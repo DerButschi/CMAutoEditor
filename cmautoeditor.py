@@ -87,6 +87,7 @@ if __name__ == '__main__':
 
     # load height map
     grid = pickle.load(open('heightmap.pkl', 'rb')).astype(int)
+    grid = grid[300:450, 425:525]
 
     n_pages_x, n_x_remain = np.divmod(grid.shape[0], PAGE_N_SQUARES_X)
     n_pages_y, n_y_remain = np.divmod(grid.shape[1], PAGE_N_SQUARES_Y)
@@ -109,13 +110,13 @@ if __name__ == '__main__':
                 n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
                 xmin = xmax - PAGE_N_SQUARES_X
             else:
-                n_squares_x = n_x_remain
+                n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain 
                 xmin = xmax - n_x_remain
             if i_page_y < n_pages_y:
                 n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y
                 ymin = ymax - PAGE_N_SQUARES_Y
             else:
-                n_squares_y = i_page_y * PAGE_N_SQUARES_Y
+                n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
                 ymin = ymax - PAGE_N_SQUARES_Y
 
             set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y)
