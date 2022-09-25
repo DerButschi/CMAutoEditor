@@ -2,6 +2,7 @@ from time import sleep
 import pyautogui
 import numpy as np
 import pickle
+import pandas
 
 # constants:
 UPPER_LEFT_SQUARE = pyautogui.Point(234,52)
@@ -51,6 +52,8 @@ def process_segment(grid, start_height):
     height = min_height
 
     for val in values:
+        if val == -1:
+            continue
         indices0, indices1 = np.where(grid == val)
 
         set_height(height, val)
@@ -86,8 +89,14 @@ if __name__ == '__main__':
     pyautogui.countdown(5)
 
     # load height map
-    grid = pickle.load(open('heightmap.pkl', 'rb')).astype(int)
-    grid = grid[300:450, 425:525]
+    height_map_df = pandas.read_csv('height_map.csv')
+
+    x = np.array(height_map_df.x.values - height_map_df.x.values.min(), dtype=int)
+    y = np.array(height_map_df.y.values - height_map_df.x.values.min(), dtype=int)
+    z = height_map_df.z.values
+
+    grid = np.full((x.max() + 1, y.max() + 1), -1)
+    grid[x, y] = z
 
     n_pages_x, n_x_remain = np.divmod(grid.shape[0], PAGE_N_SQUARES_X)
     n_pages_y, n_y_remain = np.divmod(grid.shape[1], PAGE_N_SQUARES_Y)
@@ -101,8 +110,8 @@ if __name__ == '__main__':
     prev_n_y = START_N_SQUARES_Y
     for i_page_y in range(n_pages_y + 1):
         for i_page_x in range(n_pages_x + 1):
-            if i_page_x > 3 or i_page_y > 3:
-                continue
+            # if i_page_x > 3 or i_page_y > 3:
+            #     continue
 
             xmax = grid.shape[0] - i_page_x * PAGE_N_SQUARES_X
             ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
