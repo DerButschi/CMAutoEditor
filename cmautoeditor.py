@@ -1,8 +1,8 @@
 from time import sleep
 import pyautogui
 import numpy as np
-import pickle
 import pandas
+import argparse
 
 # constants:
 UPPER_LEFT_SQUARE = pyautogui.Point(234,52)
@@ -28,6 +28,9 @@ POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 
 pyautogui.PAUSE = 0.2
+
+arg_parser = argparse.ArgumentParser()
+arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -82,10 +85,10 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y):
             pyautogui.click(POS_VERTICAL_PLUS, interval=0.5)
 
 if __name__ == '__main__':
-    pyautogui.countdown(5)
+    args = arg_parser.parse_args()
 
     # load height map
-    height_map_df = pandas.read_csv('test_map.txt')
+    height_map_df = pandas.read_csv(args.input)
 
     x = np.array(height_map_df.x.values - height_map_df.x.values.min(), dtype=int)
     y = np.array(height_map_df.y.values - height_map_df.x.values.min(), dtype=int)
@@ -104,6 +107,9 @@ if __name__ == '__main__':
     height = START_HEIGHT
     prev_n_x = START_N_SQUARES_X
     prev_n_y = START_N_SQUARES_Y
+
+    pyautogui.countdown(5)
+
     for i_page_y in range(n_pages_y + 1):
         for i_page_x in range(n_pages_x + 1):
             # if i_page_x > 3 or i_page_y > 3:
