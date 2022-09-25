@@ -1,5 +1,4 @@
 from time import sleep
-from tkinter import HORIZONTAL
 import pyautogui
 import numpy as np
 import pickle
@@ -28,15 +27,6 @@ POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 
 pyautogui.PAUSE = 0.2
-
-
-
-# print(pyautogui.position())
-# print(pyautogui.locateOnScreen('menu_map_down_arrow.png'))
-# pos_menu_map_down_arrow = pyautogui.locateCenterOnScreen('menu_map_down_arrow.png')
-# pyautogui.click(x=pos_menu_map_down_arrow.x, y=pos_menu_map_down_arrow.y)
-
-# grid = pickle.load(open('heightmap.pkl', 'rb'))[n_x:2*n_x, 0:n_y].astype(int)
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -116,7 +106,6 @@ if __name__ == '__main__':
             xmax = grid.shape[0] - i_page_x * PAGE_N_SQUARES_X
             ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
             if i_page_x < n_pages_x:
-                # n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain
                 n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
                 xmin = xmax - PAGE_N_SQUARES_X
             else:
