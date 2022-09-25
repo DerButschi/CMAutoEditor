@@ -23,6 +23,7 @@ unintended things there. PyAutoGUI has a fail safe: Just slam the mouse cursor i
 - You will see a countdown start to tick down.
 - During that time go back to the scenario editor.
 - Watch the script clicking...
+- Rather unceremoniouslz the script is done when no more clicking or height changing happens.
 
 ## Input Data
 The script takes data in csv-format with a header x,y,z. x and y denote the position of a value on the map *in units of map squares*. x=2, y=1 denotes the 3rd 
@@ -56,8 +57,6 @@ POS_HORIZONTAL_MINUS = pyautogui.Point(764, 26) # position of the left minus but
 POS_VERTICAL_PLUS = pyautogui.Point(1014, 10) # position of the upper plus button for vertical size
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10) # position of the upper minus button for vertical size
 ``` 
-
-
 
 ## Comments & Known Issues
 - So far, the script is setup to work with a screen resolution of 1920x1080. 
