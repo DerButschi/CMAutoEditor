@@ -34,26 +34,22 @@ def set_height(current_height, target_height):
         return
     elif current_height < target_height:
         n_diff = target_height - current_height
-        # key_list = ['+'] * n_diff
         pyautogui.press('+', presses=n_diff, interval=0.5)
     else:
         n_diff = current_height - target_height
-        # key_list = ['-'] * n_diff
         pyautogui.press('-', presses=n_diff, interval=0.5)
 
     sleep(1)
 
 def process_segment(grid, start_height):
     print(grid.shape)
-    values = np.unique(grid)
-    min_height = np.min(grid)
+    values = np.unique(grid[grid >= 0])
+    min_height = np.min(grid[grid >= 0])
     
     set_height(start_height, min_height)
     height = min_height
 
     for val in values:
-        if val == -1:
-            continue
         indices0, indices1 = np.where(grid == val)
 
         set_height(height, val)
@@ -89,7 +85,7 @@ if __name__ == '__main__':
     pyautogui.countdown(5)
 
     # load height map
-    height_map_df = pandas.read_csv('height_map.csv')
+    height_map_df = pandas.read_csv('test_map.txt')
 
     x = np.array(height_map_df.x.values - height_map_df.x.values.min(), dtype=int)
     y = np.array(height_map_df.y.values - height_map_df.x.values.min(), dtype=int)
