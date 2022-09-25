@@ -104,8 +104,8 @@ if __name__ == '__main__':
     # load height map
     height_map_df = pandas.read_csv(args.input)
 
-    x = np.array(height_map_df.x.values - height_map_df.x.values.min(), dtype=int)
-    y = np.array(height_map_df.y.values - height_map_df.x.values.min(), dtype=int)
+    x = np.array(height_map_df.x.values, dtype=int)
+    y = np.array(height_map_df.y.values, dtype=int)
     z = height_map_df.z.values
 
     grid = np.full((x.max() + 1, y.max() + 1), -1)
