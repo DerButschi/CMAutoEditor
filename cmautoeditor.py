@@ -17,6 +17,7 @@ import pyautogui
 import numpy as np
 import pandas
 import argparse
+import keyboard
 
 # constants:
 UPPER_LEFT_SQUARE = pyautogui.Point(234,52)
@@ -41,7 +42,7 @@ POS_HORIZONTAL_MINUS = pyautogui.Point(764, 26)
 POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 
-pyautogui.PAUSE = 0.2
+pyautogui.PAUSE = 0.2  # 0.12 almost!! works
 
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
@@ -51,10 +52,17 @@ def set_height(current_height, target_height):
         return
     elif current_height < target_height:
         n_diff = target_height - current_height
-        pyautogui.press('+', presses=n_diff, interval=0.5)
+        # pyautogui.press('+', presses=n_diff, interval=0.5)
+        for i in range(n_diff):
+            keyboard.send('+')
+            sleep(0.1)
     else:
         n_diff = current_height - target_height
-        pyautogui.press('-', presses=n_diff, interval=0.5)
+        # pyautogui.press('-', presses=n_diff, interval=0.5)
+        for i in range(n_diff):
+            keyboard.send('-')
+            sleep(0.1)
+
 
     sleep(1)
 
@@ -88,15 +96,15 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y):
 
     for i in range(n_clicks_x):
         if n_x <= start_n_x:
-            pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.5)
+            pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.2)
         else:
-            pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.5)
+            pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.2)
     
     for i in range(n_clicks_y):
         if n_y <= start_n_y:
-            pyautogui.click(POS_VERTICAL_MINUS, interval=0.5)
+            pyautogui.click(POS_VERTICAL_MINUS, interval=0.2)
         else:
-            pyautogui.click(POS_VERTICAL_PLUS, interval=0.5)
+            pyautogui.click(POS_VERTICAL_PLUS, interval=0.2)
 
 if __name__ == '__main__':
     args = arg_parser.parse_args()
