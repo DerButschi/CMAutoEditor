@@ -44,6 +44,48 @@ POS_HORIZONTAL_MINUS = pyautogui.Point(764, 26)
 POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 
+MENU_DICT = {
+    'Ground 2': pyautogui.Point(105, 123),
+    'Foliage': pyautogui.Point(110, 185),
+    'road': pyautogui.Point(107, 203)
+}
+
+GROUND_2_DICT = {
+    'Water': pyautogui.Point(81, 438),
+    'Plow NS': pyautogui.Point(135, 552),
+    'Plow EW': pyautogui.Point(188, 552),
+}
+
+GROUND_3_DICT = {
+    'Crop 1': pyautogui.Point(26, 383),
+    'Crop 2': pyautogui.Point(87, 383),
+    'Crop 3': pyautogui.Point(135, 383),
+    'Crop 4': pyautogui.Point(188, 383),
+    'Crop 5': pyautogui.Point(26, 440),
+    'Crop 6': pyautogui.Point(87, 440),
+}
+
+FOLIAGE_DICT = {
+    'Tree A': pyautogui.Point(110, 381),
+    'Tree B': pyautogui.Point(180, 380),
+    'Tree C': pyautogui.Point(39, 438),
+    'Tree D': pyautogui.Point(114, 438),
+    'Tree E': pyautogui.Point(183, 438),
+    'Tree F': pyautogui.Point(39, 498),
+    'Tree G': pyautogui.Point(114, 498),
+    'Tree H': pyautogui.Point(183, 498),
+    'Bush A': pyautogui.Point(39, 555),
+    'Bush B': pyautogui.Point(114, 555),
+    'Bush C': pyautogui.Point(183, 555),
+}
+
+FOLIAGE_DENSITY_DICT = {
+    0: pyautogui.Point(38, 617),
+    1: pyautogui.Point(110, 617),
+    2: pyautogui.Point(180, 617),
+    3: pyautogui.Point(38, 657),
+}
+
 TILE_PAGE_TO_ARROW_DICT = {
     0: pyautogui.Point(248,17),
     1: pyautogui.Point(278,17),
@@ -157,6 +199,7 @@ def set_roads(df):
         
     #     a = 1
     for tile_info, group in df.groupby(by=['type', 'sub_type', 'tile_page', 'tile_row', 'tile_col']):
+        pyautogui.click(MENU_DICT['road'])
         if tile_info[0] == 'road' and tile_info[2] > -1:
             road_sub_type = ROAD_TYPE_DICT[tile_info[1]]
             tile_page_point = TILE_PAGE_TO_ARROW_DICT[tile_info[2]]
@@ -169,6 +212,26 @@ def set_roads(df):
                 x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
                 y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
                 pyautogui.click(x=x_pos, y=y_pos)
+
+def set_ground(df):
+    for group_info, group in df.groupby(by=['type', 'sub_type']):
+        if group_info[0] not in MENU_DICT or group_info[0] == 'road':
+            continue
+        ground_menu = MENU_DICT[group_info[0]]
+        if group_info[0] == 'Ground 2':
+            ground_type = GROUND_2_DICT[group_info[1]]
+        if group_info[0] == 'Ground 3':
+            ground_type = GROUND_3_DICT[group_info[1]]
+        elif group_info[0] == 'Foliage':
+            ground_type = FOLIAGE_DICT[group_info[1]]
+        
+        pyautogui.click(ground_menu)
+        pyautogui.click(ground_type)
+
+        for _, row in group.iterrows():
+            x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
+            y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
+            pyautogui.click(x=x_pos, y=y_pos)
 
 
 if __name__ == '__main__':
@@ -266,7 +329,8 @@ if __name__ == '__main__':
             sub_df.x = sub_df.x - origin_x
             sub_df.y = sub_df.y - origin_y
             # height = process_segment(sub_df, height)
-            set_roads(sub_df)
+            # set_roads(sub_df)
+            set_ground(sub_df)
 
 
 
