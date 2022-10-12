@@ -13,18 +13,135 @@ import re
 PAGE_N_SQUARES_X = 104
 PAGE_N_SQUARES_Y = 60
 
-osm2cm_dict = {
-    'highway': {
-        'primary': (1, 'road', 'Paved 1'),
-        'secondary': (1, 'road', 'Paved 1'),
-        'residential': (1, 'road', 'Paved 2'),
-        'living_street': (1, 'road', 'Paved 2'),
-        'unclassified': (1, 'road', 'Paved 2'),
-        'footway': (2, 'road', 'Foot Path'),
-        'path': (2, 'road', 'Foot Path')
+# osm2cm_dict = {
+#     'highway': {
+#         'primary': (1, 'road', 'Paved 1'),
+#         'secondary': (1, 'road', 'Paved 1'),
+#         'residential': (1, 'road', 'Paved 2'),
+#         'living_street': (1, 'road', 'Paved 2'),
+#         'unclassified': (1, 'road', 'Paved 2'),
+#         'footway': (2, 'road', 'Foot Path'),
+#         'path': (2, 'road', 'Foot Path')
+#     },
+#     'water': {
+#         'river': (0, 'Ground 2', 'Water')
+#     }
+# }
+
+config = {
+    'road': {
+        'tags': [
+            ('highway', 'primary'),
+            ('highway', 'secondary'),
+            ('highway', 'residential'),
+            ('highway', 'living_street'),
+            ('highway', 'unclassified'),
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Road', 'cat1': 'Paved 1', 'tags': [('highway', 'primary'), ('highway', 'secondary')]},
+                {'menu': 'Road', 'cat1': 'Paved 2', 'tags': [('highway', 'residential'), ('highway', 'living_street'), ('highway', 'unclassified')]}
+            ],
+            'process': [
+                'type_from_tag'
+            ],
+            'post_process': {
+                'road_pattern'
+            }
+        },
+        'pass': 2
+    },
+    'foot_path': {
+        'tags': [
+            ('highway', 'footway'),
+            ('highway', 'path')
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Road', 'cat1': 'Foot Path', 'tags': [('highway', 'footway'), ('highway', 'footway')]},
+            ],
+            'process': [
+                'type_from_tag'
+            ]
+        },
+        'pass': 2,
     },
     'water': {
-        'river': (0, 'Ground 2', 'Water')
+        'tags': [
+            ('water', 'river'),
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Ground 2', 'cat1': 'Water', 'tags': [('water', 'river')]},
+            ],
+            'process': [
+                'type_from_tag'
+            ]
+        },
+        'pass': 3,
+    },
+    
+    'mixed_forest': {
+        'tags': [
+            ('landuse', 'forest'),
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': ['density 1', 'density 2', 'density 3']},
+                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': ['density 1', 'density 2', 'density 3']},   
+                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': ['density 1', 'density 2', 'density 3']},   
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': ['density 1', 'density 2', 'density 3']},    
+                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': ['density 1', 'density 2', 'density 3']},    
+                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': ['density 1', 'density 2', 'density 3']},
+                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': ['density 1', 'density 2', 'density 3']},
+                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': ['density 1', 'density 2', 'density 3']},
+            ],
+            'post_process': [
+                'type_random_individual',
+                'cat2_random_individual'
+            ]
+        },
+        'pass': 1
+    },
+
+    'mixed_bushes': {
+        'tags': [
+            ('natural', 'scrub')
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': ['density 1', 'density 2', 'density 3']},
+                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': ['density 1', 'density 2', 'density 3']},
+                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': ['density 1', 'density 2', 'density 3']},
+            ],
+            'post_process': [
+                'type_random_individual',
+                'cat2_random_individual'
+            ]
+        },
+        'pass': 1
+    },
+
+    'farmland': {
+        'tags': [
+            ('landuse', 'farmland'),
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Ground 2', 'cat1': 'Plow NS'},
+                {'menu': 'Ground 2', 'cat1': 'Plow EW'},
+                {'menu': 'Ground 3', 'cat1': 'Crop 1'},
+                {'menu': 'Ground 3', 'cat1': 'Crop 2'},
+                {'menu': 'Ground 3', 'cat1': 'Crop 3'},
+                {'menu': 'Ground 3', 'cat1': 'Crop 4'},
+                {'menu': 'Ground 3', 'cat1': 'Crop 5'},
+                {'menu': 'Ground 3', 'cat1': 'Crop 6'},
+            ],
+            'post_process': [
+                'type_random_area'
+            ]
+        },
+        'pass': 0
     }
 }
 
@@ -129,8 +246,63 @@ def get_road_match_pattern(gdf, idx):
     
     return sum
 
+def type_from_tag(way_df, tags, cm_types):
+    for cm_type in cm_types['types']:
+        matched = False
+        for key, value in cm_type['tags']:
+            if key in tags and tags[key] == value:
+                matched = True
+        
+        if matched:
+            for key in cm_type:
+                if key in way_df.columns:
+                    way_df[key] = cm_type[key]
+                
+    return way_df
 
+def type_random_area(group, cm_types):
+    n_types = len(cm_types['types'])
+    for sub_group_name, sub_group in group.groupby(by='id'):
+        cm_type = cm_types['types'][np.random.randint(n_types)]
+        for key in cm_type:
+            if key in sub_group.columns:
+                sub_group[key] = cm_type[key]
 
+    return group
+
+def type_random_individual(group, cm_types):
+    n_types = len(cm_types['types'])
+    type_indices = np.random.randint(0, n_types, size=(len(group),))
+    for type_idx in range(n_types):
+        idx = np.where(type_indices == type_idx)[0]
+        if len(idx) > 0:
+            cm_type = cm_types['types'][type_idx]
+            for key in cm_type:
+                if type(cm_type[key]) != list and key in group.columns:
+                    group.loc[group.index[idx], key] = cm_type[key]
+
+    return group
+
+def cat2_random_individual(group, cm_types):
+    for cat1, subgroup in group.groupby(by='cat1'):
+        cat2 = None
+        for cm_type in cm_types['types']:
+            if cm_type['cat1'] == cat1:
+                cat2 = cm_type['cat2']
+                break
+
+        if cat2 is not None:
+            cat2_indices = np.random.randint(0, len(cat2), size=(len(subgroup),))
+            for cat2_idx in range(len(cat2)):
+                idx = np.where(cat2_indices == cat2_idx)[0]
+                if len(idx) > 0:
+                    subgroup.loc[subgroup.index[idx], 'cat2'] = cat2[cat2_idx]
+
+    return group
+        
+
+def road_pattern(group, cm_types):
+    return group
 
 overpass = Overpass()
 # query = overpassQueryBuilder(bbox=[7.30153, 50.93133, 7.30745, 50.93588], elementType='way')
@@ -171,10 +343,24 @@ for xidx, x in enumerate(np.linspace(bbox_utm[0] + 4, bbox_utm[0] + n_bins_x * 8
         yiarr.append(yidx)
 
 geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, cap_style=3)
-gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr, 'filled': [False] * len(xarr),
-                              'pattern': [-1] * len(xarr), 'tile_page': [-1] * len(xarr), 'tile_row': [-1] * len(xarr), 'tile_col': [-1] * len(xarr), 
-                              'z': [-1] * len(xarr), 'category': [-1] * len(xarr), 'type': [-1] * len(xarr), 'sub_type': [-1] * len(xarr)
-                             }, geometry=geometry)
+# gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr, 'filled': [False] * len(xarr),
+#                               'pattern': [-1] * len(xarr), 'tile_page': [-1] * len(xarr), 'tile_row': [-1] * len(xarr), 'tile_col': [-1] * len(xarr), 
+#                               'z': [-1] * len(xarr), 'category': [-1] * len(xarr), 'type': [-1] * len(xarr), 'sub_type': [-1] * len(xarr)
+#                              }, geometry=geometry)
+
+gdf = geopandas.GeoDataFrame({
+    'x': xarr, 
+    'y': yarr, 
+    'xidx': xiarr, 
+    'yidx': yiarr, 
+    'z': [-1] * len(xarr),
+    'menu': [-1] * len(xarr),
+    'cat1': [-1] * len(xarr),
+    'cat2': [-1] * len(xarr),
+    'direction': [-1] * len(xarr),
+    'id': [-1] * len(xarr),
+    'name': [-1] * len(xarr),
+    }, geometry=geometry)
 
 
 n_pages_x, n_x_remain = np.divmod(n_bins_x, PAGE_N_SQUARES_X)
@@ -211,128 +397,183 @@ plt.figure()
 plt.axis('equal')
 
 
+# df = pandas.DataFrame(columns=['x', 'y', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name'])
+df = None
+
+# max_pass = -1
+# for name in config:
+#     if config['name']['pass'] > max_pass:
+#         max_pass = config['name']['pass']
+
 for way in result.ways():
-    if way.tags() is None:
+    way_tags = way.tags()
+    way_geometry = way.geometry()
+    if way.tags() is None or way_geometry is None:
         continue
-    if 'water' in way.tags():
-        tag_category = way.tags()['water']
-        coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates'][0]]
-        polygon = Polygon(coords)
 
-        intersects = gdf.geometry.intersects(polygon)
+    for name in config:
+        # if config['name']['pass'] != i_pass:
+        #     continue
+        for tag_key, tag_value in config[name]['tags']:
+            if tag_key in way_tags and way_tags[tag_key] == tag_value:
+                to_fill = None
+                if way_geometry['type'] == 'Polygon':
+                    exterior_coords = [(projection(coord[0], coord[1])) for coord in way_geometry['coordinates'][0]]
+                    polygon = Polygon(exterior_coords)
+                    to_fill = gdf.geometry.intersects(polygon)
+                elif way_geometry['type'] == 'LineString':
+                    coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates']]
+                    ls = LineString(coords)
+                    to_fill = gdf.geometry.crosses(ls)
+                else:
+                    raise Exception('geometry {} not yet covered'.format(way_geometry['type']))
 
-        not_filled_with_lower_category = ~((gdf.category != -1) & (gdf.category < osm2cm_dict['water'][tag_category][0]) & (gdf.filled))
-        to_fill = intersects & not_filled_with_lower_category
+                if to_fill is not None:
+                    way_df = gdf.loc[to_fill, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name']].copy(deep=True)
+                    way_df['id'] = way.id()
+                    way_df['name'] = name
+
+                    cm_types = config[name]['cm_types']
+                    if 'process' in cm_types:
+                        for func_name in cm_types['process']:
+                            way_df = globals()[func_name](way_df, way.tags(), cm_types)
+
+                    if df is None:
+                        df = way_df
+                    else:
+                        df = pandas.concat([df, way_df])
+
+
+for group_name, group in df.groupby(by='name'):
+    cm_types = config[group_name]['cm_types']
+    if 'post_process' in cm_types:
+        for func_name in cm_types['post_process']:
+            processed_group = globals()[func_name](group, cm_types)
+            df.loc[processed_group.index] = processed_group
+
+
+# for way in result.ways():
+#     if way.tags() is None:
+#         continue
+#     if 'water' in way.tags():
+#         tag_category = way.tags()['water']
+#         coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates'][0]]
+#         polygon = Polygon(coords)
+
+#         intersects = gdf.geometry.intersects(polygon)
+
+#         not_filled_with_lower_category = ~((gdf.category != -1) & (gdf.category < osm2cm_dict['water'][tag_category][0]) & (gdf.filled))
+#         to_fill = intersects & not_filled_with_lower_category
         
-        gdf['filled'] = np.bitwise_or(gdf['filled'], to_fill)
-        indices = np.where(to_fill)[0]
-        gdf.loc[to_fill, 'category'] = osm2cm_dict['water'][tag_category][0]
-        gdf.loc[to_fill, 'type'] = osm2cm_dict['water'][tag_category][1]
-        gdf.loc[to_fill, 'sub_type'] = osm2cm_dict['water'][tag_category][2]
-        for idx in indices:
-            plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-b')
+#         gdf['filled'] = np.bitwise_or(gdf['filled'], to_fill)
+#         indices = np.where(to_fill)[0]
+#         gdf.loc[to_fill, 'category'] = osm2cm_dict['water'][tag_category][0]
+#         gdf.loc[to_fill, 'type'] = osm2cm_dict['water'][tag_category][1]
+#         gdf.loc[to_fill, 'sub_type'] = osm2cm_dict['water'][tag_category][2]
+#         for idx in indices:
+#             plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-b')
 
-        a = 1
+#         a = 1
         
-    if 'landuse' in way.tags():
-        if way.tags()['landuse'] == 'forest':
-            if 'type' in way.tags() and way.tags['type'] == 'multipolygon':
-                continue
-            coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates'][0]]
-            polygon = Polygon(coords)
-            intersects = gdf.geometry.intersects(polygon)
-            gdf['filled'] = np.bitwise_or(gdf['filled'], intersects)
-            gdf.loc[intersects, 'category'] = 0
-            gdf.loc[intersects, 'type'] = 'Foliage'
+#     if 'landuse' in way.tags():
+#         if way.tags()['landuse'] == 'forest':
+#             if 'type' in way.tags() and way.tags['type'] == 'multipolygon':
+#                 continue
+#             coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates'][0]]
+#             polygon = Polygon(coords)
+#             intersects = gdf.geometry.intersects(polygon)
+#             gdf['filled'] = np.bitwise_or(gdf['filled'], intersects)
+#             gdf.loc[intersects, 'category'] = 0
+#             gdf.loc[intersects, 'type'] = 'Foliage'
 
-            tree_dict = {
-                0: 'Tree A',
-                1: 'Tree B',
-                2: 'Tree C',
-                3: 'Tree D',
-                4: 'Tree E',
-                5: 'Tree F',
-                6: 'Tree G',
-                7: 'Tree H',
-            }
+#             tree_dict = {
+#                 0: 'Tree A',
+#                 1: 'Tree B',
+#                 2: 'Tree C',
+#                 3: 'Tree D',
+#                 4: 'Tree E',
+#                 5: 'Tree F',
+#                 6: 'Tree G',
+#                 7: 'Tree H',
+#             }
 
-            sub_type = [tree_dict[tidx] for tidx in np.random.randint(0, 8, size=(len(intersects[intersects]),))]
-            gdf.loc[intersects, 'sub_type'] = sub_type
-            indices = np.where(intersects)[0]
-            for idx in indices:
-                plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-g')
-        elif way.tags()['landuse'] == 'farmland':
-            if 'type' in way.tags() and way.tags['type'] == 'multipolygon':
-                continue
-            coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates'][0]]
-            polygon = Polygon(coords)
-            intersects = gdf.geometry.intersects(polygon)
+#             sub_type = [tree_dict[tidx] for tidx in np.random.randint(0, 8, size=(len(intersects[intersects]),))]
+#             gdf.loc[intersects, 'sub_type'] = sub_type
+#             indices = np.where(intersects)[0]
+#             for idx in indices:
+#                 plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-g')
+#         elif way.tags()['landuse'] == 'farmland':
+#             if 'type' in way.tags() and way.tags['type'] == 'multipolygon':
+#                 continue
+#             coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates'][0]]
+#             polygon = Polygon(coords)
+#             intersects = gdf.geometry.intersects(polygon)
 
-            farmland_dict = {
-                0: ('Ground 2', 'Plow NS'),
-                1: ('Ground 2', 'Plow EW'),
-                2: ('Ground 3', 'Crop 1'),
-                3: ('Ground 3', 'Crop 2'),
-                4: ('Ground 3', 'Crop 3'),
-                5: ('Ground 3', 'Crop 4'),
-                6: ('Ground 3', 'Crop 5'),
-                7: ('Ground 3', 'Crop 6'),
-            }
+#             farmland_dict = {
+#                 0: ('Ground 2', 'Plow NS'),
+#                 1: ('Ground 2', 'Plow EW'),
+#                 2: ('Ground 3', 'Crop 1'),
+#                 3: ('Ground 3', 'Crop 2'),
+#                 4: ('Ground 3', 'Crop 3'),
+#                 5: ('Ground 3', 'Crop 4'),
+#                 6: ('Ground 3', 'Crop 5'),
+#                 7: ('Ground 3', 'Crop 6'),
+#             }
 
-            farmland_type = farmland_dict[np.random.randint(0, 8)]
+#             farmland_type = farmland_dict[np.random.randint(0, 8)]
 
-            gdf['filled'] = np.bitwise_or(gdf['filled'], intersects)
-            gdf.loc[intersects, 'category'] = 0
-            gdf.loc[intersects, 'type'] = farmland_type[0]
-            gdf.loc[intersects, 'sub_type'] = farmland_type[1]
-            indices = np.where(intersects)[0]
-            for idx in indices:
-                plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-y')
+#             gdf['filled'] = np.bitwise_or(gdf['filled'], intersects)
+#             gdf.loc[intersects, 'category'] = 0
+#             gdf.loc[intersects, 'type'] = farmland_type[0]
+#             gdf.loc[intersects, 'sub_type'] = farmland_type[1]
+#             indices = np.where(intersects)[0]
+#             for idx in indices:
+#                 plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-y')
 
-    if 'natural' in way.tags():
-        if way.tags()['natural'] == 'scrub':
-            if 'type' in way.tags() and way.tags['type'] == 'multipolygon':
-                continue
-            coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates'][0]]
-            polygon = Polygon(coords)
-            intersects = gdf.geometry.intersects(polygon)
-            gdf['filled'] = np.bitwise_or(gdf['filled'], intersects)
-            gdf.loc[intersects, 'category'] = 0
-            gdf.loc[intersects, 'type'] = 'Foliage'
+#     if 'natural' in way.tags():
+#         if way.tags()['natural'] == 'scrub':
+#             if 'type' in way.tags() and way.tags['type'] == 'multipolygon':
+#                 continue
+#             coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates'][0]]
+#             polygon = Polygon(coords)
+#             intersects = gdf.geometry.intersects(polygon)
+#             gdf['filled'] = np.bitwise_or(gdf['filled'], intersects)
+#             gdf.loc[intersects, 'category'] = 0
+#             gdf.loc[intersects, 'type'] = 'Foliage'
 
-            tree_dict = {
-                0: 'Bush A',
-                1: 'Bush B',
-                2: 'Bush C',
-            }
+#             tree_dict = {
+#                 0: 'Bush A',
+#                 1: 'Bush B',
+#                 2: 'Bush C',
+#             }
 
-            sub_type = [tree_dict[tidx] for tidx in np.random.randint(0, 3, size=(len(intersects[intersects]),))]
-            gdf.loc[intersects, 'sub_type'] = sub_type
-            indices = np.where(intersects)[0]
-            for idx in indices:
-                plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-c')
+#             sub_type = [tree_dict[tidx] for tidx in np.random.randint(0, 3, size=(len(intersects[intersects]),))]
+#             gdf.loc[intersects, 'sub_type'] = sub_type
+#             indices = np.where(intersects)[0]
+#             for idx in indices:
+#                 plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-c')
 
 
 
-    if 'highway' in way.tags():
-        tag_category = way.tags()['highway']
-        if way.tags()['highway'] not in osm2cm_dict['highway']:
-            continue
-        coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates']]
-        ls = LineString(coords)
+#     if 'highway' in way.tags():
+#         tag_category = way.tags()['highway']
+#         if way.tags()['highway'] not in osm2cm_dict['highway']:
+#             continue
+#         coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates']]
+#         ls = LineString(coords)
 
-        crosses = geometry.crosses(ls)
+#         crosses = geometry.crosses(ls)
 
-        not_filled_with_lower_category = ~((gdf.category != -1) & (gdf.category < osm2cm_dict['highway'][tag_category][0]) & (gdf.filled))
-        to_fill = crosses & not_filled_with_lower_category
+#         not_filled_with_lower_category = ~((gdf.category != -1) & (gdf.category < osm2cm_dict['highway'][tag_category][0]) & (gdf.filled))
+#         to_fill = crosses & not_filled_with_lower_category
         
-        gdf['filled'] = np.bitwise_or(gdf['filled'], to_fill)
-        indices = np.where(to_fill)[0]
-        gdf.loc[to_fill, 'category'] = osm2cm_dict['highway'][tag_category][0]
-        gdf.loc[to_fill, 'type'] = osm2cm_dict['highway'][tag_category][1]
-        gdf.loc[to_fill, 'sub_type'] = osm2cm_dict['highway'][tag_category][2]
-        for idx in indices:
-            plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-k')
+#         gdf['filled'] = np.bitwise_or(gdf['filled'], to_fill)
+#         indices = np.where(to_fill)[0]
+#         gdf.loc[to_fill, 'category'] = osm2cm_dict['highway'][tag_category][0]
+#         gdf.loc[to_fill, 'type'] = osm2cm_dict['highway'][tag_category][1]
+#         gdf.loc[to_fill, 'sub_type'] = osm2cm_dict['highway'][tag_category][2]
+#         for idx in indices:
+#             plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-k')
 
 
 rindices = np.where(gdf.filled & (gdf['type'] == 'road'))[0]
