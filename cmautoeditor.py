@@ -12,7 +12,9 @@
 #    See the License for the specific language governing permissions and
 #    limitations under the License. 
 
+from sre_constants import GROUPREF_EXISTS
 from time import sleep
+from tokenize import group
 import pyautogui
 import numpy as np
 import pandas
@@ -31,7 +33,7 @@ SQUARE_SIZE_Y = 16
 START_N_SQUARES_X = 40
 START_N_SQUARES_Y = 40
 # START_N_SQUARES_X = 104
-# START_N_SQUARES_Y = 60
+# START_N_SQUARES_Y = 80
 
 PAGE_N_SQUARES_X = 104
 PAGE_N_SQUARES_Y = 60
@@ -46,8 +48,33 @@ POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 
 MENU_DICT = {
     'Ground 2': pyautogui.Point(105, 123),
+    'Ground 3': pyautogui.Point(105, 144),
     'Foliage': pyautogui.Point(110, 185),
-    'road': pyautogui.Point(107, 203)
+    'Road': pyautogui.Point(107, 203),
+    'Water': pyautogui.Point(81, 438),
+    'Plow NS': pyautogui.Point(135, 552),
+    'Plow EW': pyautogui.Point(188, 552),
+    'Crop 1': pyautogui.Point(26, 383),
+    'Crop 2': pyautogui.Point(87, 383),
+    'Crop 3': pyautogui.Point(135, 383),
+    'Crop 4': pyautogui.Point(188, 383),
+    'Crop 5': pyautogui.Point(26, 440),
+    'Crop 6': pyautogui.Point(87, 440),
+    'Tree A': pyautogui.Point(110, 381),
+    'Tree B': pyautogui.Point(180, 380),
+    'Tree C': pyautogui.Point(39, 438),
+    'Tree D': pyautogui.Point(114, 438),
+    'Tree E': pyautogui.Point(183, 438),
+    'Tree F': pyautogui.Point(39, 498),
+    'Tree G': pyautogui.Point(114, 498),
+    'Tree H': pyautogui.Point(183, 498),
+    'Bush A': pyautogui.Point(39, 555),
+    'Bush B': pyautogui.Point(114, 555),
+    'Bush C': pyautogui.Point(183, 555),
+    'density 1': pyautogui.Point(38, 617),
+    'density 2': pyautogui.Point(110, 617),
+    'density 3': pyautogui.Point(180, 617),
+    'density 4': pyautogui.Point(38, 657),
 }
 
 GROUND_2_DICT = {
@@ -214,19 +241,24 @@ def set_roads(df):
                 pyautogui.click(x=x_pos, y=y_pos)
 
 def set_ground(df):
-    for group_info, group in df.groupby(by=['type', 'sub_type']):
+    for group_info, group in df.groupby(by=['menu', 'cat1', 'cat2']):
         if group_info[0] not in MENU_DICT or group_info[0] == 'road':
             continue
-        ground_menu = MENU_DICT[group_info[0]]
-        if group_info[0] == 'Ground 2':
-            ground_type = GROUND_2_DICT[group_info[1]]
-        if group_info[0] == 'Ground 3':
-            ground_type = GROUND_3_DICT[group_info[1]]
-        elif group_info[0] == 'Foliage':
-            ground_type = FOLIAGE_DICT[group_info[1]]
-        
-        pyautogui.click(ground_menu)
-        pyautogui.click(ground_type)
+        # ground_menu = MENU_DICT[group_info[0]]
+        # if group_info[0] == 'Ground 2':
+        #     ground_type = GROUND_2_DICT[group_info[1]]
+        # if group_info[0] == 'Ground 3':
+        #     ground_type = GROUND_3_DICT[group_info[1]]
+        # elif group_info[0] == 'Foliage':
+        #     ground_type = FOLIAGE_DICT[group_info[1]]
+
+        if group_info[0] not in MENU_DICT or group_info[1] not in MENU_DICT:
+            continue
+        pyautogui.click(MENU_DICT[group_info[0]])
+        pyautogui.click(MENU_DICT[group_info[1]])
+
+        if group_info[2] in MENU_DICT:
+            pyautogui.click(MENU_DICT[group_info[2]])
 
         for _, row in group.iterrows():
             x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)

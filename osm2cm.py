@@ -260,31 +260,30 @@ def type_from_tag(way_df, tags, cm_types):
                 
     return way_df
 
-def type_random_area(group, cm_types):
+def type_random_area(df, name, cm_types):
     n_types = len(cm_types['types'])
-    for sub_group_name, sub_group in group.groupby(by='id'):
+    sub_df = df[df['name'] == name]
+    for sub_group_name, sub_group in sub_df.groupby(by='id'):
         cm_type = cm_types['types'][np.random.randint(n_types)]
         for key in cm_type:
-            if key in sub_group.columns:
-                sub_group[key] = cm_type[key]
+            if key in df.columns:
+                df.loc[sub_group.index, key] = cm_type[key]
 
-    return group
-
-def type_random_individual(group, cm_types):
+def type_random_individual(df, name, cm_types):
     n_types = len(cm_types['types'])
-    type_indices = np.random.randint(0, n_types, size=(len(group),))
+    sub_df = df[df['name'] == name]
+    type_indices = np.random.randint(0, n_types, size=(len(sub_df),))
     for type_idx in range(n_types):
         idx = np.where(type_indices == type_idx)[0]
         if len(idx) > 0:
             cm_type = cm_types['types'][type_idx]
             for key in cm_type:
-                if type(cm_type[key]) != list and key in group.columns:
-                    group.loc[group.index[idx], key] = cm_type[key]
+                if type(cm_type[key]) != list and key in df.columns:
+                    df.loc[sub_df.index[idx], key] = cm_type[key]
 
-    return group
-
-def cat2_random_individual(group, cm_types):
-    for cat1, subgroup in group.groupby(by='cat1'):
+def cat2_random_individual(df, name, cm_types):
+    sub_df = df[df['name'] == name]
+    for cat1, subgroup in sub_df.groupby(by='cat1'):
         cat2 = None
         for cm_type in cm_types['types']:
             if cm_type['cat1'] == cat1:
@@ -296,13 +295,11 @@ def cat2_random_individual(group, cm_types):
             for cat2_idx in range(len(cat2)):
                 idx = np.where(cat2_indices == cat2_idx)[0]
                 if len(idx) > 0:
-                    subgroup.loc[subgroup.index[idx], 'cat2'] = cat2[cat2_idx]
-
-    return group
+                    df.loc[subgroup.index[idx], 'cat2'] = cat2[cat2_idx]
         
 
-def road_pattern(group, cm_types):
-    return group
+def road_pattern(df, name, cm_types):
+    pass
 
 overpass = Overpass()
 # query = overpassQueryBuilder(bbox=[7.30153, 50.93133, 7.30745, 50.93588], elementType='way')
@@ -393,8 +390,8 @@ for i_page_y in range(int(n_pages_y)):
     )
 
 grid_polygons = MultiPolygon(grid_polygons)
-plt.figure()
-plt.axis('equal')
+# plt.figure()
+# plt.axis('equal')
 
 
 # df = pandas.DataFrame(columns=['x', 'y', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name'])
@@ -409,14 +406,17 @@ for way in result.ways():
     way_tags = way.tags()
     way_geometry = way.geometry()
     if way.tags() is None or way_geometry is None:
+        print(way.tags(), way.id())
         continue
 
+    matched = False
     for name in config:
         # if config['name']['pass'] != i_pass:
         #     continue
         for tag_key, tag_value in config[name]['tags']:
             if tag_key in way_tags and way_tags[tag_key] == tag_value:
                 to_fill = None
+                matched = True
                 if way_geometry['type'] == 'Polygon':
                     exterior_coords = [(projection(coord[0], coord[1])) for coord in way_geometry['coordinates'][0]]
                     polygon = Polygon(exterior_coords)
@@ -441,15 +441,16 @@ for way in result.ways():
                     if df is None:
                         df = way_df
                     else:
-                        df = pandas.concat([df, way_df])
+                        df = pandas.concat([df, way_df], ignore_index=True)
 
+    if not matched:
+        print(way.tags(), way.id())
 
-for group_name, group in df.groupby(by='name'):
-    cm_types = config[group_name]['cm_types']
+for name in config:
+    cm_types = config[name]['cm_types']
     if 'post_process' in cm_types:
         for func_name in cm_types['post_process']:
-            processed_group = globals()[func_name](group, cm_types)
-            df.loc[processed_group.index] = processed_group
+            globals()[func_name](df, name, cm_types)
 
 
 # for way in result.ways():
@@ -576,42 +577,45 @@ for group_name, group in df.groupby(by='name'):
 #             plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-k')
 
 
-rindices = np.where(gdf.filled & (gdf['type'] == 'road'))[0]
-for ridx in rindices:
-    pattern = get_road_match_pattern(gdf, ridx)
-    entry = None
-    if pattern in pattern2roadtile_dict:
-        entries = pattern2roadtile_dict[pattern]
-        if type(entries) == int:
-            entries = pattern2roadtile_dict[entries]
-        if len(entries) > 1:
-            entry = entries[np.random.randint(0, len(entries))]
-        else:
-            entry = entries[0]
+# rindices = np.where(gdf.filled & (gdf['type'] == 'road'))[0]
+# for ridx in rindices:
+#     pattern = get_road_match_pattern(gdf, ridx)
+#     entry = None
+#     if pattern in pattern2roadtile_dict:
+#         entries = pattern2roadtile_dict[pattern]
+#         if type(entries) == int:
+#             entries = pattern2roadtile_dict[entries]
+#         if len(entries) > 1:
+#             entry = entries[np.random.randint(0, len(entries))]
+#         else:
+#             entry = entries[0]
 
-    gdf.iloc[ridx, 5] = pattern
-    if entry is not None:
-        gdf.iloc[ridx, 6] = entry[0]
-        gdf.iloc[ridx, 7] = entry[1]
-        gdf.iloc[ridx, 8] = entry[2]
+#     gdf.iloc[ridx, 5] = pattern
+#     if entry is not None:
+#         gdf.iloc[ridx, 6] = entry[0]
+#         gdf.iloc[ridx, 7] = entry[1]
+#         gdf.iloc[ridx, 8] = entry[2]
         
-unmatched_patterns = gdf[(gdf.pattern != -1) & (gdf.tile_page == -1)].pattern.unique()
-for p in unmatched_patterns: 
-    print('pattern: {} -> {}'.format(p, re.findall('...', bin(p)[2:].zfill(9)[::-1])))
-    indices = np.where(gdf.pattern == p)[0]
-    for idx in indices:
-        plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-r')
+# unmatched_patterns = gdf[(gdf.pattern != -1) & (gdf.tile_page == -1)].pattern.unique()
+# for p in unmatched_patterns: 
+#     print('pattern: {} -> {}'.format(p, re.findall('...', bin(p)[2:].zfill(9)[::-1])))
+#     indices = np.where(gdf.pattern == p)[0]
+#     for idx in indices:
+#         plt.plot(geometry[idx].exterior.xy[0], geometry[idx].exterior.xy[1], '-r')
 
 
 
-plt.show()
+# plt.show()
+
+df_out = df.rename(columns={"xidx": "x", "yidx": "y"})
+df_out.to_csv('osm_test_objects2.csv')
 
 # gdf_out = gdf[(gdf.tile_page != -1) & (gdf.tile_row != -1) & (gdf.tile_col != -1)]
-gdf_out = gdf[gdf['type'] != -1]
+# gdf_out = gdf[gdf['type'] != -1]
 
-gdf_out.x = gdf_out.xidx
-gdf_out.y = gdf_out.yidx
-gdf_out.to_csv('osm_test_roads.csv', columns=['x', 'y', 'z', 'tile_page', 'tile_row', 'tile_col', 'category', 'type', 'sub_type'])
+# gdf_out.x = gdf_out.xidx
+# gdf_out.y = gdf_out.yidx
+# gdf_out.to_csv('osm_test_roads.csv', columns=['x', 'y', 'z', 'tile_page', 'tile_row', 'tile_col', 'category', 'type', 'sub_type'])
 
 # df = pandas.DataFrame(waypoints)
 
