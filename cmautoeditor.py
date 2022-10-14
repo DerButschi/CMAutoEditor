@@ -20,6 +20,7 @@ import numpy as np
 import pandas
 import argparse
 import keyboard
+import os
 
 # constants:
 UPPER_LEFT_SQUARE = pyautogui.Point(234,52)
@@ -47,6 +48,7 @@ POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 
 MENU_DICT = {
+    'Ground 1': pyautogui.Point(113, 107),
     'Ground 2': pyautogui.Point(105, 123),
     'Ground 3': pyautogui.Point(105, 144),
     'Foliage': pyautogui.Point(110, 185),
@@ -75,6 +77,14 @@ MENU_DICT = {
     'density 2': pyautogui.Point(110, 617),
     'density 3': pyautogui.Point(180, 617),
     'density 4': pyautogui.Point(38, 657),
+    'Grass T': pyautogui.Point(191, 498),
+    'Grass TY': pyautogui.Point(27, 554),
+    'Weeds': pyautogui.Point(80, 554),
+    'Grass XT': pyautogui.Point(135, 657),
+    'Grass XTY': pyautogui.Point(191, 657),
+    'Dirt': pyautogui.Point(27, 383),
+    'Pavement 1': pyautogui.Point(81, 495),
+
 }
 
 GROUND_2_DICT = {
@@ -240,7 +250,7 @@ def set_roads(df):
                 y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
                 pyautogui.click(x=x_pos, y=y_pos)
 
-def set_ground(df):
+def set_ground(df, map_df):
     for group_info, group in df.groupby(by=['menu', 'cat1', 'cat2']):
         if group_info[0] not in MENU_DICT or group_info[0] == 'road':
             continue
@@ -260,109 +270,134 @@ def set_ground(df):
         if group_info[2] in MENU_DICT:
             pyautogui.click(MENU_DICT[group_info[2]])
 
-        for _, row in group.iterrows():
+        for row_idx, row in group.iterrows():
             x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
             y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
             pyautogui.click(x=x_pos, y=y_pos)
+
+            map_df.loc[row_idx, 'done'] = 1
 
 
 if __name__ == '__main__':
     args = arg_parser.parse_args()
 
     # load height map
-    map_df = pandas.read_csv(args.input)
-    map_df.z = map_df.z.round().astype(int)
+    if os.path.exists(args.input + '.checkpoint') and os.path.exists(args.input + '.meta.checkpoint'):
+        map_df = pandas.read_csv(args.input + '.checkpoint')
+        meta_df = pandas.read_csv(args.input + '.meta.checkpoint')
+        start_i_page_x = meta_df['start_i_page_x'][0]
+        start_i_page_y = meta_df['start_i_page_y'][0]
+        prev_n_x = meta_df['prev_n_x'][0]
+        prev_n_y = meta_df['prev_n_y'][0]
 
-    # x = np.array(map_df.x.values, dtype=int)
-    # y = np.array(map_df.y.values, dtype=int)
-    # z = map_df.z.values
+    else:
+        map_df = pandas.read_csv(args.input)
+        map_df.z = map_df.z.round().astype(int)
 
-    # grid = np.full((x.max() + 1, y.max() + 1), -1)
-    # grid[x, y] = z
-    total_n_squares_x = map_df.x.max() + 1
-    total_n_squares_y = map_df.y.max() + 1
+        if 'done' not in map_df:
+            map_df['done'] = 0
 
-    n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X)
-    n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y)
-    n_x_remain = (np.floor(n_x_remain / 2) * 2).astype(int)
-    n_y_remain = (np.floor(n_y_remain / 2) * 2).astype(int)
+        start_i_page_x = 0
+        start_i_page_y = 0
+        prev_n_x = START_N_SQUARES_X
+        prev_n_y = START_N_SQUARES_Y
 
-    # grid = grid[0:(n_pages_x * PAGE_N_SQUARES_X + n_x_remain), 0:(n_pages_y * PAGE_N_SQUARES_Y + n_y_remain)]
+    try:    
+        map_df = map_df[map_df['done'] == 0]
 
-    map_df = map_df[(map_df.x >= 0) & (map_df.y >= 0) & (map_df.x < (n_pages_x * PAGE_N_SQUARES_X + n_x_remain)) & (map_df.y < (n_pages_y * PAGE_N_SQUARES_Y + n_y_remain))]
+        # x = np.array(map_df.x.values, dtype=int)
+        # y = np.array(map_df.y.values, dtype=int)
+        # z = map_df.z.values
 
-    # map_df = map_df[map_df.x.between(0, (n_pages_x * PAGE_N_SQUARES_X + n_x_remain), inclusive='left')]
-    # map_df = map_df[map_df.y.between(0, (n_pages_y * PAGE_N_SQUARES_Y + n_y_remain), inclusive='left')]
-                    
-    total_n_squares_x = n_pages_x * PAGE_N_SQUARES_X + n_x_remain
-    total_n_squares_y = n_pages_y * PAGE_N_SQUARES_Y + n_y_remain
+        # grid = np.full((x.max() + 1, y.max() + 1), -1)
+        # grid[x, y] = z
+        total_n_squares_x = map_df.x.max() + 1
+        total_n_squares_y = map_df.y.max() + 1
 
-    height = START_HEIGHT
-    prev_n_x = START_N_SQUARES_X
-    prev_n_y = START_N_SQUARES_Y
+        n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X)
+        n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y)
+        n_x_remain = (np.floor(n_x_remain / 2) * 2).astype(int)
+        n_y_remain = (np.floor(n_y_remain / 2) * 2).astype(int)
 
-    pyautogui.countdown(5)
+        # grid = grid[0:(n_pages_x * PAGE_N_SQUARES_X + n_x_remain), 0:(n_pages_y * PAGE_N_SQUARES_Y + n_y_remain)]
 
-    for i_page_y in range(n_pages_y + 1):
-        for i_page_x in range(n_pages_x + 1):
-            # if i_page_x > 3 or i_page_y > 3:
-            #     continue
+        map_df = map_df[(map_df.x >= 0) & (map_df.y >= 0) & (map_df.x < (n_pages_x * PAGE_N_SQUARES_X + n_x_remain)) & (map_df.y < (n_pages_y * PAGE_N_SQUARES_Y + n_y_remain))]
 
-            # xmax = total_n_squares_x - i_page_x * PAGE_N_SQUARES_X
-            # ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
-            # if i_page_x < n_pages_x:
-            #     n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
-            #     xmin = xmax - PAGE_N_SQUARES_X
-            # else:
-            #     n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain 
-            #     xmin = xmax - n_x_remain
-            # if i_page_y < n_pages_y:
-            #     n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y
-            #     ymin = ymax - PAGE_N_SQUARES_Y
-            # else:
-            #     n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
-            #     ymin = ymax - PAGE_N_SQUARES_Y
+        # map_df = map_df[map_df.x.between(0, (n_pages_x * PAGE_N_SQUARES_X + n_x_remain), inclusive='left')]
+        # map_df = map_df[map_df.y.between(0, (n_pages_y * PAGE_N_SQUARES_Y + n_y_remain), inclusive='left')]
+                        
+        total_n_squares_x = n_pages_x * PAGE_N_SQUARES_X + n_x_remain
+        total_n_squares_y = n_pages_y * PAGE_N_SQUARES_Y + n_y_remain
+
+        height = START_HEIGHT
+
+        pyautogui.countdown(5)
+
+        for i_page_y in range(n_pages_y + 1):
+            for i_page_x in range(n_pages_x + 1):
+                # if i_page_x > 3 or i_page_y > 3:
+                #     continue
+
+                # xmax = total_n_squares_x - i_page_x * PAGE_N_SQUARES_X
+                # ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
+                # if i_page_x < n_pages_x:
+                #     n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
+                #     xmin = xmax - PAGE_N_SQUARES_X
+                # else:
+                #     n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain 
+                #     xmin = xmax - n_x_remain
+                # if i_page_y < n_pages_y:
+                #     n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y
+                #     ymin = ymax - PAGE_N_SQUARES_Y
+                # else:
+                #     n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
+                #     ymin = ymax - PAGE_N_SQUARES_Y
 
 
-            if i_page_x < n_pages_x:
-                n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
-                xmax = total_n_squares_x - i_page_x * PAGE_N_SQUARES_X
-                xmin = xmax - PAGE_N_SQUARES_X
-                origin_x = total_n_squares_x - (i_page_x + 1) * PAGE_N_SQUARES_X
-            else:
-                n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain 
-                xmax = n_x_remain
-                xmin = 0
-                origin_x = 0
-            if i_page_y < n_pages_y:
-                n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y
-                ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
-                ymin = ymax - PAGE_N_SQUARES_Y
-                origin_y = i_page_y * PAGE_N_SQUARES_Y
-            else:
-                n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
-                ymax = total_n_squares_y
-                ymin = total_n_squares_y - n_y_remain
-                origin_y = total_n_squares_y - PAGE_N_SQUARES_Y
+                if i_page_x < n_pages_x:
+                    n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
+                    xmax = total_n_squares_x - i_page_x * PAGE_N_SQUARES_X
+                    xmin = xmax - PAGE_N_SQUARES_X
+                    origin_x = total_n_squares_x - (i_page_x + 1) * PAGE_N_SQUARES_X
+                else:
+                    n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain 
+                    xmax = n_x_remain
+                    xmin = 0
+                    origin_x = 0
+                if i_page_y < n_pages_y:
+                    n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y
+                    ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
+                    ymin = ymax - PAGE_N_SQUARES_Y
+                    origin_y = i_page_y * PAGE_N_SQUARES_Y
+                else:
+                    n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
+                    ymax = total_n_squares_y
+                    ymin = total_n_squares_y - n_y_remain
+                    origin_y = total_n_squares_y - PAGE_N_SQUARES_Y
 
-            if xmax == xmin or ymax == ymin:
-                continue
-            # if i_page_x == 0 and i_page_y == 0:
-            #     continue
+                if xmax == xmin or ymax == ymin:
+                    continue
+                # if i_page_x == 0 and i_page_y == 0:
+                #     continue
 
-            set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y)
-            prev_n_x = n_squares_x
-            prev_n_y = n_squares_y
+                set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y)
+                prev_n_x = n_squares_x
+                prev_n_y = n_squares_y
 
-            # sub_grid = grid[xmin:xmax, ymin:ymax]
+                # sub_grid = grid[xmin:xmax, ymin:ymax]
 
-            # height = process_segment(sub_grid, height)
-            sub_df = map_df[map_df.x.between(xmin, xmax, inclusive='left') & map_df.y.between(ymin, ymax, inclusive='left')].copy(deep=True)
-            sub_df.x = sub_df.x - origin_x
-            sub_df.y = sub_df.y - origin_y
-            # height = process_segment(sub_df, height)
-            # set_roads(sub_df)
-            set_ground(sub_df)
+                # height = process_segment(sub_grid, height)
+                sub_df = map_df[map_df.x.between(xmin, xmax, inclusive='left') & map_df.y.between(ymin, ymax, inclusive='left')].copy(deep=True)
+                sub_df.x = sub_df.x - origin_x
+                sub_df.y = sub_df.y - origin_y
+                # height = process_segment(sub_df, height)
+                # set_roads(sub_df)
+                set_ground(sub_df, map_df)
+
+    except pyautogui.FailSafeException:
+        map_df.to_csv(args.input + '.checkpoint')
+        meta_df = pandas.DataFrame({'prev_n_x': [prev_n_x], 'prev_n_y': [prev_n_y], 'start_i_page_x': [i_page_x], 'start_i_page_y': [i_page_y]})
+        meta_df.to_csv(args.input + '.meta.checkpoint')
 
 
 
