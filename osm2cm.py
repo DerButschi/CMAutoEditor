@@ -6,7 +6,7 @@ import numpy as np
 from shapely.geometry import LineString, Polygon, MultiPolygon, MultiLineString, Point, MultiPoint
 from shapely.ops import split, snap
 import matplotlib.pyplot as plt
-from skimage.draw import line, line_aa, line_nd, polygon
+# from skimage.draw import line, line_aa, line_nd, polygon
 import geopandas
 import re
 
@@ -84,21 +84,76 @@ config = {
     'mixed_forest': {
         'tags': [
             ('landuse', 'forest'),
+            ('natural', 'wood')
         ],
+        'exclude_tags': {
+            'leaf_type': 'broadleaved',
+        },
         'cm_types': {
             'types': [
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': ['density 1', 'density 2', 'density 3']},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': ['density 1', 'density 2', 'density 3']},   
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': ['density 1', 'density 2', 'density 3']},   
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': ['density 1', 'density 2', 'density 3']},    
-                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': ['density 1', 'density 2', 'density 3']},    
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': ['density 1', 'density 2', 'density 3']},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': ['density 1', 'density 2', 'density 3']},
-                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': ['density 1', 'density 2', 'density 3']},
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 3', 'weight': 1},
             ],
             'post_process': [
                 'type_random_individual',
-                'cat2_random_individual'
+            ]
+        },
+        'pass': 1
+    },
+
+    'broadleaved_forest': {
+        'tags': [
+            ('landuse', 'forest'),
+            ('natural', 'wood')
+        ],
+        'required_tags': {
+            'leaf_type': 'broadleaved',
+        },
+        'cm_types': {
+            'types': [
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
+                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
+            ],
+            'post_process': [
+                'type_random_individual',
             ]
         },
         'pass': 1
@@ -110,13 +165,18 @@ config = {
         ],
         'cm_types': {
             'types': [
-                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': ['density 1', 'density 2', 'density 3']},
-                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': ['density 1', 'density 2', 'density 3']},
-                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': ['density 1', 'density 2', 'density 3']},
+                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 1', 'weight': 1.0},
+                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 2', 'weight': 2.0},
+                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 3', 'weight': 1.0},
+                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 1', 'weight': 1.0},
+                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 2', 'weight': 2.0},
+                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 3', 'weight': 1.0},
+                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 1', 'weight': 1.0},
+                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 2', 'weight': 2.0},
+                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 3', 'weight': 1.0},
             ],
             'post_process': [
                 'type_random_individual',
-                'cat2_random_individual'
             ]
         },
         'pass': 1
@@ -128,21 +188,71 @@ config = {
         ],
         'cm_types': {
             'types': [
-                {'menu': 'Ground 2', 'cat1': 'Plow NS'},
-                {'menu': 'Ground 2', 'cat1': 'Plow EW'},
-                {'menu': 'Ground 3', 'cat1': 'Crop 1'},
-                {'menu': 'Ground 3', 'cat1': 'Crop 2'},
-                {'menu': 'Ground 3', 'cat1': 'Crop 3'},
-                {'menu': 'Ground 3', 'cat1': 'Crop 4'},
-                {'menu': 'Ground 3', 'cat1': 'Crop 5'},
-                {'menu': 'Ground 3', 'cat1': 'Crop 6'},
+                {'menu': 'Ground 2', 'cat1': 'Plow NS', 'weight': 1.0},
+                {'menu': 'Ground 2', 'cat1': 'Plow EW', 'weight': 1.0},
+                {'menu': 'Ground 3', 'cat1': 'Crop 1', 'weight': 1.0},
+                {'menu': 'Ground 3', 'cat1': 'Crop 2', 'weight': 1.0},
+                {'menu': 'Ground 3', 'cat1': 'Crop 3', 'weight': 1.0},
+                {'menu': 'Ground 3', 'cat1': 'Crop 4', 'weight': 1.0},
+                {'menu': 'Ground 3', 'cat1': 'Crop 5', 'weight': 1.0},
+                {'menu': 'Ground 3', 'cat1': 'Crop 6', 'weight': 1.0},
             ],
             'post_process': [
                 'type_random_area'
             ]
         },
         'pass': 0
-    }
+    },
+
+    'grassland': {
+        'tags': [
+            ('landuse', 'grass')
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Ground 1', 'cat1': 'Grass T', 'weight': 1.0},
+                {'menu': 'Ground 1', 'cat1': 'Grass TY', 'weight': 1.0},
+                {'menu': 'Ground 1', 'cat1': 'Weeds', 'weight': 1.0},
+                {'menu': 'Ground 1', 'cat1': 'Grass XT', 'weight': 1.0},
+                {'menu': 'Ground 1', 'cat1': 'Grass XTY', 'weight': 1.0},
+            ],
+            'post_process': [
+                'type_random_individual'
+            ],
+        }
+    },
+
+    'construction_site': {
+        'tags': [
+            ('landuse', 'construction')
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Ground 1', 'cat1': 'Dirt', 'weight': 1.0},
+            ],
+            'post_process': [
+                'type_random_individual'
+            ]
+        }
+    },
+
+    # 'residential_buildings': {
+    #     'tags': [
+    #         ('building', 'house'),
+    #         ('building', 'residential'),
+    #         ('building', 'detached'),
+    #         ('building', 'apartments')
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 2', 'cat1': 'Pavement 1', 'weight': 1.0}
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual'
+    #         ]
+    #     }
+    # }
+
 }
 
 # pattern: page, row, col
@@ -263,8 +373,15 @@ def type_from_tag(way_df, tags, cm_types):
 def type_random_area(df, name, cm_types):
     n_types = len(cm_types['types'])
     sub_df = df[df['name'] == name]
+
+    sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types['types']])
+    probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types['types']]
+
+    rng = np.random.default_rng()
+
     for sub_group_name, sub_group in sub_df.groupby(by='id'):
-        cm_type = cm_types['types'][np.random.randint(n_types)]
+        type_idx = rng.choice(list(range(n_types)), p=probabilities, size=1)[0]
+        cm_type = cm_types['types'][type_idx]
         for key in cm_type:
             if key in df.columns:
                 df.loc[sub_group.index, key] = cm_type[key]
@@ -272,7 +389,14 @@ def type_random_area(df, name, cm_types):
 def type_random_individual(df, name, cm_types):
     n_types = len(cm_types['types'])
     sub_df = df[df['name'] == name]
-    type_indices = np.random.randint(0, n_types, size=(len(sub_df),))
+
+    sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types['types']])
+    probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types['types']]
+
+    rng = np.random.default_rng()
+    type_indices = rng.choice(list(range(n_types)), p=probabilities, size=(len(sub_df),))
+
+    # type_indices = np.random.randint(0, n_types, size=(len(sub_df),))
     for type_idx in range(n_types):
         idx = np.where(type_indices == type_idx)[0]
         if len(idx) > 0:
@@ -313,7 +437,7 @@ lon_max, lat_max = projection(380804.0-8, 5644444.0-8, inverse=True)
 bbox = [lat_min, lon_min, lat_max, lon_max]
 
 
-query = overpassQueryBuilder(bbox=bbox, elementType='way', includeGeometry=True, out='body')
+query = overpassQueryBuilder(bbox=bbox, elementType=['way', 'relation'], includeGeometry=True, out='body')
 
 result = overpass.query(query)
 
@@ -402,49 +526,70 @@ df = None
 #     if config['name']['pass'] > max_pass:
 #         max_pass = config['name']['pass']
 
-for way in result.ways():
-    way_tags = way.tags()
-    way_geometry = way.geometry()
-    if way.tags() is None or way_geometry is None:
-        print(way.tags(), way.id())
+for element in result.elements():
+    if element.type() not in ('relation', 'way'):
+        continue
+    element_tags = element.tags()
+    if element.tags() is None:
+        print(element.tags(), element.id())
         continue
 
     matched = False
     for name in config:
         # if config['name']['pass'] != i_pass:
         #     continue
+        excluded = False
+        if 'exclude_tags' in config[name]:
+            for element_tag_key in element_tags:
+                if element_tag_key in config[name]['exclude_tags'] and config[name]['exclude_tags'][element_tag_key] == element_tags[element_tag_key]:
+                    excluded = True
+
+        if 'required_tags' in config[name]:
+            for required_tag_key in config[name]['required_tags']:
+                if not (required_tag_key in element_tags and config[name]['required_tags'][required_tag_key] == element_tags[required_tag_key]):
+                    excluded = True
+
+        if excluded:
+            continue
+
         for tag_key, tag_value in config[name]['tags']:
-            if tag_key in way_tags and way_tags[tag_key] == tag_value:
+            if tag_key in element_tags and element_tags[tag_key] == tag_value:
                 to_fill = None
                 matched = True
-                if way_geometry['type'] == 'Polygon':
-                    exterior_coords = [(projection(coord[0], coord[1])) for coord in way_geometry['coordinates'][0]]
-                    polygon = Polygon(exterior_coords)
+                element_geometry = element.geometry()
+                if element_geometry['type'] == 'Polygon':
+                    exterior_coords = [(projection(coord[0], coord[1])) for coord in element_geometry['coordinates'][0]]
+                    interiors = []
+                    for interior_idx in range(1, len(element_geometry['coordinates'])):
+                        interior_coords = [(projection(coord[0], coord[1])) for coord in element_geometry['coordinates'][interior_idx]]
+                        interiors.append(interior_coords)
+
+                    polygon = Polygon(exterior_coords, holes=interiors)
                     to_fill = gdf.geometry.intersects(polygon)
-                elif way_geometry['type'] == 'LineString':
-                    coords = [(projection(coord[0], coord[1])) for coord in way.geometry()['coordinates']]
+                elif element_geometry['type'] == 'LineString':
+                    coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
                     ls = LineString(coords)
                     to_fill = gdf.geometry.crosses(ls)
                 else:
-                    raise Exception('geometry {} not yet covered'.format(way_geometry['type']))
+                    raise Exception('geometry {} not yet covered'.format(element_geometry['type']))
 
                 if to_fill is not None:
-                    way_df = gdf.loc[to_fill, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name']].copy(deep=True)
-                    way_df['id'] = way.id()
-                    way_df['name'] = name
+                    element_df = gdf.loc[to_fill, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name']].copy(deep=True)
+                    element_df['id'] = element.id()
+                    element_df['name'] = name
 
                     cm_types = config[name]['cm_types']
                     if 'process' in cm_types:
                         for func_name in cm_types['process']:
-                            way_df = globals()[func_name](way_df, way.tags(), cm_types)
+                            element_df = globals()[func_name](element_df, element.tags(), cm_types)
 
                     if df is None:
-                        df = way_df
+                        df = element_df
                     else:
-                        df = pandas.concat([df, way_df], ignore_index=True)
+                        df = pandas.concat([df, element_df], ignore_index=True)
 
     if not matched:
-        print(way.tags(), way.id())
+        print(element.tags(), element.id())
 
 for name in config:
     cm_types = config[name]['cm_types']
