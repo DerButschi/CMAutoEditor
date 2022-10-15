@@ -84,6 +84,26 @@ MENU_DICT = {
     'Grass XTY': pyautogui.Point(191, 657),
     'Dirt': pyautogui.Point(27, 383),
     'Pavement 1': pyautogui.Point(81, 495),
+    'Direction 1': pyautogui.Point(248,17),
+    'Direction 2': pyautogui.Point(278,17),
+    'Direction 3': pyautogui.Point(308,17),
+    'Direction 4': pyautogui.Point(338,17),
+    'Road Tile 1': pyautogui.Point(36,615),
+    'Road Tile 2': pyautogui.Point(108,615),
+    'Road Tile 3': pyautogui.Point(182,615),
+    'Road Tile 4': pyautogui.Point(36,659),
+    'Road Tile 5': pyautogui.Point(108,659),
+    'Road Tile 6': pyautogui.Point(182,659),
+    'Road Tile 7': pyautogui.Point(36,696),
+    'Road Tile 8': pyautogui.Point(108,696),
+    'Road Tile 9': pyautogui.Point(182,696),
+    'Road Tile 10': pyautogui.Point(36,740),
+    'Road Tile 11': pyautogui.Point(108,740),
+    'Road Tile 12': pyautogui.Point(182,740),
+    'Paved 1': pyautogui.Point(36,440),
+    'Paved 2': pyautogui.Point(108,440),
+    'Foot Path': pyautogui.Point(183,440),
+    'Gravel Road': pyautogui.Point(183,383),
 
 }
 
@@ -251,8 +271,10 @@ def set_roads(df):
                 pyautogui.click(x=x_pos, y=y_pos)
 
 def set_ground(df, map_df):
-    for group_info, group in df.groupby(by=['menu', 'cat1', 'cat2']):
-        if group_info[0] not in MENU_DICT or group_info[0] == 'road':
+    for group_info, group in df.groupby(by=['menu', 'cat1', 'cat2', 'direction']):
+        if group_info[0] not in MENU_DICT:
+            continue
+        if group_info[0] != 'Road':
             continue
         # ground_menu = MENU_DICT[group_info[0]]
         # if group_info[0] == 'Ground 2':
@@ -269,6 +291,8 @@ def set_ground(df, map_df):
 
         if group_info[2] in MENU_DICT:
             pyautogui.click(MENU_DICT[group_info[2]])
+        if group_info[3] in MENU_DICT:
+            pyautogui.click(MENU_DICT[group_info[3]])
 
         for row_idx, row in group.iterrows():
             x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)

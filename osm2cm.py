@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 # from skimage.draw import line, line_aa, line_nd, polygon
 import geopandas
 import re
+import networkx as nx
 
 PAGE_N_SQUARES_X = 104
 PAGE_N_SQUARES_Y = 60
@@ -43,7 +44,8 @@ config = {
                 {'menu': 'Road', 'cat1': 'Paved 2', 'tags': [('highway', 'residential'), ('highway', 'living_street'), ('highway', 'unclassified')]}
             ],
             'process': [
-                'type_from_tag'
+                'type_from_tag',
+                'add_to_road_graph'
             ],
             'post_process': {
                 'road_pattern'
@@ -58,11 +60,15 @@ config = {
         ],
         'cm_types': {
             'types': [
-                {'menu': 'Road', 'cat1': 'Foot Path', 'tags': [('highway', 'footway'), ('highway', 'footway')]},
+                {'menu': 'Road', 'cat1': 'Gravel Road', 'tags': [('highway', 'footway'), ('highway', 'footway')]},
             ],
             'process': [
-                'type_from_tag'
-            ]
+                'type_from_tag',
+                'add_to_road_graph'
+            ],
+            'post_process': {
+                'road_pattern'
+            }
         },
         'pass': 2,
     },
@@ -338,25 +344,43 @@ pattern2roadtile_dict = {
 
 }
 
+# def get_road_match_pattern(gdf, idx):
+#     tile_xidx = gdf.xidx[idx]
+#     tile_yidx = gdf.yidx[idx]
+#     tag_category = gdf.category[idx]
+
+#     exponent = 0
+#     sum = 0
+#     for yidx in range(tile_yidx + 1, tile_yidx - 2, -1):
+#         for xidx in range(tile_xidx - 1, tile_xidx + 2):
+#             tile = gdf[(gdf.xidx == xidx) & (gdf.yidx == yidx) & (gdf.category == tag_category)]
+#             if len(tile) > 0:
+#                 if tile.filled.any():
+#                     sum += np.power(2, exponent)
+            
+#             exponent += 1
+    
+#     return sum
+
 def get_road_match_pattern(gdf, idx):
     tile_xidx = gdf.xidx[idx]
     tile_yidx = gdf.yidx[idx]
-    tag_category = gdf.category[idx]
 
     exponent = 0
     sum = 0
     for yidx in range(tile_yidx + 1, tile_yidx - 2, -1):
         for xidx in range(tile_xidx - 1, tile_xidx + 2):
-            tile = gdf[(gdf.xidx == xidx) & (gdf.yidx == yidx) & (gdf.category == tag_category)]
+            tile = gdf[(gdf.xidx == xidx) & (gdf.yidx == yidx)]
             if len(tile) > 0:
-                if tile.filled.any():
-                    sum += np.power(2, exponent)
+                sum += np.power(2, exponent)
             
             exponent += 1
     
     return sum
 
-def type_from_tag(way_df, tags, cm_types):
+
+def type_from_tag(way_df, gdf, element, cm_types):
+    tags = element.tags()
     for cm_type in cm_types['types']:
         matched = False
         for key, value in cm_type['tags']:
@@ -369,6 +393,43 @@ def type_from_tag(way_df, tags, cm_types):
                     way_df[key] = cm_type[key]
                 
     return way_df
+
+def add_to_road_graph(df, gdf, element, cm_types):
+    if len(df) == 0:
+        return df
+
+    coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
+    ls = LineString(coords)
+    ls_crosses = gdf.geometry.crosses(ls)
+
+    squares = gdf.loc[ls_crosses, ['x', 'y', 'xidx', 'yidx']]
+    normalized_dists = []
+    for idx in range(len(squares)):
+        normalized_dists.append(ls.project(Point(squares['x'].values[idx], squares['y'].values[idx]), normalized=True))
+
+    df['dist_along_way'] = normalized_dists
+
+    a = 1
+
+    # for i_node in range(1, element.countNodes()):
+    #     p1 = Point(projection(element.geometry()['coordinates'][i_node-1][0], element.geometry()['coordinates'][i_node-1][1]))
+    #     p2 = Point(projection(element.geometry()['coordinates'][i_node][0], element.geometry()['coordinates'][i_node][1]))
+    #     ls = LineString([p1, p2])
+    #     ls_crosses = gdf.crosses(ls)
+    #     squares = gdf.loc[ls_crosses, ['x', 'y', 'xidx', 'yidx']]
+
+    #     contains_p1 = gdf.contains(p1)
+    #     contains_p2 = gdf.contains(p2)
+
+    #     square1 = gdf.loc[contains_p1, ['xidx', 'yidx']]
+    #     square2 = gdf.loc[contains_p2, ['xidx', 'yidx']]
+
+    #     road_graph.add_edge(element.nodes()[i_node-1].id(), element.nodes()[i_node].id(), way_id=element.id(), squares=squares, name=df.name.unique()[0])
+    #     road_graph.nodes[element.nodes()[i_node-1].id()]['square'] = square1
+    #     road_graph.nodes[element.nodes()[i_node].id()]['square'] = square2
+        
+    return df
+
 
 def type_random_area(df, name, cm_types):
     n_types = len(cm_types['types'])
@@ -423,7 +484,26 @@ def cat2_random_individual(df, name, cm_types):
         
 
 def road_pattern(df, name, cm_types):
-    pass
+    sub_df = df[df.name == name]
+
+    for group_id, group in sub_df.groupby(by='id'):
+        sorted_group = group.sort_values(by='dist_along_way')
+
+        for idx_pos, idx in enumerate(sorted_group.index):
+            cut_sorted_group = sorted_group.loc[sorted_group.index[max(idx_pos-2,0):min(idx_pos+3, len(sorted_group.index))]]
+
+            pattern = get_road_match_pattern(cut_sorted_group, idx)
+
+            if pattern not in pattern2roadtile_dict:
+                print('pattern: {} -> {}'.format(pattern, re.findall('...', bin(pattern)[2:].zfill(9)[::-1])))
+            else:
+                if type(pattern2roadtile_dict[pattern]) == int:
+                    pattern = pattern2roadtile_dict[pattern]
+                direction, road_row, road_col = pattern2roadtile_dict[pattern][0]
+                df.loc[idx, 'direction'] = 'Direction {}'.format(direction + 1)
+                df.loc[idx, 'cat2'] = 'Road Tile {}'.format(road_row * 3 + road_col + 1)
+                
+
 
 overpass = Overpass()
 # query = overpassQueryBuilder(bbox=[7.30153, 50.93133, 7.30745, 50.93588], elementType='way')
@@ -481,6 +561,7 @@ gdf = geopandas.GeoDataFrame({
     'direction': [-1] * len(xarr),
     'id': [-1] * len(xarr),
     'name': [-1] * len(xarr),
+    'dist_along_way': [-1] * len(xarr),
     }, geometry=geometry)
 
 
@@ -521,6 +602,7 @@ grid_polygons = MultiPolygon(grid_polygons)
 # df = pandas.DataFrame(columns=['x', 'y', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name'])
 df = None
 
+road_graph = nx.Graph()
 # max_pass = -1
 # for name in config:
 #     if config['name']['pass'] > max_pass:
@@ -581,7 +663,7 @@ for element in result.elements():
                     cm_types = config[name]['cm_types']
                     if 'process' in cm_types:
                         for func_name in cm_types['process']:
-                            element_df = globals()[func_name](element_df, element.tags(), cm_types)
+                            element_df = globals()[func_name](element_df, gdf, element, cm_types)
 
                     if df is None:
                         df = element_df
