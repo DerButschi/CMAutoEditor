@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import geopandas
 import re
 import networkx as nx
+from sklearn import neighbors
 
 PAGE_N_SQUARES_X = 104
 PAGE_N_SQUARES_Y = 60
@@ -49,7 +50,7 @@ config = {
                 'add_to_road_graph'
             ],
             'post_process': {
-                'road_pattern'
+                'road_navigation_graph'
             }
         },
         'pass': 2
@@ -357,6 +358,88 @@ pattern2roadtile_dict = {
 
 }
 
+pin2pin_dict = {
+    1: [(6, 2), (20, 2), (7, 2)],
+    2: [(13, 2), (16, 2)],
+    3: [(13, 1), (12, 2), (8, 2), (18, 2), (14, 2)],
+    4: [(10, 2), (13, 2)],
+    5: [(6, 2), (12, 2), (20, 2), (19, 2)],
+    6: [(1, 2), (5, 2), (11, 2)],
+    7: [(1, 2), (18, 2), (2)],
+    8: [(3, 2), (18, 1), (17, 2), (13, 2), (19, 2)],
+    9: [(15, 2), (18, 2)],
+    10: [(4, 2), (11, 2)],
+    11: [(6, 2), (10, 2), (17, 2)],
+    12: [(3, 2), (6, 2)],
+    13: [(3, 1), (4, 2), (8, 2), (18, 2), (2, 2)],
+    14: [(3, 2), (20, 2)],
+    15: [(9, 2), (16, 2)],
+    16: [(2, 2), (15, 2)],
+    17: [(8, 2), (11, 2)],
+    18: [(3, 2), (8, 1), (13, 2), (9, 2), (7, 2)],
+    19: [(8, 2), (5, 2)],
+    20: [(1, 2), (14, 2), (5, 2)],
+}
+
+start_pin_dict = {
+    (0, 1): 3,
+    (0, -1): 13,
+    (1, 0): 18,
+    (-1, 0): 8,
+}
+
+end_pin_dict = {
+    (0, 1): 13,
+    (0, -1): 3,
+    (1, 0): 8,
+    (-1, 0): 18,
+}
+
+start_intersection_dict = {
+    (0, 1): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 19, 20],
+    (0, -1): [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    (1, 0): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    (-1, 0): [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+}
+
+end_intersection_dict = {
+    (0, -1): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 19, 20],
+    (0, 1): [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    (-1, 0): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    (1, 0): [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+}
+
+square2square_dict = {
+    (0, 1): {
+        15: 1,
+        14: 2,
+        13: 3,
+        12: 4,
+        11: 5,
+    },
+    (0, -1): {
+        1: 15,
+        2: 14,
+        3: 13,
+        4: 12,
+        5: 11,
+    },
+    (1, 0): {
+        6: 20,
+        7: 19,
+        8: 18,
+        9: 17,
+        10: 16,
+    },
+    (-1, 0): {
+        20: 6,
+        19: 7,
+        18: 8,
+        17: 9,
+        16: 10,
+    }
+}
+
 # def get_road_match_pattern(gdf, idx):
 #     tile_xidx = gdf.xidx[idx]
 #     tile_yidx = gdf.yidx[idx]
@@ -411,6 +494,10 @@ def add_to_road_graph(df, gdf, element, cm_types):
     if len(df) == 0:
         return df
 
+    if name not in road_graphs:
+        road_graph = nx.Graph
+        road_graphs[name] = road_graph
+
     coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
     points = [Point(coord[0], coord[1]) for coord in coords]
 
@@ -430,39 +517,41 @@ def add_to_road_graph(df, gdf, element, cm_types):
     if name not in node_dict:
         node_dict[name] = {}
 
+    gdf_ls = gdf.loc[ls_crosses]
+    nodes = []
     for node_idx in range(element.countNodes()):
         node_id = element.nodes()[node_idx].id()
-        # squares = gdf.loc[gdf.contains(points[0]), ['xidx', 'yidx']]
-        # if len(squares) > 0:
-        #     xidx, yidx = squares.values[0]
-        # else:
-        #     continue
+        point = Point(coords[node_idx])
+        gdf_point = gdf_ls.loc[gdf.contains(point)]
+        if len(gdf_point) > 0:
+            xidx, yidx = gdf_ls.loc[gdf.contains(point), ['xidx', 'yidx']].values[0]
+            nodes.append((node_id, xidx, yidx))
 
-        if node_id not in node_dict[name]:
-            node_dict[name][node_id] = []
+    sorted_df = df.sort_values(by='dist_along_way')
+    go_on = True
+    df_pos_idx = 0
+    node_idx = 0
+    current_edge = None
+    while go_on:
+        node_id, node_xidx, node_yidx = nodes[node_idx]
+        df_xidx, df_yidx = sorted_df.loc[sorted_df.index[df_pos_idx], ['xidx', 'yidx']].values
+
+        if node_xidx == df_xidx and node_yidx == df_yidx:
+            if current_edge is None:
+                current_edge = [(node_id, node_xidx, node_yidx)]
+                node_idx += 1
+            else:
+                current_edge.append((node_id, node_xidx, node_yidx))
+                road_graph.add_edge(current_edge[0][0], current_edge[-1][0], squares=[edge_element[1:3] for edge_element in current_edge])
+                road_graph.nodes[current_edge[0][0]]['square'] = current_edge[0][1:3] 
+                road_graph.nodes[current_edge[-1][0]]['square'] = current_edge[-1][1:3] 
+                current_edge = [current_edge[-1]]
+                node_idx += 1
+        else:
+            df_pos_idx += 1
         
-        node_dict[name][node_id].append(element.id())
-
-
-
-    a = 1
-
-    # for i_node in range(1, element.countNodes()):
-    #     p1 = Point(projection(element.geometry()['coordinates'][i_node-1][0], element.geometry()['coordinates'][i_node-1][1]))
-    #     p2 = Point(projection(element.geometry()['coordinates'][i_node][0], element.geometry()['coordinates'][i_node][1]))
-    #     ls = LineString([p1, p2])
-    #     ls_crosses = gdf.crosses(ls)
-    #     squares = gdf.loc[ls_crosses, ['x', 'y', 'xidx', 'yidx']]
-
-    #     contains_p1 = gdf.contains(p1)
-    #     contains_p2 = gdf.contains(p2)
-
-    #     square1 = gdf.loc[contains_p1, ['xidx', 'yidx']]
-    #     square2 = gdf.loc[contains_p2, ['xidx', 'yidx']]
-
-    #     road_graph.add_edge(element.nodes()[i_node-1].id(), element.nodes()[i_node].id(), way_id=element.id(), squares=squares, name=df.name.unique()[0])
-    #     road_graph.nodes[element.nodes()[i_node-1].id()]['square'] = square1
-    #     road_graph.nodes[element.nodes()[i_node].id()]['square'] = square2
+        if df_pos_idx == len(sorted_df) or node_idx == len(nodes):
+            go_on = False
         
     return df
 
@@ -518,6 +607,75 @@ def cat2_random_individual(df, gdf, name, cm_types):
                 if len(idx) > 0:
                     df.loc[subgroup.index[idx], 'cat2'] = cat2[cat2_idx]
         
+def road_navigation_graph(df, gdf, name, cm_types):
+    road_graph = road_graphs[name]
+    nodes_to_delete = []
+    for node_id in road_graph.nodes:
+        if len(list(nx.neighbors(road_graph, node_id))) == 2:
+            nodes_to_delete.append(node_id)
+
+    while len(nodes_to_delete) > 0:
+        node_id = nodes_to_delete.pop()
+
+        neighbor1, neighbor2 = list(nx.neighbors(road_graph, node_id))
+        node = road_graph.nodes[node_id]
+        edge1 = road_graph.edges[neighbor1, node_id]
+        edge2 = road_graph.edges[neighbor2, node_id]
+        new_squares = []
+        new_squares.extend(edge1['squares'] if edge1['squares'][-1] == node['square'] else edge1['squares'][::-1])
+        new_squares.extend(edge2['squares'] if edge2['squares'][0] == node['square'] else edge1['squares'][::-1])
+
+        road_graph.add_edge(neighbor1, neighbor2, squares=new_squares)
+        road_graph.remove_node(node_id)
+
+    node_pos = {}
+    for node in road_graph.nodes:
+        node_pos[node] = road_graph.nodes[node]['square']
+
+    # plt.figure()
+    # plt.axis('equal')
+    # nx.draw_networkx(road_graph, pos=node_pos)
+    # plt.show()
+
+    edge_graphs = {}
+    for edge in road_graph.edges:
+        graph = nx.DiGraph()
+        node1_id = edge[0]
+        node2_id = edge[1]
+        squares = edge['squares']
+        if squares[0] == road_graph.nodes[node2_id]['square']:
+            squares = squares[::-1]
+
+        last_pins = []
+        for i_square in range(len(squares)):
+            square = squares[i_square]
+            if i_square < len(squares) - 1:
+                square_diff = (squares[i_square + 1][0] - square[0], squares[i_square + 1][1] - square[1])
+
+            if i_square == 0:
+                if len(list(nx.neighbors(road_graph, node1_id))) == 1:
+                    input_pins = [start_pin_dict[square_diff]]
+                else:
+                    input_pins = [start_intersection_dict[square_diff]]
+            else:
+                input_pins = [square2square_dict[square_diff][pin] for pin in last_pins]
+
+            last_pins = []
+            output_pins = list(square2square_dict[square_diff].keys())
+            for in_pin in input_pins:
+                for connected_pin, weight in pin2pin_dict[in_pin]:
+                    if connected_pin in output_pins:
+                        graph.add_edge((in_pin, i_square), (connected_pin, i_square), weight=weight)
+                        last_pins.append(connected_pin)
+
+            
+                    
+                        
+
+
+
+
+
 
 def road_pattern(df, gdf, name, cm_types):
     sub_df = df[df.name == name]
@@ -685,12 +843,7 @@ grid_polygons = MultiPolygon(grid_polygons)
 # df = pandas.DataFrame(columns=['x', 'y', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name'])
 df = None
 
-road_graph = nx.Graph()
-node_dict = {}
-# max_pass = -1
-# for name in config:
-#     if config['name']['pass'] > max_pass:
-#         max_pass = config['name']['pass']
+road_graphs = {}
 
 for element in result.elements():
     if element.type() not in ('relation', 'way'):
@@ -761,6 +914,15 @@ for element in result.elements():
 
     if not matched:
         print(element.tags(), element.id())
+
+node_pos = {}
+for node in road_graph.nodes:
+    node_pos[node] = road_graph.nodes[node]['square']
+
+plt.figure()
+plt.axis('equal')
+nx.draw_networkx(road_graph, pos=node_pos)
+plt.show()
 
 for name in config:
     cm_types = config[name]['cm_types']
