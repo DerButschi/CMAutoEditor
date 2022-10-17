@@ -1,5 +1,6 @@
 from unicodedata import category
 from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
+from OSMPythonTools.api import Api
 from pyproj import Proj
 import pandas
 import numpy as np
@@ -340,7 +341,19 @@ pattern2roadtile_dict = {
     179: 178,
     121: 56,
     466: 146,
-    400: 402
+    400: 402,
+    88: 120,
+    436: 180,
+    211: 147,
+    310: 306,
+    464: 146,
+    473: 153,
+    123: 62,
+    315: 59,
+    472: 152,
+    377: 52,
+    252: 184
+
 
 }
 
@@ -399,15 +412,38 @@ def add_to_road_graph(df, gdf, element, cm_types):
         return df
 
     coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
+    points = [Point(coord[0], coord[1]) for coord in coords]
+
     ls = LineString(coords)
     ls_crosses = gdf.geometry.crosses(ls)
 
     squares = gdf.loc[ls_crosses, ['x', 'y', 'xidx', 'yidx']]
     normalized_dists = []
+    # s = gdf.loc[ls_crosses]
+    # for poly in s.geometry:
+    #     	plt.plot(poly.exterior.xy[0], poly.exterior.xy[1], '-k')
     for idx in range(len(squares)):
         normalized_dists.append(ls.project(Point(squares['x'].values[idx], squares['y'].values[idx]), normalized=True))
 
     df['dist_along_way'] = normalized_dists
+
+    if name not in node_dict:
+        node_dict[name] = {}
+
+    for node_idx in range(element.countNodes()):
+        node_id = element.nodes()[node_idx].id()
+        # squares = gdf.loc[gdf.contains(points[0]), ['xidx', 'yidx']]
+        # if len(squares) > 0:
+        #     xidx, yidx = squares.values[0]
+        # else:
+        #     continue
+
+        if node_id not in node_dict[name]:
+            node_dict[name][node_id] = []
+        
+        node_dict[name][node_id].append(element.id())
+
+
 
     a = 1
 
@@ -431,7 +467,7 @@ def add_to_road_graph(df, gdf, element, cm_types):
     return df
 
 
-def type_random_area(df, name, cm_types):
+def type_random_area(df, gdf, name, cm_types):
     n_types = len(cm_types['types'])
     sub_df = df[df['name'] == name]
 
@@ -447,7 +483,7 @@ def type_random_area(df, name, cm_types):
             if key in df.columns:
                 df.loc[sub_group.index, key] = cm_type[key]
 
-def type_random_individual(df, name, cm_types):
+def type_random_individual(df, gdf, name, cm_types):
     n_types = len(cm_types['types'])
     sub_df = df[df['name'] == name]
 
@@ -466,7 +502,7 @@ def type_random_individual(df, name, cm_types):
                 if type(cm_type[key]) != list and key in df.columns:
                     df.loc[sub_df.index[idx], key] = cm_type[key]
 
-def cat2_random_individual(df, name, cm_types):
+def cat2_random_individual(df, gdf, name, cm_types):
     sub_df = df[df['name'] == name]
     for cat1, subgroup in sub_df.groupby(by='cat1'):
         cat2 = None
@@ -483,9 +519,10 @@ def cat2_random_individual(df, name, cm_types):
                     df.loc[subgroup.index[idx], 'cat2'] = cat2[cat2_idx]
         
 
-def road_pattern(df, name, cm_types):
+def road_pattern(df, gdf, name, cm_types):
     sub_df = df[df.name == name]
 
+    print('road elements')
     for group_id, group in sub_df.groupby(by='id'):
         sorted_group = group.sort_values(by='dist_along_way')
 
@@ -495,24 +532,74 @@ def road_pattern(df, name, cm_types):
             pattern = get_road_match_pattern(cut_sorted_group, idx)
 
             if pattern not in pattern2roadtile_dict:
-                print('pattern: {} -> {}'.format(pattern, re.findall('...', bin(pattern)[2:].zfill(9)[::-1])))
+                print('[{}] pattern: {} -> {}'.format(group_id, pattern, re.findall('...', bin(pattern)[2:].zfill(9)[::-1])))
             else:
                 if type(pattern2roadtile_dict[pattern]) == int:
                     pattern = pattern2roadtile_dict[pattern]
                 direction, road_row, road_col = pattern2roadtile_dict[pattern][0]
                 df.loc[idx, 'direction'] = 'Direction {}'.format(direction + 1)
                 df.loc[idx, 'cat2'] = 'Road Tile {}'.format(road_row * 3 + road_col + 1)
+
+    print('intersections')
+    for node_id in node_dict[name]:
+        if len(node_dict[name][node_id]) < 2:
+            continue
+
+        node = api.query('node/{}'.format(node_id))
+        coords = node.geometry()['coordinates']
+        point = Point(projection(coords[0], coords[1]))
+
+        squares = gdf.loc[gdf.contains(point), ['xidx', 'yidx']]
+        if len(squares) == 0:
+            continue
+
+        xidx, yidx = squares.values[0]
+        
+        pattern_df = None
+        way_ids = node_dict[name][node_id]
+        first_node_idx = None
+        for way_idx, way_id in enumerate(way_ids):
+            sorted_df = df.loc[df.id == way_id].sort_values(by='dist_along_way')
+            node_idx = sorted_df.loc[(df.xidx == xidx) & (df.yidx == yidx)].index[0]
+            node_idx_pos = np.where(sorted_df.index == node_idx)[0][0]
+            cut_sorted_df = sorted_df.loc[sorted_df.index[max(node_idx_pos-2,0):min(node_idx_pos+3, len(sorted_df.index))]]
+
+            if way_idx > 0:
+                df.drop(node_idx, inplace=True)
+            else:
+                first_node_idx = node_idx
+
+            if pattern_df is None:
+                pattern_df = cut_sorted_df
+            else:
+                pattern_df = pandas.concat([pattern_df, cut_sorted_df])
+
+        pattern = get_road_match_pattern(pattern_df, first_node_idx)
+
+        if pattern not in pattern2roadtile_dict:
+            print('pattern: {} -> {}'.format(pattern, re.findall('...', bin(pattern)[2:].zfill(9)[::-1])))
+        else:
+            if type(pattern2roadtile_dict[pattern]) == int:
+                pattern = pattern2roadtile_dict[pattern]
+            direction, road_row, road_col = pattern2roadtile_dict[pattern][0]
+            df.loc[first_node_idx, 'direction'] = 'Direction {}'.format(direction + 1)
+            df.loc[first_node_idx, 'cat2'] = 'Road Tile {}'.format(road_row * 3 + road_col + 1)
+
+
+
                 
 
 
 overpass = Overpass()
+api = Api()
 # query = overpassQueryBuilder(bbox=[7.30153, 50.93133, 7.30745, 50.93588], elementType='way')
 
 # bbox = [50.93133, 7.30153, 50.93588, 7.30745] # lat_min, lon_min, lat_max, lon_max
 projection = Proj(proj='utm', zone=32, ellps='WGS84')
 
-lon_min, lat_min = projection(379964.0, 5643796.0, inverse=True)
-lon_max, lat_max = projection(380804.0-8, 5644444.0-8, inverse=True)
+bbox_utm = [379964.0, 5643796.0, 380804.0-8, 5644444.0-8]
+lon_min, lat_min = projection(bbox_utm[0], bbox_utm[1], inverse=True)
+lon_max, lat_max = projection(bbox_utm[2], bbox_utm[3], inverse=True)
 
 bbox = [lat_min, lon_min, lat_max, lon_max]
 
@@ -521,10 +608,6 @@ query = overpassQueryBuilder(bbox=bbox, elementType=['way', 'relation'], include
 
 result = overpass.query(query)
 
-
-bbox_utm = []
-bbox_utm.extend(projection(bbox[1], bbox[0]))
-bbox_utm.extend(projection(bbox[3], bbox[2]))
 
 n_bins_x = np.ceil((bbox_utm[2] - bbox_utm[0]) / 8).astype(int)
 n_bins_y = np.ceil((bbox_utm[3] - bbox_utm[1]) / 8).astype(int)
@@ -536,8 +619,8 @@ xarr = []
 yarr = []
 xiarr = []
 yiarr = []
-for xidx, x in enumerate(np.linspace(bbox_utm[0] + 4, bbox_utm[0] + n_bins_x * 8, n_bins_x)):
-    for yidx, y in enumerate(np.linspace(bbox_utm[1] + 4, bbox_utm[1] + n_bins_y * 8, n_bins_y)):
+for xidx, x in enumerate(np.linspace(bbox_utm[0] + 4, bbox_utm[0] + 4 + (n_bins_x - 1) * 8, n_bins_x)):
+    for yidx, y in enumerate(np.linspace(bbox_utm[1] + 4, bbox_utm[1] + 4 + (n_bins_y - 1) * 8, n_bins_y)):
         xarr.append(x)
         yarr.append(y)
         xiarr.append(xidx)
@@ -603,6 +686,7 @@ grid_polygons = MultiPolygon(grid_polygons)
 df = None
 
 road_graph = nx.Graph()
+node_dict = {}
 # max_pass = -1
 # for name in config:
 #     if config['name']['pass'] > max_pass:
@@ -647,7 +731,12 @@ for element in result.elements():
                         interiors.append(interior_coords)
 
                     polygon = Polygon(exterior_coords, holes=interiors)
-                    to_fill = gdf.geometry.intersects(polygon)
+                    within = gdf.geometry.within(polygon)
+                    intersecting = gdf.geometry.intersects(polygon)
+                    is_border = np.bitwise_and(intersecting, ~within)
+                    is_largest_square_area = gdf.loc[is_border].geometry.intersection(polygon).area > 32
+
+                    to_fill = np.bitwise_or(within, is_largest_square_area)
                 elif element_geometry['type'] == 'LineString':
                     coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
                     ls = LineString(coords)
@@ -677,7 +766,7 @@ for name in config:
     cm_types = config[name]['cm_types']
     if 'post_process' in cm_types:
         for func_name in cm_types['post_process']:
-            globals()[func_name](df, name, cm_types)
+            globals()[func_name](df, gdf, name, cm_types)
 
 
 # for way in result.ways():
