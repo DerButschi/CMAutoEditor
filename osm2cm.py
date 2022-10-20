@@ -1,3 +1,17 @@
+#    Copyright 2022 Nicolas Möser
+
+#    Licensed under the Apache License, Version 2.0 (the "License");
+#    you may not use this file except in compliance with the License.
+#    You may obtain a copy of the License at
+
+#        http://www.apache.org/licenses/LICENSE-2.0
+
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS,
+#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#    See the License for the specific language governing permissions and
+#    limitations under the License. 
+
 from unicodedata import category
 from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
 from OSMPythonTools.api import Api
@@ -12,6 +26,7 @@ import geopandas
 import re
 import networkx as nx
 from sklearn import neighbors
+from profile.general import road_tiles
 
 PAGE_N_SQUARES_X = 104
 PAGE_N_SQUARES_Y = 60
@@ -55,194 +70,194 @@ config = {
         },
         'pass': 2
     },
-    'foot_path': {
-        'tags': [
-            ('highway', 'footway'),
-            ('highway', 'path')
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Road', 'cat1': 'Gravel Road', 'tags': [('highway', 'footway'), ('highway', 'footway')]},
-            ],
-            'process': [
-                'type_from_tag',
-                'add_to_road_graph'
-            ],
-            'post_process': {
-                'road_pattern'
-            }
-        },
-        'pass': 2,
-    },
-    'water': {
-        'tags': [
-            ('water', 'river'),
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Ground 2', 'cat1': 'Water', 'tags': [('water', 'river')]},
-            ],
-            'process': [
-                'type_from_tag'
-            ]
-        },
-        'pass': 3,
-    },
+    # 'foot_path': {
+    #     'tags': [
+    #         ('highway', 'footway'),
+    #         ('highway', 'path')
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Road', 'cat1': 'Gravel Road', 'tags': [('highway', 'footway'), ('highway', 'footway')]},
+    #         ],
+    #         'process': [
+    #             'type_from_tag',
+    #             'add_to_road_graph'
+    #         ],
+    #         'post_process': {
+    #             'road_pattern'
+    #         }
+    #     },
+    #     'pass': 2,
+    # },
+    # 'water': {
+    #     'tags': [
+    #         ('water', 'river'),
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 2', 'cat1': 'Water', 'tags': [('water', 'river')]},
+    #         ],
+    #         'process': [
+    #             'type_from_tag'
+    #         ]
+    #     },
+    #     'pass': 3,
+    # },
     
-    'mixed_forest': {
-        'tags': [
-            ('landuse', 'forest'),
-            ('natural', 'wood')
-        ],
-        'exclude_tags': {
-            'leaf_type': 'broadleaved',
-        },
-        'cm_types': {
-            'types': [
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 3', 'weight': 1},
-            ],
-            'post_process': [
-                'type_random_individual',
-            ]
-        },
-        'pass': 1
-    },
+    # 'mixed_forest': {
+    #     'tags': [
+    #         ('landuse', 'forest'),
+    #         ('natural', 'wood')
+    #     ],
+    #     'exclude_tags': {
+    #         'leaf_type': 'broadleaved',
+    #     },
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 3', 'weight': 1},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual',
+    #         ]
+    #     },
+    #     'pass': 1
+    # },
 
-    'broadleaved_forest': {
-        'tags': [
-            ('landuse', 'forest'),
-            ('natural', 'wood')
-        ],
-        'required_tags': {
-            'leaf_type': 'broadleaved',
-        },
-        'cm_types': {
-            'types': [
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
-            ],
-            'post_process': [
-                'type_random_individual',
-            ]
-        },
-        'pass': 1
-    },
+    # 'broadleaved_forest': {
+    #     'tags': [
+    #         ('landuse', 'forest'),
+    #         ('natural', 'wood')
+    #     ],
+    #     'required_tags': {
+    #         'leaf_type': 'broadleaved',
+    #     },
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual',
+    #         ]
+    #     },
+    #     'pass': 1
+    # },
 
-    'mixed_bushes': {
-        'tags': [
-            ('natural', 'scrub')
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 1', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 2', 'weight': 2.0},
-                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 3', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 1', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 2', 'weight': 2.0},
-                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 3', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 1', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 2', 'weight': 2.0},
-                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 3', 'weight': 1.0},
-            ],
-            'post_process': [
-                'type_random_individual',
-            ]
-        },
-        'pass': 1
-    },
+    # 'mixed_bushes': {
+    #     'tags': [
+    #         ('natural', 'scrub')
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 1', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 2', 'weight': 2.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 3', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 1', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 2', 'weight': 2.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 3', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 1', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 2', 'weight': 2.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 3', 'weight': 1.0},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual',
+    #         ]
+    #     },
+    #     'pass': 1
+    # },
 
-    'farmland': {
-        'tags': [
-            ('landuse', 'farmland'),
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Ground 2', 'cat1': 'Plow NS', 'weight': 1.0},
-                {'menu': 'Ground 2', 'cat1': 'Plow EW', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 1', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 2', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 3', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 4', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 5', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 6', 'weight': 1.0},
-            ],
-            'post_process': [
-                'type_random_area'
-            ]
-        },
-        'pass': 0
-    },
+    # 'farmland': {
+    #     'tags': [
+    #         ('landuse', 'farmland'),
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 2', 'cat1': 'Plow NS', 'weight': 1.0},
+    #             {'menu': 'Ground 2', 'cat1': 'Plow EW', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 1', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 2', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 3', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 4', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 5', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 6', 'weight': 1.0},
+    #         ],
+    #         'post_process': [
+    #             'type_random_area'
+    #         ]
+    #     },
+    #     'pass': 0
+    # },
 
-    'grassland': {
-        'tags': [
-            ('landuse', 'grass')
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Ground 1', 'cat1': 'Grass T', 'weight': 1.0},
-                {'menu': 'Ground 1', 'cat1': 'Grass TY', 'weight': 1.0},
-                {'menu': 'Ground 1', 'cat1': 'Weeds', 'weight': 1.0},
-                {'menu': 'Ground 1', 'cat1': 'Grass XT', 'weight': 1.0},
-                {'menu': 'Ground 1', 'cat1': 'Grass XTY', 'weight': 1.0},
-            ],
-            'post_process': [
-                'type_random_individual'
-            ],
-        }
-    },
+    # 'grassland': {
+    #     'tags': [
+    #         ('landuse', 'grass')
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 1', 'cat1': 'Grass T', 'weight': 1.0},
+    #             {'menu': 'Ground 1', 'cat1': 'Grass TY', 'weight': 1.0},
+    #             {'menu': 'Ground 1', 'cat1': 'Weeds', 'weight': 1.0},
+    #             {'menu': 'Ground 1', 'cat1': 'Grass XT', 'weight': 1.0},
+    #             {'menu': 'Ground 1', 'cat1': 'Grass XTY', 'weight': 1.0},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual'
+    #         ],
+    #     }
+    # },
 
-    'construction_site': {
-        'tags': [
-            ('landuse', 'construction')
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Ground 1', 'cat1': 'Dirt', 'weight': 1.0},
-            ],
-            'post_process': [
-                'type_random_individual'
-            ]
-        }
-    },
+    # 'construction_site': {
+    #     'tags': [
+    #         ('landuse', 'construction')
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 1', 'cat1': 'Dirt', 'weight': 1.0},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual'
+    #         ]
+    #     }
+    # },
 
     # 'residential_buildings': {
     #     'tags': [
@@ -359,47 +374,47 @@ pattern2roadtile_dict = {
 }
 
 pin2pin_dict = {
-    1: [(6, 2), (20, 2), (7, 2)],
-    2: [(13, 2), (16, 2)],
-    3: [(13, 1), (12, 2), (8, 2), (18, 2), (14, 2)],
-    4: [(10, 2), (13, 2)],
-    5: [(6, 2), (12, 2), (20, 2), (19, 2)],
-    6: [(1, 2), (5, 2), (11, 2)],
-    7: [(1, 2), (18, 2), (2)],
-    8: [(3, 2), (18, 1), (17, 2), (13, 2), (19, 2)],
-    9: [(15, 2), (18, 2)],
-    10: [(4, 2), (11, 2)],
-    11: [(6, 2), (10, 2), (17, 2)],
-    12: [(3, 2), (6, 2)],
-    13: [(3, 1), (4, 2), (8, 2), (18, 2), (2, 2)],
-    14: [(3, 2), (20, 2)],
-    15: [(9, 2), (16, 2)],
-    16: [(2, 2), (15, 2)],
-    17: [(8, 2), (11, 2)],
-    18: [(3, 2), (8, 1), (13, 2), (9, 2), (7, 2)],
-    19: [(8, 2), (5, 2)],
-    20: [(1, 2), (14, 2), (5, 2)],
+    1: [(6, 0.7), (20, 0.7), (7, 1.1)],
+    2: [(13, 1.1), (16, 1.1)],
+    3: [(13, 1), (12, 1.1), (8, 1.1), (18, 1.1), (14, 1.1)],
+    4: [(10, 1.1), (13, 1.1)],
+    5: [(6, 0.7), (12, 1.1), (20, 0.7), (19, 1.1)],
+    6: [(1, 0.7), (5, 0.7), (11, 0.7)],
+    7: [(1, 1.1), (18, 1.1)],
+    8: [(3, 1.1), (18, 1), (17, 1.1), (13, 1.1), (19, 1.1)],
+    9: [(15, 1.1), (18, 1.1)],
+    10: [(4, 1.1), (11, 0.7)],
+    11: [(6, 0.7), (10, 0.7), (17, 1.1), (16, 0.7)],
+    12: [(3, 1.1), (6, 1.1)],
+    13: [(3, 1), (4, 1.1), (8, 1.1), (18, 1.1), (2, 1.1)],
+    14: [(3, 1.1), (20, 1.1)],
+    15: [(9, 1.1), (16, 0.7)],
+    16: [(2, 1.1), (15, 0.7), (11, 0.7)],
+    17: [(8, 1.1), (11, 1.1)],
+    18: [(3, 1.1), (8, 1), (13, 1.1), (9, 1.1), (7, 1.1)],
+    19: [(8, 1.1), (5, 1.1)],
+    20: [(1, 0.7), (14, 1.1), (5, 0.7)],
 }
 
 start_pin_dict = {
-    (0, 1): 3,
-    (0, -1): 13,
-    (1, 0): 18,
-    (-1, 0): 8,
+    (0, 1): [3],
+    (0, -1): [13],
+    (1, 0): [18],
+    (-1, 0): [8],
 }
 
 end_pin_dict = {
-    (0, 1): 13,
-    (0, -1): 3,
-    (1, 0): 8,
-    (-1, 0): 18,
+    (0, 1): [13],
+    (0, -1): [3],
+    (1, 0): [8],
+    (-1, 0): [18],
 }
 
 start_intersection_dict = {
     (0, 1): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 16, 17, 18, 19, 20],
     (0, -1): [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-    (1, 0): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-    (-1, 0): [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    (-1, 0): [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    (1, 0): [1, 2, 3, 4, 5, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
 }
 
 end_intersection_dict = {
@@ -440,6 +455,76 @@ square2square_dict = {
     }
 }
 
+
+# direction, row, col
+pin2roadtile_dict = {
+    (3, 13): [(0, 0, 0), (2, 0, 0)],
+    (1, 6): [(0, 0, 1)],
+    (5, 6): [(0, 0, 1)],
+    (3, 12): [(0, 0, 2)],
+    (3, 8): [(0, 1, 0)],
+    (4, 10): [(0, 1, 1)],
+    (3, 8, 13): [(0, 1, 2)],
+    (1, 5, 6, 20): [(0, 2, 0)],
+    (4, 9, 13): [(0, 2, 1)],
+    (3, 8, 13, 18): [(0, 2, 2), (1, 2, 2), (2, 2, 2), (3, 2, 2)],
+    (3, 14): [(0, 3, 0)],
+    (2, 16): [(0, 3, 1)],
+    (2, 13, 16): [(0, 3, 2)],
+
+    (8, 18): [(1, 0, 0), (3, 0, 0)],
+    (6, 11): [(1, 0, 1)],
+    (10, 11): [(1, 0, 1)],
+    (8, 17): [(1, 0, 2)],
+    (8, 13): [(1, 1, 0)],
+    (9, 15): [(1, 1, 1)],
+    (8, 13, 18): [(1, 1, 2)],
+    (5, 6, 10, 11): [(1, 2, 0)],
+    (9, 15, 18): [(1, 2, 1)],
+    (8, 19): [(1, 3, 0)],
+    (1, 7): [(1, 3, 1)],
+    (1, 7, 18): [(1, 3, 2)],
+
+    (11, 16): [(2, 0, 1)],
+    (15, 16): [(2, 0, 1)],
+    (2, 13): [(2, 0, 2)],
+    (13, 18): [(2, 1, 0)],
+    (14, 20): [(2, 1, 1)],
+    (3, 13, 18): [(2, 1, 2)],
+    (10, 11, 15, 16): [(2, 2, 0)],
+    (3, 14, 19): [(2, 2, 1)],
+    (4, 13): [(2, 3, 0)],
+    (6, 12): [(2, 3, 1)],
+    (3, 6, 12): [(2, 3, 2)],
+
+    (1, 20): [(3, 0, 1)],
+    (4, 20): [(3, 0, 1)],
+    (7, 18): [(3, 0, 2)],
+    (3, 18): [(3, 1, 0)],
+    (5, 19): [(3, 1, 1)],
+    (3, 8, 18): [(3, 1, 2)],
+    (1, 15, 16, 20): [(3, 2, 0)],
+    (5, 8, 19): [(3, 2, 1)],
+    (9, 18): [(3, 3, 0)],
+    (11, 17): [(3, 3, 1)],
+    (8, 11, 17): [(3, 3, 2)],
+
+}
+
+road_direction_dict = {
+    (0, 1): 'u',
+    (0, -1): 'd',
+    (1, 0): 'r',
+    (-1, 0): 'l',
+}
+
+opposite_road_direction_dict = {
+    'u': 'd',
+    'd': 'u',
+    'r': 'l',
+    'l': 'r'
+}
+
 # def get_road_match_pattern(gdf, idx):
 #     tile_xidx = gdf.xidx[idx]
 #     tile_yidx = gdf.yidx[idx]
@@ -457,6 +542,61 @@ square2square_dict = {
 #             exponent += 1
     
 #     return sum
+
+def extract_connection_direction_from_node(node_id, other_node_id, road_graph):
+    squares = road_graph.edges[node_id, other_node_id]['squares']
+    node_square = road_graph.nodes[node_id]['square']
+    if squares[0] != node_square:
+        squares = squares[::-1]
+    
+    return road_direction_dict[(squares[1][0] - squares[0][0], squares[1][1] - squares[0][1])]
+
+def extract_valid_tiles_from_node(node_id, other_node_id, road_graph, edge_graphs):
+    # direction_to_other_node = extract_connection_direction_from_node(node_id, other_node_id, road_graph)
+    valid_connections = []
+    if (node_id, other_node_id) in edge_graphs:
+        graph = edge_graphs[(node_id, other_node_id)]['graph']
+        if nx.has_path(graph, 'start', 'end'):
+            paths = nx.all_shortest_paths(graph, 'start', 'end', weight='cost')
+            for path in paths:
+                valid_connections.append(path[1][0])
+    elif (other_node_id, node_id) in edge_graphs:
+        graph = nx.reverse_view(edge_graphs[(other_node_id, node_id)]['graph'])
+        if nx.has_path(graph, 'end', 'start'):
+            paths = nx.all_shortest_paths(graph, 'end', 'start', weight='cost')
+            for path in paths:
+                valid_connections.append(path[1][0])
+
+    return valid_connections
+    
+
+
+
+def extract_required_directions(node_id, neighbors, road_graph):
+    required_directions = []
+    if len(neighbors) > 0:
+        for neighbor in neighbors:
+            direction_out = extract_connection_direction_from_node(node_id, neighbor, road_graph)
+
+            required_directions.append(direction_out)
+
+    return required_directions
+
+def fix_tile_for_node(node_id, edge_graphs, tile):
+    for node_pair in edge_graphs:
+        if node_id in node_pair:
+            graph = edge_graphs[node_pair]['graph']
+            nodes_to_delete = []
+            if node_id == node_pair[0]:
+                for graph_node in nx.neighbors(graph, 'start'):
+                    if graph_node[0] != tile:
+                        nodes_to_delete.append(graph_node)
+            else:
+                for graph_node in nx.neighbors(nx.reverse_view(graph), 'end'):
+                    if graph_node[0] != tile:
+                        nodes_to_delete.append(graph_node)
+
+            graph.remove_nodes_from(nodes_to_delete)
 
 def get_road_match_pattern(gdf, idx):
     tile_xidx = gdf.xidx[idx]
@@ -495,63 +635,107 @@ def add_to_road_graph(df, gdf, element, cm_types):
         return df
 
     if name not in road_graphs:
-        road_graph = nx.Graph
-        road_graphs[name] = road_graph
+        road_graphs[name] = nx.Graph()
+
+    road_graph = road_graphs[name]
 
     coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
     points = [Point(coord[0], coord[1]) for coord in coords]
 
     ls = LineString(coords)
-    ls_crosses = gdf.geometry.crosses(ls)
+    # ls_crosses = np.bitwise_or(gdf.geometry.crosses(ls), gdf.geometry.contains(ls))
 
-    squares = gdf.loc[ls_crosses, ['x', 'y', 'xidx', 'yidx']]
-    normalized_dists = []
+    # squares = gdf.loc[ls_crosses, ['x', 'y', 'xidx', 'yidx']]
+    squares = gdf.loc[gdf.sindex.query(ls, predicate='intersects')]
+    ls_intersection = squares.geometry.intersection(ls)
+    intersection_mid_points = []
+    for idx in range(len(ls_intersection.values)):
+        g = ls_intersection.values[idx]
+        if type(g) == LineString:
+            intersection_mid_points.append(g.interpolate(0.5, normalized=True))
+        elif type(g) == MultiLineString:
+            for gidx in range(len(g.geoms)):
+                intersection_mid_points.append(g.geoms[gidx].interpolate(0.5, normalized=True))
+        else:
+            raise Exception
+
+    if len(intersection_mid_points) > 1:
+        intersection_mid_points = np.array(intersection_mid_points)
+        intersection_mid_point_dist = [ls.project(mid_point) for mid_point in intersection_mid_points]
+        sorted_indices = np.argsort(intersection_mid_point_dist)
+        sorted_intersection_mid_points = intersection_mid_points[sorted_indices]
+    else:
+        sorted_intersection_mid_points = intersection_mid_points
+
+    squares_along_way = []
+    for p in sorted_intersection_mid_points:
+        gdf_point = gdf.loc[gdf.sindex.query(p, predicate='within')]
+        if len(gdf_point) > 0:
+            # xidx, yidx = gdf_ls.loc[gdf.contains(point), ['xidx', 'yidx']].values[0]
+            xidx, yidx = gdf_point.loc[:, ['xidx', 'yidx']].values[0]
+            squares_along_way.append((xidx, yidx))
+
+    # squares = squares.sort_index()
+
+    # normalized_dists = []
     # s = gdf.loc[ls_crosses]
     # for poly in s.geometry:
     #     	plt.plot(poly.exterior.xy[0], poly.exterior.xy[1], '-k')
-    for idx in range(len(squares)):
-        normalized_dists.append(ls.project(Point(squares['x'].values[idx], squares['y'].values[idx]), normalized=True))
+    # for idx in range(len(squares)):
+    #     normalized_dists.append(ls.project(Point(squares['x'].values[idx], squares['y'].values[idx]), normalized=True))
 
-    df['dist_along_way'] = normalized_dists
+    # df['dist_along_way'] = normalized_dists
 
-    if name not in node_dict:
-        node_dict[name] = {}
-
-    gdf_ls = gdf.loc[ls_crosses]
+    # gdf_ls = gdf.loc[ls_crosses]
     nodes = []
     for node_idx in range(element.countNodes()):
         node_id = element.nodes()[node_idx].id()
         point = Point(coords[node_idx])
-        gdf_point = gdf_ls.loc[gdf.contains(point)]
+        # gdf_point = gdf_ls.loc[gdf.contains(point)]
+        gdf_point = gdf.loc[gdf.sindex.query(point, 'within')]
         if len(gdf_point) > 0:
-            xidx, yidx = gdf_ls.loc[gdf.contains(point), ['xidx', 'yidx']].values[0]
+            # xidx, yidx = gdf_ls.loc[gdf.contains(point), ['xidx', 'yidx']].values[0]
+            xidx, yidx = gdf_point.loc[:, ['xidx', 'yidx']].values[0]
             nodes.append((node_id, xidx, yidx))
 
-    sorted_df = df.sort_values(by='dist_along_way')
-    go_on = True
-    df_pos_idx = 0
-    node_idx = 0
-    current_edge = None
-    while go_on:
-        node_id, node_xidx, node_yidx = nodes[node_idx]
-        df_xidx, df_yidx = sorted_df.loc[sorted_df.index[df_pos_idx], ['xidx', 'yidx']].values
+    # sorted_df = df.sort_values(by='dist_along_way')
 
-        if node_xidx == df_xidx and node_yidx == df_yidx:
-            if current_edge is None:
-                current_edge = [(node_id, node_xidx, node_yidx)]
-                node_idx += 1
-            else:
-                current_edge.append((node_id, node_xidx, node_yidx))
-                road_graph.add_edge(current_edge[0][0], current_edge[-1][0], squares=[edge_element[1:3] for edge_element in current_edge])
-                road_graph.nodes[current_edge[0][0]]['square'] = current_edge[0][1:3] 
-                road_graph.nodes[current_edge[-1][0]]['square'] = current_edge[-1][1:3] 
-                current_edge = [current_edge[-1]]
-                node_idx += 1
-        else:
-            df_pos_idx += 1
-        
-        if df_pos_idx == len(sorted_df) or node_idx == len(nodes):
-            go_on = False
+    node_idx = 0
+    current_squares = []
+    current_nodes = []
+    for sq_idx, sq in enumerate(squares_along_way):
+        df_xidx, df_yidx = sq
+
+        current_squares.append((df_xidx, df_yidx))
+        if len(current_squares) > 1 and (np.abs(current_squares[-2][0] - current_squares[-1][0]) > 1 or np.abs(current_squares[-2][1] - current_squares[-1][1]) > 1):
+            current_squares = [current_squares[-1]]
+            current_nodes = []
+
+        while node_idx < len(nodes) and nodes[node_idx][1] == df_xidx and nodes[node_idx][2] == df_yidx:
+            node_id, node_xidx, node_yidx = nodes[node_idx]
+            current_nodes.append((node_id, node_xidx, node_yidx))
+            if len(current_nodes) == 2:
+                road_graph.add_edge(current_nodes[0][0], current_nodes[1][0], squares=current_squares)
+                square_diffs = [(current_squares[idx][0] - current_squares[idx-1][0], current_squares[idx][1] - current_squares[idx-1][1]) for idx in range(1, len(current_squares))]
+                road_graph.nodes[current_nodes[0][0]]['square'] = current_nodes[0][1:3]
+                road_graph.nodes[current_nodes[1][0]]['square'] = current_nodes[1][1:3]
+
+                current_nodes = [current_nodes[1]]
+                current_squares = [current_squares[-1]]
+            
+            node_idx += 1
+
+        if len(current_nodes) == 0:
+            current_nodes.append(('generic_{}'.format(globals()['generic_node_cnt']), df_xidx, df_yidx))
+            globals()['generic_node_cnt'] += 1
+
+        if sq_idx == len(squares_along_way) - 1 and len(current_squares) > 1 and len(current_nodes) == 1:
+            current_nodes.append(('generic_{}'.format(globals()['generic_node_cnt']), df_xidx, df_yidx))
+            globals()['generic_node_cnt'] += 1
+            road_graph.add_edge(current_nodes[0][0], current_nodes[1][0], squares=current_squares)
+            square_diffs = [(current_squares[idx][0] - current_squares[idx-1][0], current_squares[idx][1] - current_squares[idx-1][1]) for idx in range(1, len(current_squares))]
+            road_graph.nodes[current_nodes[0][0]]['square'] = current_nodes[0][1:3]
+            road_graph.nodes[current_nodes[1][0]]['square'] = current_nodes[1][1:3]
         
     return df
 
@@ -623,7 +807,10 @@ def road_navigation_graph(df, gdf, name, cm_types):
         edge2 = road_graph.edges[neighbor2, node_id]
         new_squares = []
         new_squares.extend(edge1['squares'] if edge1['squares'][-1] == node['square'] else edge1['squares'][::-1])
-        new_squares.extend(edge2['squares'] if edge2['squares'][0] == node['square'] else edge1['squares'][::-1])
+        new_squares.extend(edge2['squares'][1::] if edge2['squares'][0] == node['square'] else edge2['squares'][::-1][1::])
+
+        square_diffs = [(new_squares[idx][0] - new_squares[idx-1][0], new_squares[idx][1] - new_squares[idx-1][1]) for idx in range(1, len(new_squares))]
+        assert (-1, -1) not in square_diffs
 
         road_graph.add_edge(neighbor1, neighbor2, squares=new_squares)
         road_graph.remove_node(node_id)
@@ -632,44 +819,198 @@ def road_navigation_graph(df, gdf, name, cm_types):
     for node in road_graph.nodes:
         node_pos[node] = road_graph.nodes[node]['square']
 
-    # plt.figure()
-    # plt.axis('equal')
-    # nx.draw_networkx(road_graph, pos=node_pos)
-    # plt.show()
+    plt.figure()
+    plt.axis('equal')
+    nx.draw_networkx(road_graph, pos=node_pos)
+    plt.show()
 
     edge_graphs = {}
     for edge in road_graph.edges:
         graph = nx.DiGraph()
         node1_id = edge[0]
         node2_id = edge[1]
-        squares = edge['squares']
+        squares = road_graph.edges[node1_id, node2_id]['squares']
+        other_node1_neighbors = [neighbor for neighbor in nx.neighbors(road_graph, node1_id) if neighbor != node2_id]
+        other_node2_neighbors = [neighbor for neighbor in nx.neighbors(road_graph, node2_id) if neighbor != node1_id]
+
+        if len(squares) < 2:
+            continue
+
         if squares[0] == road_graph.nodes[node2_id]['square']:
             squares = squares[::-1]
 
-        last_pins = []
+        # last_output_pins = []
+        # last_direction = None
+        last_tiles = []
         for i_square in range(len(squares)):
             square = squares[i_square]
+            direction_in = None
+            direction_out = None
             if i_square < len(squares) - 1:
-                square_diff = (squares[i_square + 1][0] - square[0], squares[i_square + 1][1] - square[1])
+                direction_out = road_direction_dict[(squares[i_square + 1][0] - square[0], squares[i_square + 1][1] - square[1])]
+            if i_square > 0:
+                direction_in = road_direction_dict[(squares[i_square - 1][0] - square[0], squares[i_square - 1][1] - square[1])]
 
             if i_square == 0:
-                if len(list(nx.neighbors(road_graph, node1_id))) == 1:
-                    input_pins = [start_pin_dict[square_diff]]
+                if len(other_node1_neighbors) == 0:
+                    direction_in = opposite_road_direction_dict[direction_out]
+                    valid_tiles = road_tiles[(road_tiles[direction_in] == (2,3)) & ~pandas.isnull(road_tiles[direction_out]) & (road_tiles['n_connections'] == 2)].index.values
                 else:
-                    input_pins = [start_intersection_dict[square_diff]]
-            else:
-                input_pins = [square2square_dict[square_diff][pin] for pin in last_pins]
+                    directions_in = extract_required_directions(node1_id, other_node1_neighbors, road_graph)
+                    connection_condition = ~pandas.isnull(road_tiles[directions_in[0]]) & (road_tiles['n_connections'] == len(directions_in) + 1)
+                    for dir_idx in range(1, len(directions_in)):
+                        connection_condition = np.bitwise_and(connection_condition, ~pandas.isnull(road_tiles[directions_in[dir_idx]]))
 
-            last_pins = []
-            output_pins = list(square2square_dict[square_diff].keys())
-            for in_pin in input_pins:
-                for connected_pin, weight in pin2pin_dict[in_pin]:
-                    if connected_pin in output_pins:
-                        graph.add_edge((in_pin, i_square), (connected_pin, i_square), weight=weight)
-                        last_pins.append(connected_pin)
-
-            
+                    valid_tiles = road_tiles[~pandas.isnull(road_tiles[direction_out]) & connection_condition].index.values
                     
+                last_tiles = valid_tiles
+                for tile in valid_tiles:
+                    graph.add_edge('start', (tile, i_square), cost=road_tiles.loc[tile, 'cost'])
+            elif 0 < i_square < len(squares) - 1:
+                last_direction_out = opposite_road_direction_dict[direction_in]
+                new_last_tiles = []
+                for last_tile in last_tiles:
+                    tile_connection = road_tiles.loc[last_tile, last_direction_out]
+                    valid_tiles = road_tiles.loc[(road_tiles[direction_in] == tile_connection) & ~pandas.isnull(road_tiles[direction_out]) & (road_tiles['n_connections'] == 2)].index.values
+                    for tile in valid_tiles:
+                        new_last_tiles.append(tile)
+                        graph.add_edge((last_tile, i_square - 1), (tile, i_square), cost=road_tiles.loc[tile, 'cost'])
+                
+                last_tiles = np.unique(new_last_tiles)
+            else:
+                last_direction_out = opposite_road_direction_dict[direction_in]
+                for last_tile in last_tiles:
+                    tile_connection = road_tiles.loc[last_tile, last_direction_out]
+                    if len(other_node2_neighbors) == 0:
+                        direction_out = opposite_road_direction_dict[direction_in]
+                        valid_tiles = road_tiles.loc[(road_tiles[direction_in] == tile_connection) & (road_tiles[direction_out] == (2,3)) & (road_tiles['n_connections'] == 2)].index.values
+                    else:
+                        directions_out = extract_required_directions(node2_id, other_node2_neighbors, road_graph)
+                        connection_condition = ~pandas.isnull(road_tiles[directions_out[0]]) & (road_tiles['n_connections'] == len(directions_out) + 1)
+                        for dir_idx in range(1, len(directions_out)):
+                            connection_condition = np.bitwise_and(connection_condition, ~pandas.isnull(road_tiles[directions_out[dir_idx]]))
+
+                        valid_tiles = road_tiles.loc[(road_tiles[direction_in] == tile_connection) & connection_condition].index.values
+
+                    for tile in valid_tiles:
+                        graph.add_edge((last_tile, i_square - 1), (tile, i_square), cost=road_tiles.loc[tile, 'cost'])
+                        graph.add_edge((tile, i_square), 'end')
+
+        edge_graphs[(node1_id, node2_id)] = {'graph': graph, 'squares': squares}
+
+        #     if i_square < len(squares) - 1:
+        #         direction = (squares[i_square + 1][0] - square[0], squares[i_square + 1][1] - square[1])
+        #     else:
+        #         direction = (square[0] - squares[i_square - 1][0], square[1] - squares[i_square - 1][1])
+
+        #     if i_square == 0:
+        #         if len(list(nx.neighbors(road_graph, node1_id))) == 1:
+        #             input_pins = start_pin_dict[direction]
+        #         else:
+        #             input_pins = start_intersection_dict[direction]
+
+        #         for pin in input_pins:
+        #             graph.add_edge('start', (pin, i_square))
+        #     else:
+        #         input_pins = []
+        #         for pin in last_output_pins:
+        #             in_pin = square2square_dict[last_direction][pin]
+        #             graph.add_edge((pin, i_square - 1), (in_pin, i_square))
+        #             input_pins.append(in_pin)
+
+
+        #     output_pins = []
+        #     if i_square < len(squares) - 1:
+        #         target_pins = list(square2square_dict[direction].keys())
+        #     else:
+        #         if len(list(nx.neighbors(road_graph, node2_id))) == 1:
+        #             target_pins = end_pin_dict[direction]
+        #         else:
+        #             target_pins = end_intersection_dict[direction]
+
+        #     print(input_pins)
+        #     for in_pin in input_pins:
+        #         for connected_pin, weight in pin2pin_dict[in_pin]:
+        #             if connected_pin in target_pins:
+        #                 graph.add_edge((in_pin, i_square), (connected_pin, i_square), weight=weight)
+        #                 graph.nodes[(in_pin, i_square)]['square'] = square
+        #                 output_pins.append(connected_pin)
+
+        #     if i_square == len(squares) - 1:
+        #         for pin in output_pins:
+        #             graph.add_edge((pin, i_square), 'end')
+
+        #     last_output_pins = np.unique(output_pins)
+        #     last_direction = direction
+
+        # edge_graphs[(node1_id, node2_id)] = {'graph': graph, 'squares': squares}
+
+    for node_pair in edge_graphs:
+        node1_id, node2_id = node_pair
+        graph = edge_graphs[node_pair]['graph']
+        squares = edge_graphs[node_pair]['squares']
+
+        if not nx.has_path(graph, 'start', 'end'):
+            continue
+
+        node1_neighbors = [neighbor for neighbor in nx.neighbors(road_graph, node1_id) if neighbor != node2_id]
+        node2_neighbors = [neighbor for neighbor in nx.neighbors(road_graph, node2_id) if neighbor != node1_id]
+
+        valid_start_tiles = []
+        valid_end_tiles = []
+        for neighbor in node1_neighbors:
+            valid_start_tiles.extend(extract_valid_tiles_from_node(node1_id, neighbor, road_graph, edge_graphs))
+        for neighbor in node2_neighbors:
+            valid_end_tiles.extend(extract_valid_tiles_from_node(node2_id, neighbor, road_graph, edge_graphs))
+
+        valid_start_tiles = np.unique(valid_start_tiles)
+        valid_end_tiles = np.unique(valid_end_tiles)
+
+        paths = list(nx.all_shortest_paths(graph, 'start', 'end', weight='cost'))
+        valid_paths = []
+        valid_starts = False
+        valid_ends = False
+        for path in paths:
+            valid_start = False
+            valid_end = False
+            if len(node1_neighbors) == 0 or (len(node1_neighbors) > 0 and path[1][0] in valid_start_tiles):
+                valid_start = True
+            if len(node2_neighbors) == 0 or (len(node2_neighbors) > 0 and path[-2][0] in valid_end_tiles):
+                valid_end = True
+
+            valid_starts = valid_starts or valid_start
+            valid_ends = valid_ends or valid_end
+            if valid_start and valid_end:
+                valid_paths.append(path)
+
+        if len(valid_paths) == 0:
+            if valid_starts and not valid_ends:
+                reason_string = 'no valid end was found'    
+            elif not valid_starts and valid_ends:
+                reason_string = 'no valid start was found'
+            else:
+                reason_string = 'no valid start or end were found'
+            print('Could not find valid path from {} to {} because {}.'.format(node1_id, node2_id, reason_string))
+            continue
+
+        print('yeah!')
+        path = valid_paths[0][1:-1]
+        for idx in range(len(path)):
+            square = squares[idx]
+            direction, row, col = road_tiles.loc[path[idx][0], ['direction', 'row', 'col']]
+
+            tile_condition = (df.xidx == square[0]) & (df.yidx == square[1]) & (df.name == name)
+
+            df.loc[tile_condition, 'direction'] = 'Direction {}'.format(direction + 1)
+            df.loc[tile_condition, 'cat2'] = 'Road Tile {}'.format(row * 3 + col + 1)
+        
+        # if len(node1_neighbors) > 0:
+        fix_tile_for_node(node1_id, edge_graphs, path[0][0])
+        # if len(node2_neighbors) > 0:
+        fix_tile_for_node(node2_id, edge_graphs, path[-1][0])
+        
+        valid_paths = []
+        a = 1
                         
 
 
@@ -842,7 +1183,7 @@ grid_polygons = MultiPolygon(grid_polygons)
 
 # df = pandas.DataFrame(columns=['x', 'y', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name'])
 df = None
-
+generic_node_cnt = 0
 road_graphs = {}
 
 for element in result.elements():
@@ -893,7 +1234,7 @@ for element in result.elements():
                 elif element_geometry['type'] == 'LineString':
                     coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
                     ls = LineString(coords)
-                    to_fill = gdf.geometry.crosses(ls)
+                    to_fill = np.bitwise_or(gdf.geometry.crosses(ls), gdf.geometry.contains(ls))
                 else:
                     raise Exception('geometry {} not yet covered'.format(element_geometry['type']))
 
@@ -915,14 +1256,14 @@ for element in result.elements():
     if not matched:
         print(element.tags(), element.id())
 
-node_pos = {}
-for node in road_graph.nodes:
-    node_pos[node] = road_graph.nodes[node]['square']
+# node_pos = {}
+# for node in road_graphs['road'].nodes:
+#     node_pos[node] = road_graphs['road'].nodes[node]['square']
 
-plt.figure()
-plt.axis('equal')
-nx.draw_networkx(road_graph, pos=node_pos)
-plt.show()
+# plt.figure()
+# plt.axis('equal')
+# nx.draw_networkx(road_graphs['road'], pos=node_pos)
+# plt.show()
 
 for name in config:
     cm_types = config[name]['cm_types']
