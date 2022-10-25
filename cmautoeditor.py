@@ -13,9 +13,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from sre_constants import GROUPREF_EXISTS
+# from sre_constants import GROUPREF_EXISTS
 from time import sleep
-from tokenize import group
+# from tokenize import group
 import pyautogui
 import numpy as np
 import pandas
@@ -275,8 +275,8 @@ def set_ground(df, map_df):
     for group_info, group in df.groupby(by=['menu', 'cat1', 'cat2', 'direction']):
         if group_info[0] not in MENU_DICT:
             continue
-        if group_info[0] != 'Road':
-            continue
+        # if group_info[0] != 'Road':
+        #     continue
         # ground_menu = MENU_DICT[group_info[0]]
         # if group_info[0] == 'Ground 2':
         #     ground_type = GROUND_2_DICT[group_info[1]]
@@ -339,8 +339,8 @@ if __name__ == '__main__':
         total_n_squares_x = map_df.x.max() + 1
         total_n_squares_y = map_df.y.max() + 1
 
-        n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X)
-        n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y)
+        n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X, dtype=int)
+        n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y, dtype=int)
         n_x_remain = (np.floor(n_x_remain / 2) * 2).astype(int)
         n_y_remain = (np.floor(n_y_remain / 2) * 2).astype(int)
 
