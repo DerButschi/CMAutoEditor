@@ -20,6 +20,15 @@ import skimage
 import matplotlib.pyplot as plt
 import argparse
 
+def z_on_plain(p1, p2, x, y):
+    f1 = p2[0] - p1[0]
+    f2 = p2[1] - p1[1]
+    f3 = p2[2] - p1[2]
+
+    z = f1 * f3 / (np.square(f1) + np.square(f2)) * (x - p1[0]) + f2 * f3 / (np.square(f1) + np.square(f2)) * (y - p1[1]) + p1[2]
+
+    return z
+
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dgm-dir', '-d', required=True, help='directory in which the dgm files are located')
 argparser.add_argument('--bounding-box', '-b', required=True, help='lower left and upper right corner of the box in which data is to be extracted (min x, min y, max x, max y)',
@@ -27,6 +36,7 @@ argparser.add_argument('--bounding-box', '-b', required=True, help='lower left a
 )
 argparser.add_argument('--contour', '-c', required=False, type=float, help='contour level distance (default: 5 m)', default=5.0)
 argparser.add_argument('--output-name', '-o', required=False, type=str, help='output name (without file extension) (default: output)', default='output')
+argparser.add_argument('--water-level-correction', '-w', required=False, type=float, nargs=4, help='correct elevation for the fact that in CM water does not flow downhill expects x,y coordinates of lowest and highest water level of one river.')
 
 args = argparser.parse_args()
 
@@ -54,8 +64,29 @@ print('This corresponds to {} x {} squares in CM.'.format(np.floor(grid_size_x /
 grid_size_x_cm = np.floor(grid_size_x / 8).astype(int)
 grid_size_y_cm = np.floor(grid_size_y / 8).astype(int)
 
+if args.water_level_correction is not None:
+    p1_x_condition = df.x.between(args.water_level_correction[0] - grid_cell_x / 2, args.water_level_correction[0] + grid_cell_x / 2)
+    p1_y_condition = df.y.between(args.water_level_correction[1] - grid_cell_y / 2, args.water_level_correction[1] + grid_cell_y / 2)
+    p2_x_condition = df.x.between(args.water_level_correction[2] - grid_cell_x / 2, args.water_level_correction[2] + grid_cell_x / 2)
+    p2_y_condition = df.y.between(args.water_level_correction[3] - grid_cell_y / 2, args.water_level_correction[3] + grid_cell_y / 2)
+
+    z1 = df.loc[p1_x_condition & p1_y_condition, 'z']
+    z2 = df.loc[p2_x_condition & p2_y_condition, 'z']
+
+    if len(z1) == 0 or len(z2) == 0:
+        print('One of the specified points is outside of the selected area. Water level correction cannot be applied.')
+    else:
+        z1 = z1.values[0]
+        z2 = z2.values[0]
+        print('Water level correction requested. The difference in height between both points is {} m.'.format(z2 - z1))
+
+        zp = z_on_plain((args.water_level_correction[0], args.water_level_correction[1], z1), (args.water_level_correction[2], args.water_level_correction[3], z2), df.x, df.y)
+
+        df.z = df.z - (zp - z1)
+
 df.x = df.x - df.x.min()
 df.y = df.y - df.y.min()
+
 
 if df.z.min() < 20:
     df.z = df.z - np.floor(df.z.min()) + 20
@@ -87,7 +118,7 @@ height_map_reduced_df.to_csv('{}.csv'.format(args.output_name))
 hm = height_map_reduced.T
 zmin = np.floor(height_map_reduced_df.z.min()).astype(int)
 zmax = np.ceil(height_map_reduced_df.z.max()).astype(int)
-plt.figure(); plt.axis('equal'); cs = plt.contour(hm, levels=np.arange(zmin-20, zmax+args.contour, args.contour), colors='k', linewidths=0.05); plt.clabel(cs, inline=0, fontsize=1, fmt='%d'); plt.axis('off')
+plt.figure(); plt.axis('equal'); cs = plt.contour(hm, levels=np.arange(0, zmax+args.contour, args.contour), colors='k', linewidths=0.05); plt.clabel(cs, inline=0, fontsize=1, fmt='%d'); plt.axis('off')
 plt.tight_layout(pad=1.00)
 plt.savefig("{}_contour.png".format(args.output_name), bbox_inches='tight', dpi=1200, pad_inches=0)
 
@@ -113,12 +144,8 @@ df_contour = df_contour.drop_duplicates()
 if df_contour is not None:
     df_contour.to_csv("{}_contour.csv".format(args.output_name))
 
-# a = 1
 plt.figure()
-plt.imshow(height_map_reduced.T[::-1,:], vmin=zmin, vmax=zmax)
-# plt.savefig('heightmap.png')
-# pickle.dump(height_map_reduced, open('heightmap.pkl', 'wb'))
+plt.imshow(height_map_reduced.T, vmin=zmin, vmax=zmax, origin='lower')
 plt.savefig('{}.png'.format(args.output_name))
-# pickle.dump(height_map_reduced, open('heightmap.pkl', 'wb'))
 
 
