@@ -69,6 +69,9 @@ def set_height(current_height, target_height):
 
 def process_segment(grid, start_height):
     print(grid.shape)
+    if len(grid[grid >= 0]) == 0:
+        return start_height
+        
     values = np.unique(grid[grid >= 0])
     min_height = np.min(grid[grid >= 0])
     

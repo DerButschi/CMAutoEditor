@@ -37,6 +37,7 @@ argparser.add_argument('--bounding-box', '-b', required=True, help='lower left a
 argparser.add_argument('--contour', '-c', required=False, type=float, help='contour level distance (default: 5 m)', default=5.0)
 argparser.add_argument('--output-name', '-o', required=False, type=str, help='output name (without file extension) (default: output)', default='output')
 argparser.add_argument('--water-level-correction', '-w', required=False, type=float, nargs=4, help='correct elevation for the fact that in CM water does not flow downhill expects x,y coordinates of lowest and highest water level of one river.')
+argparser.add_argument('--stride', '-s', required=False, type=int, help='ouput will contain only every stride-th point')
 
 args = argparser.parse_args()
 
@@ -45,7 +46,8 @@ xmin_request, ymin_request, xmax_request, ymax_request = args.bounding_box
 df = None
 print('Processing input files...')
 for filename in os.listdir(args.dgm_dir):
-    if filename.endswith('.xyz.gz'):
+    # if filename.endswith('.xyz.gz'):
+    if os.path.isfile(os.path.join(args.dgm_dir, filename)):
         df_file = pandas.read_csv(os.path.join(args.dgm_dir, filename), delimiter=r"\s+", names=['x','y','z'])
         df_file = df_file[df_file.x.between(xmin_request, xmax_request) & df_file.y.between(ymin_request, ymax_request)]
         if df is not None:
@@ -113,7 +115,18 @@ for xx in range(height_map_reduced.shape[0]):
         z_arr.append(height_map_reduced[xx, yy])
 
 height_map_reduced_df = pandas.DataFrame({'x': x_arr, 'y': y_arr, 'z': z_arr})
-height_map_reduced_df.to_csv('{}.csv'.format(args.output_name))
+if args.stride is not None:
+    df_out = height_map_reduced_df.iloc[::args.stride]
+    df_out = pandas.concat((df_out, pandas.DataFrame(
+        {
+            'x': [height_map_reduced_df.x.max()], 
+            'y': [height_map_reduced_df.y.max()], 
+            'z': [-1]
+        }
+    )))
+    df_out.to_csv('{}.csv'.format(args.output_name))
+else:
+    height_map_reduced_df.to_csv('{}.csv'.format(args.output_name))
 
 hm = height_map_reduced.T
 zmin = np.floor(height_map_reduced_df.z.min()).astype(int)
@@ -139,9 +152,18 @@ for level_idx in range(len(cs.levels)):
         else:
             df_contour = pandas.concat((df_contour, pandas.DataFrame({'x': x_contour, 'y': y_contour, 'z': z_contour})))
 
-df_contour = df_contour.drop_duplicates()
-
 if df_contour is not None:
+    df_contour = df_contour.drop_duplicates()
+    if args.stride is not None:
+        df_contour = df_contour.iloc[::args.stride]
+        df_contour = pandas.concat((df_contour, pandas.DataFrame(
+            {
+                'x': [height_map_reduced_df.x.max()], 
+                'y': [height_map_reduced_df.y.max()], 
+                'z': [-1]
+            }
+        )))
+
     df_contour.to_csv("{}_contour.csv".format(args.output_name))
 
 plt.figure()
