@@ -90,13 +90,32 @@ config = {
     #     },
     #     'pass': 2,
     # },
-    'water': {
+    # 'water': {
+    #     'tags': [
+    #         ('water', 'river'),
+    #         # ('water', 'pond'),
+    #         # ('water', 'fishpond'),
+    #         # ('water', 'wastewater'),
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 2', 'cat1': 'Water', 'tags': [('water', 'river')]},
+    #             {'menu': 'Ground 2', 'cat1': 'Deep Ford', 'tags': [('water', 'pond'), ('water', 'fishpond'), ('water', 'wastewater')]},
+    #         ],
+    #         'process': [
+    #             'type_from_tag'
+    #         ]
+    #     },
+    #     'pass': 3,
+    # },
+
+    'wetland': {
         'tags': [
-            ('water', 'river'),
+            ('natural', 'wetland'),
         ],
         'cm_types': {
             'types': [
-                {'menu': 'Ground 2', 'cat1': 'Water', 'tags': [('water', 'river')]},
+                {'menu': 'Ground 2', 'cat1': 'Marsh', 'tags': [('natural', 'wetland')]},
             ],
             'process': [
                 'type_from_tag'
@@ -104,122 +123,159 @@ config = {
         },
         'pass': 3,
     },
-    
-    'mixed_forest': {
-        'tags': [
-            ('landuse', 'forest'),
-            ('natural', 'wood')
-        ],
-        'exclude_tags': {
-            'leaf_type': 'broadleaved',
-        },
-        'cm_types': {
-            'types': [
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 3', 'weight': 1},
-            ],
-            'post_process': [
-                'type_random_individual',
-            ]
-        },
-        'pass': 1
-    },
 
-    'broadleaved_forest': {
+    'garden': {
         'tags': [
-            ('landuse', 'forest'),
-            ('natural', 'wood')
-        ],
-        'required_tags': {
-            'leaf_type': 'broadleaved',
-        },
-        'cm_types': {
-            'types': [
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
-                {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
-            ],
-            'post_process': [
-                'type_random_individual',
-            ]
-        },
-        'pass': 1
-    },
-
-    'mixed_bushes': {
-        'tags': [
-            ('natural', 'scrub')
+            ('leisure', 'garden'),
         ],
         'cm_types': {
             'types': [
-                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 1', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 2', 'weight': 2.0},
-                {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 3', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 1', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 2', 'weight': 2.0},
-                {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 3', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 1', 'weight': 1.0},
-                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 2', 'weight': 2.0},
-                {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 3', 'weight': 1.0},
-            ],
-            'post_process': [
-                'type_random_individual',
-            ]
-        },
-        'pass': 1
-    },
-
-    'farmland': {
-        'tags': [
-            ('landuse', 'farmland'),
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Ground 2', 'cat1': 'Plow NS', 'weight': 1.0},
-                {'menu': 'Ground 2', 'cat1': 'Plow EW', 'weight': 1.0},
                 {'menu': 'Ground 3', 'cat1': 'Crop 1', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 2', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 3', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 4', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 5', 'weight': 1.0},
-                {'menu': 'Ground 3', 'cat1': 'Crop 6', 'weight': 1.0},
+                {'menu': 'Ground 2', 'cat1': 'Plow NS', 'weight': 0.5},
+                {'menu': 'Ground 2', 'cat1': 'Plow EW', 'weight': 0.5},
+                {'menu': 'Ground 1', 'cat1': 'Grass', 'weight': 1.0},
+                {'menu': 'Ground 1', 'cat1': 'Flowers', 'weight': 1.0},
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 0.5},
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 0.5},
+            ],
+            'post_process': [
+                'type_random_individual',
+            ]
+        }
+
+    },
+
+    # 'mixed_forest': {
+    #     'tags': [
+    #         ('landuse', 'forest'),
+    #         ('natural', 'wood')
+    #     ],
+    #     'exclude_tags': {
+    #         'leaf_type': 'broadleaved',
+    #     },
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree E', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree H', 'cat2': 'density 3', 'weight': 1},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual',
+    #         ]
+    #     },
+    #     'pass': 1
+    # },
+
+    # 'broadleaved_forest': {
+    #     'tags': [
+    #         ('landuse', 'forest'),
+    #         ('natural', 'wood')
+    #     ],
+    #     'required_tags': {
+    #         'leaf_type': 'broadleaved',
+    #     },
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree B', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree C', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree F', 'cat2': 'density 3', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 1', 'weight': 1},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 2', 'weight': 2},
+    #             {'menu': 'Foliage', 'cat1': 'Tree G', 'cat2': 'density 3', 'weight': 1},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual',
+    #         ]
+    #     },
+    #     'pass': 1
+    # },
+
+    # 'mixed_bushes': {
+    #     'tags': [
+    #         ('natural', 'scrub')
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 1', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 2', 'weight': 2.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush A', 'cat2': 'density 3', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 1', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 2', 'weight': 2.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush B', 'cat2': 'density 3', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 1', 'weight': 1.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 2', 'weight': 2.0},
+    #             {'menu': 'Foliage', 'cat1': 'Bush C', 'cat2': 'density 3', 'weight': 1.0},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual',
+    #         ]
+    #     },
+    #     'pass': 1
+    # },
+
+    # 'farmland': {
+    #     'tags': [
+    #         ('landuse', 'farmland'),
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 2', 'cat1': 'Plow NS', 'weight': 1.0},
+    #             {'menu': 'Ground 2', 'cat1': 'Plow EW', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 1', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 2', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 3', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 4', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 5', 'weight': 1.0},
+    #             {'menu': 'Ground 3', 'cat1': 'Crop 6', 'weight': 1.0},
+    #         ],
+    #         'post_process': [
+    #             'type_random_area'
+    #         ]
+    #     },
+    #     'pass': 0
+    # },
+
+    'orchard': {
+        'tags': [
+            ('landuse', 'orchard'),
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Foliage', 'cat1': 'Tree A', 'cat2': 'density 4', 'weight': 1},
+                {'menu': 'Foliage', 'cat1': 'Tree D', 'cat2': 'density 4', 'weight': 1},
             ],
             'post_process': [
                 'type_random_area'
@@ -228,37 +284,52 @@ config = {
         'pass': 0
     },
 
-    'grassland': {
-        'tags': [
-            ('landuse', 'grass')
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Ground 1', 'cat1': 'Grass T', 'weight': 1.0},
-                {'menu': 'Ground 1', 'cat1': 'Grass TY', 'weight': 1.0},
-                {'menu': 'Ground 1', 'cat1': 'Weeds', 'weight': 1.0},
-                {'menu': 'Ground 1', 'cat1': 'Grass XT', 'weight': 1.0},
-                {'menu': 'Ground 1', 'cat1': 'Grass XTY', 'weight': 1.0},
-            ],
-            'post_process': [
-                'type_random_individual'
-            ],
-        }
-    },
+    # 'grassland': {
+    #     'tags': [
+    #         ('landuse', 'grass')
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 1', 'cat1': 'Grass T', 'weight': 1.0},
+    #             {'menu': 'Ground 1', 'cat1': 'Grass TY', 'weight': 1.0},
+    #             {'menu': 'Ground 1', 'cat1': 'Weeds', 'weight': 1.0},
+    #             {'menu': 'Ground 1', 'cat1': 'Grass XT', 'weight': 1.0},
+    #             {'menu': 'Ground 1', 'cat1': 'Grass XTY', 'weight': 1.0},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual'
+    #         ],
+    #     }
+    # },
 
-    'construction_site': {
-        'tags': [
-            ('landuse', 'construction')
-        ],
-        'cm_types': {
-            'types': [
-                {'menu': 'Ground 1', 'cat1': 'Dirt', 'weight': 1.0},
-            ],
-            'post_process': [
-                'type_random_individual'
-            ]
-        }
-    },
+    # 'meadow': {
+    #     'tags': [
+    #         ('landuse', 'meadow'),
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 1', 'cat1': 'Grass', 'tags': [('landuse', 'meadow')]},
+    #         ],
+    #         'process': [
+    #             'type_from_tag'
+    #         ]
+    #     },
+    #     'pass': 3,
+    # },
+
+    # 'construction_site': {
+    #     'tags': [
+    #         ('landuse', 'construction')
+    #     ],
+    #     'cm_types': {
+    #         'types': [
+    #             {'menu': 'Ground 1', 'cat1': 'Dirt', 'weight': 1.0},
+    #         ],
+    #         'post_process': [
+    #             'type_random_individual'
+    #         ]
+    #     }
+    # },
 
     # 'residential_buildings': {
     #     'tags': [
@@ -275,7 +346,53 @@ config = {
     #             'type_random_individual'
     #         ]
     #     }
-    # }
+    # },
+
+    'pitch': {
+        'tags': [
+            ('leisure', 'pitch'),
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Ground 1', 'cat1': 'Dirt Red', 'tags': [('leisure', 'pitch')]}
+            ],
+            'process': [
+                'type_from_tag',
+            ],
+        }
+    },
+
+    'gravel_beach': {
+        'tags': [
+            ('natural', 'beach'),
+        ],
+        'required_tags': {
+            'surface': 'gravel',
+        },
+        'cm_types': {
+            'types': [
+                {'menu': 'Ground 2', 'cat1': 'Gravel', 'tags': [('natural', 'beach')]}
+            ],
+            'process': [
+                'type_from_tag',
+            ],
+        }
+    },
+
+    'playground': {
+        'tags': [
+            ('leisure', 'playground'),
+        ],
+        'cm_types': {
+            'types': [
+                {'menu': 'Ground 1', 'cat1': 'Sand', 'tags': [('leisure', 'playground')]}
+            ],
+            'process': [
+                'type_from_tag',
+            ],
+        }
+    },
+
 
 }
 
@@ -636,7 +753,7 @@ def add_to_road_graph(df, gdf, element, cm_types):
         return df
 
     if name not in road_graphs:
-        road_graphs[name] = nx.Graph()
+        road_graphs[name] = nx.MultiGraph()
 
     road_graph = road_graphs[name]
 
@@ -661,7 +778,7 @@ def add_to_road_graph(df, gdf, element, cm_types):
             raise Exception
 
     if len(intersection_mid_points) > 1:
-        intersection_mid_points = np.array(intersection_mid_points)
+        intersection_mid_points = np.array(intersection_mid_points, dtype=object)
         intersection_mid_point_dist = [ls.project(mid_point) for mid_point in intersection_mid_points]
         sorted_indices = np.argsort(intersection_mid_point_dist)
         sorted_intersection_mid_points = intersection_mid_points[sorted_indices]
@@ -700,6 +817,15 @@ def add_to_road_graph(df, gdf, element, cm_types):
             nodes.append((node_id, xidx, yidx))
 
     # sorted_df = df.sort_values(by='dist_along_way')
+
+    # remove duplicates
+    # filtered_squares_along_way = []
+    # for sidx in range(1, len(squares_along_way)):
+    #     if squares_along_way[sidx] != squares_along_way[sidx - 1]:
+    #         filtered_squares_along_way.append(squares_along_way[sidx])
+
+    # squares_along_way = filtered_squares_along_way
+
 
     node_idx = 0
     current_squares = []
@@ -796,16 +922,26 @@ def road_navigation_graph(df, gdf, name, cm_types):
     road_graph = road_graphs[name]
     nodes_to_delete = []
     for node_id in road_graph.nodes:
-        if len(list(nx.neighbors(road_graph, node_id))) == 2:
+        neighbors = [neighbor for neighbor in nx.neighbors(road_graph, node_id) if neighbor != node_id]
+        if len(neighbors) == 2:
             nodes_to_delete.append(node_id)
 
     while len(nodes_to_delete) > 0:
         node_id = nodes_to_delete.pop()
 
-        neighbor1, neighbor2 = list(nx.neighbors(road_graph, node_id))
-        node = road_graph.nodes[node_id]
-        edge1 = road_graph.edges[neighbor1, node_id]
-        edge2 = road_graph.edges[neighbor2, node_id]
+        neighbors = list(nx.neighbors(road_graph, node_id))
+        if len(neighbors) == 2:
+            neighbor1, neighbor2 = neighbors
+            node = road_graph.nodes[node_id]
+            edge1 = road_graph.get_edge_data(neighbor1, node_id)[0]
+            edge2 = road_graph.get_edge_data(neighbor2, node_id)[0]
+        else:
+            neighbor1 = neighbors[0]
+            neighbor2 = neighbors[0]
+            node = road_graph.nodes[node_id]
+            edge1 = road_graph.get_edge_data(neighbor1, node_id)[0]
+            edge2 = road_graph.get_edge_data(neighbor1, node_id)[1]
+
         new_squares = []
         new_squares.extend(edge1['squares'] if edge1['squares'][-1] == node['square'] else edge1['squares'][::-1])
         new_squares.extend(edge2['squares'][1::] if edge2['squares'][0] == node['square'] else edge2['squares'][::-1][1::])
@@ -816,14 +952,28 @@ def road_navigation_graph(df, gdf, name, cm_types):
         road_graph.add_edge(neighbor1, neighbor2, squares=new_squares)
         road_graph.remove_node(node_id)
 
-    node_pos = {}
-    for node in road_graph.nodes:
-        node_pos[node] = road_graph.nodes[node]['square']
+    road_graph = nx.Graph(road_graph)
 
-    plt.figure()
-    plt.axis('equal')
-    nx.draw_networkx(road_graph, pos=node_pos)
-    plt.show()
+    for edge in road_graph.edges:
+        squares = road_graph.edges[edge[0], edge[1]]['squares']
+        filtered_squares = []
+        for sidx in range(1, len(squares)):
+            if squares[sidx] != squares[sidx - 1]:
+                filtered_squares.append(squares[sidx])
+
+        road_graph.edges[edge[0], edge[1]]['squares'] = filtered_squares
+
+
+    # node_pos = {}
+    # for node in road_graph.nodes:
+    #     node_pos[node] = road_graph.nodes[node]['square']
+
+    # plt.figure()
+    # plt.axis('equal')
+    # nx.draw_networkx(road_graph, pos=node_pos)
+    # plt.show()
+
+
 
     edge_graphs = {}
     for edge in road_graph.edges:
@@ -831,6 +981,7 @@ def road_navigation_graph(df, gdf, name, cm_types):
         node1_id = edge[0]
         node2_id = edge[1]
         squares = road_graph.edges[node1_id, node2_id]['squares']
+
         other_node1_neighbors = [neighbor for neighbor in nx.neighbors(road_graph, node1_id) if neighbor != node2_id]
         other_node2_neighbors = [neighbor for neighbor in nx.neighbors(road_graph, node2_id) if neighbor != node1_id]
 
@@ -1099,8 +1250,9 @@ api = Api()
 # bbox = [50.93133, 7.30153, 50.93588, 7.30745] # lat_min, lon_min, lat_max, lon_max
 projection = Proj(proj='utm', zone=32, ellps='WGS84')
 
-# bbox_utm = [379964.0, 5643796.0, 380804.0-8, 5644444.0-8]
-bbox_utm = [379877.0, 5643109.0, 381461.0, 5645022.0]
+# bbox_utm = [379964.0, 5643796.0, 380804.0-8, 5644444.0-8] # overath
+bbox_utm = [379877.0, 5643109.0, 381461.0, 5645022.0] # overath extended
+# bbox_utm = [550894, 5586630, 553442, 5589362] # doellbach
 lon_min, lat_min = projection(bbox_utm[0], bbox_utm[1], inverse=True)
 lon_max, lat_max = projection(bbox_utm[2], bbox_utm[3], inverse=True)
 
@@ -1239,8 +1391,27 @@ for element in result.elements():
                     coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
                     ls = LineString(coords)
                     to_fill = np.bitwise_or(gdf.geometry.crosses(ls), gdf.geometry.contains(ls))
+                elif element_geometry['type'] == 'MultiPolygon':
+                    polygons = []
+                    for polygon_idx in range(len(element_geometry['coordinates'])):
+                        polygon_coordinates = element_geometry['coordinates'][polygon_idx]
+                        exterior_coords = [(projection(coord[0], coord[1])) for coord in polygon_coordinates[0]]
+                        interiors = []
+                        for interior_idx in range(1, len(polygon_coordinates)):
+                            interior_coords = [(projection(coord[0], coord[1])) for coord in polygon_coordinates[interior_idx]]
+                            interiors.append(interior_coords)
+                        
+                        polygons.append(Polygon(exterior_coords, holes=interiors))
+
+                    multipolygon = MultiPolygon(polygons)
+                    within = gdf.geometry.within(polygon)
+                    intersecting = gdf.geometry.intersects(polygon)
+                    is_border = np.bitwise_and(intersecting, ~within)
+                    is_largest_square_area = gdf.loc[is_border].geometry.intersection(polygon).area > 32
+
+                    to_fill = np.bitwise_or(within, is_largest_square_area)
                 else:
-                    raise Exception('geometry {} not yet covered'.format(element_geometry['type']))
+                    raise Exception('geometry {} of element {}/{} not yet covered'.format(element_geometry['type'], element.type(), element.id()))
 
                 if to_fill is not None:
                     element_df = gdf.loc[to_fill, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name']].copy(deep=True)
@@ -1429,10 +1600,24 @@ for name in config:
 
 
 # plt.show()
+df = pandas.concat((
+    df, 
+    pandas.DataFrame({
+        'xidx': [gdf.xidx.max()], 
+        'yidx': [gdf.yidx.max()], 
+        'z': [-1], 
+        'menu': [-1], 
+        'cat1': [-1], 
+        'cat2': [-1], 
+        'direction': [-1], 
+        'id': [-1], 
+        'name': [-1]
+    })
+))
 
 df_out = df.rename(columns={"xidx": "x", "yidx": "y"})
 # df_out.to_csv('osm_test_objects2.csv')
-df_out.to_csv('overath_extended_osm.csv')
+df_out.to_csv('overath_extended_osm_roads.csv')
 
 # gdf_out = gdf[(gdf.tile_page != -1) & (gdf.tile_row != -1) & (gdf.tile_col != -1)]
 # gdf_out = gdf[gdf['type'] != -1]
