@@ -53,7 +53,7 @@ MENU_DICT = {
     'Ground 2': pyautogui.Point(105, 123),
     'Ground 3': pyautogui.Point(105, 144),
     'Foliage': pyautogui.Point(110, 185),
-    'Road': pyautogui.Point(107, 203),
+    'Roads': pyautogui.Point(107, 203),
     'Water': pyautogui.Point(81, 438),
     'Plow NS': pyautogui.Point(135, 552),
     'Plow EW': pyautogui.Point(188, 552),
@@ -78,6 +78,8 @@ MENU_DICT = {
     'density 2': pyautogui.Point(110, 617),
     'density 3': pyautogui.Point(180, 617),
     'density 4': pyautogui.Point(38, 657),
+    'Grass': pyautogui.Point(189, 438),
+    'Flowers': pyautogui.Point(137, 498),
     'Grass T': pyautogui.Point(191, 498),
     'Grass TY': pyautogui.Point(27, 554),
     'Weeds': pyautogui.Point(80, 554),
@@ -105,6 +107,13 @@ MENU_DICT = {
     'Paved 2': pyautogui.Point(108,440),
     'Foot Path': pyautogui.Point(183,440),
     'Gravel Road': pyautogui.Point(183,383),
+    'Marsh': pyautogui.Point(189, 381),
+    'Deep Ford': pyautogui.Point(27, 495),
+    'Dirt Red': pyautogui.Point(83, 383),
+    'Gravel': pyautogui.Point(27, 554),
+    'Sand': pyautogui.Point(134, 440),
+    'Railroad': pyautogui.Point(36, 497),
+    'Stream': pyautogui.Point(108, 497),
 
 }
 
@@ -336,8 +345,8 @@ if __name__ == '__main__':
 
         # grid = np.full((x.max() + 1, y.max() + 1), -1)
         # grid[x, y] = z
-        total_n_squares_x = map_df.x.max() + 1
-        total_n_squares_y = map_df.y.max() + 1
+        total_n_squares_x = int(map_df.x.max()) + 1
+        total_n_squares_y = int(map_df.y.max()) + 1
 
         n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X, dtype=int)
         n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y, dtype=int)
