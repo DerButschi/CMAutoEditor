@@ -19,6 +19,7 @@ from shapely.geometry import LineString, Point, MultiPoint, MultiLineString
 from shapely.ops import split
 import geopandas
 import pandas
+import logging
 from profiles.general import road_tiles, rail_tiles
 
 road_direction_dict = {
@@ -160,6 +161,7 @@ def assign_type_from_tag(osm_processor, config, element_entry):
 
 
 def create_line_graph(osm_processor, config, name):
+    logger = logging.getLogger('osm2cm')
     lines = osm_processor.network_graphs[name]['lines']
     lines_intersecting = lines.geometry.sindex.query_bulk(lines.geometry, 'intersects')
 
@@ -177,7 +179,7 @@ def create_line_graph(osm_processor, config, name):
                 elif type(p) == MultiPoint:
                     filtered_intersection_points.extend([g for g in p.geoms])
                 else:
-                    print('Warning, intersection geometry is of type {}!'.format(type(p)))
+                    logger.warning('Warning, intersection geometry is of type {}!'.format(type(p)))
             
             intersection_points = filtered_intersection_points
             intersection_points.extend([p for p in ls.boundary.geoms if p not in intersection_points])
@@ -222,10 +224,8 @@ def create_square_graph(osm_processor, config, name):
                 raise Exception
 
         if len(intersection_mid_points) > 1:
-            intersection_mid_points = np.array(intersection_mid_points, dtype=object)
-            intersection_mid_point_dist = [ls.project(mid_point) for mid_point in intersection_mid_points]
-            sorted_indices = np.argsort(intersection_mid_point_dist)
-            sorted_intersection_mid_points = intersection_mid_points[sorted_indices]
+            # intersection_mid_points = np.array(intersection_mid_points, dtype=object)
+            sorted_intersection_mid_points = sorted(intersection_mid_points, key=lambda mid_point: ls.project(mid_point))
         else:
             sorted_intersection_mid_points = intersection_mid_points
 
@@ -446,6 +446,7 @@ def assign_rail_tiles_to_network(osm_processor, config, name):
     assign_tiles_to_network(osm_processor, config, name, rail_tiles)
 
 def assign_tiles_to_network(osm_processor, config, name, tile_df):
+    logger = logging.getLogger('osm2cm')
     square_graph = osm_processor.network_graphs[name]['square_graph']
     edge_graphs = {}
     for edge in square_graph.edges:
@@ -499,8 +500,15 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
                     for tile in valid_tiles:
                         new_last_tiles.append(tile)
                         graph.add_edge((last_tile, i_square - 1), (tile, i_square), cost=tile_df.loc[tile, 'cost'])
-                
+
+                if len(new_last_tiles) == 0:
+                    logger.debug('Found no possible continuation of network edge between nodes {} and {} at square index {}.'.format(node1_id, node2_id, i_square))
+                    logger.debug('    Last tiles were {}, new square has incoming direction {} and outgoing direction {}.'. format(
+                        tile_df.loc[last_tiles, ['direction', 'row', 'col', 'variant']].values, direction_in, direction_out)
+                    )
+                    break
                 last_tiles = np.unique(new_last_tiles)
+
             else:
                 last_direction_out = opposite_road_direction_dict[direction_in]
                 for last_tile in last_tiles:
