@@ -34,6 +34,7 @@ import json
 import geojson
 from tqdm import tqdm
 import osm_utils.processing
+import logging
 
 
 
@@ -139,14 +140,28 @@ class OSMProcessor:
             ]
         }
 
+        self.logger = logging.getLogger('osm2cm')
+        self.logger.setLevel(logging.DEBUG)
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter('[%(name)s] [%(levelname)s]: %(message)s'))
+        stream_handler.setLevel(logging.DEBUG)
+        file_handler = logging.FileHandler('osm2cm.log', encoding='utf-8', mode='w')
+        file_handler.setLevel(logging.DEBUG)
+        self.logger.addHandler(stream_handler)
+        self.logger.addHandler(file_handler)
+        self.logger.debug('Initialization complete.')
+
     def _init_grid(self, bounding_box_data):
         n_bins_x = np.floor((self.bbox[2] - self.bbox[0]) / 8).astype(int)
         n_bins_y = np.floor((self.bbox[3] - self.bbox[1]) / 8).astype(int)
+        self.logger.info('Requested bounding box has {} x {} squares.'.format(n_bins_x, n_bins_y))
 
         n_bins_pad_x_min = np.ceil(max(0, self.bbox[0] - bounding_box_data[0]) / 8).astype(int)
         n_bins_pad_y_min = np.ceil(max(0, self.bbox[1] - bounding_box_data[1]) / 8).astype(int)
         n_bins_pad_x_max = np.ceil(max(0, bounding_box_data[2] - (self.bbox[0] + n_bins_x * 8)) / 8).astype(int)
         n_bins_pad_y_max = np.ceil(max(0, bounding_box_data[3] - (self.bbox[1] + n_bins_y * 8)) / 8).astype(int)
+
+        self.logger.debug('Input data adds squares: {} W, {} E, {} S, {} N'.format(n_bins_pad_x_min, n_bins_pad_x_max, n_bins_pad_y_min, n_bins_pad_y_max))
 
         n_bins_x_data = n_bins_x + n_bins_pad_x_min + n_bins_pad_x_max
         n_bins_y_data = n_bins_y + n_bins_pad_y_min + n_bins_pad_y_max
@@ -266,17 +281,17 @@ class OSMProcessor:
                         osm_utils.processing.__getattribute__(stage)(self, config, item)
 
     def write_to_file(self):
+        xmax = self.idx_bbox[2]
+        ymax = self.idx_bbox[3]
+        sub_df = self._get_sub_df((self.gdf.xidx == xmax) & (self.gdf.yidx == ymax))
+        sub_df.x = xmax
+        sub_df.y = ymax
+        self.df = pandas.concat((self.df, sub_df), ignore_index=True)
         self.df = self.df.rename(columns={"xidx": "x", "yidx": "y"})
         self.df = self.df.loc[
             (self.df.x.between(self.idx_bbox[0], self.idx_bbox[2])) &
             (self.df.y.between(self.idx_bbox[1], self.idx_bbox[3]))
         ]
-        xmax = self.idx_bbox[2]
-        ymax = self.idx_bbox[3]
-        sub_df = self._get_sub_df((self.gdf.y == xmax) & (self.gdf.y == ymax))
-        sub_df.x = xmax
-        sub_df.y = ymax
-        self.df = pandas.concat((self.df, sub_df), ignore_index=True)
         self.df.x = self.df.x - self.idx_bbox[0]
         self.df.y = self.df.y - self.idx_bbox[1]
         self.df.to_csv('overath_extended_roads_only.csv')
