@@ -137,6 +137,12 @@ class OSMProcessor:
                 (1, "create_line_graph", "by_config_name"), 
                 (2, "create_square_graph", "by_config_name"), 
                 (3, "assign_rail_tiles_to_network", "by_config_name")
+            ],
+            "stream_tiles": [
+                (0, "collect_network_data", "by_element"), 
+                (1, "create_line_graph", "by_config_name"), 
+                (2, "create_square_graph", "by_config_name"), 
+                (3, "assign_stream_tiles_to_network", "by_config_name")
             ]
         }
 

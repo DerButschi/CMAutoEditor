@@ -20,7 +20,7 @@ from shapely.ops import split
 import geopandas
 import pandas
 import logging
-from profiles.general import road_tiles, rail_tiles
+from profiles.general import road_tiles, rail_tiles, stream_tiles
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -445,6 +445,9 @@ def assign_road_tiles_to_network(osm_processor, config, name):
 def assign_rail_tiles_to_network(osm_processor, config, name):
     assign_tiles_to_network(osm_processor, config, name, rail_tiles)
 
+def assign_stream_tiles_to_network(osm_processor, config, name):
+    assign_tiles_to_network(osm_processor, config, name, stream_tiles)
+
 def assign_tiles_to_network(osm_processor, config, name, tile_df):
     logger = logging.getLogger('osm2cm')
     square_graph = osm_processor.network_graphs[name]['square_graph']
@@ -560,7 +563,11 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
         for start_tile in valid_start_tiles:
             for end_tile in valid_end_tiles:
                 if nx.has_path(graph, (start_tile, 0), (end_tile, edge_end_idx)):
-                    valid_paths.extend([path for path in nx.all_shortest_paths(graph, (start_tile, 0), (end_tile, edge_end_idx), weight='cost')])
+                    # only return one valid path!
+                    valid_paths.append(nx.shortest_path(graph, (start_tile, 0), (end_tile, edge_end_idx), weight='cost'))
+                    # paths = nx.all_shortest_paths(graph, (start_tile, 0), (end_tile, edge_end_idx), weight='cost')
+                    # valid_paths = [path for path in paths]
+                    # valid_paths.extend([path for path in nx.all_shortest_paths(graph, (start_tile, 0), (end_tile, edge_end_idx), weight='cost')])
 
         if len(valid_paths) == 0:
             continue
