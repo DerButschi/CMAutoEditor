@@ -21,6 +21,7 @@ import geopandas
 import pandas
 import logging
 from profiles.general import road_tiles, rail_tiles, stream_tiles
+import matplotlib.pyplot as plt
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -36,6 +37,31 @@ opposite_road_direction_dict = {
     'l': 'r'
 }
 
+def draw_line_graph(graph: nx.MultiGraph, show: bool = False):
+    plt.figure()
+    plt.axis('equal')
+    for edge in graph.edges:
+        ls = graph.get_edge_data(*edge)['ls']
+        plt.plot(ls.xy[0], ls.xy[1], '-')
+    
+    for node in graph.nodes:
+        plt.plot(node[0], node[1], 'ko')
+
+    if show:
+        plt.show()
+
+def draw_square_graph(graph: nx.MultiGraph, show: bool = False):
+    plt.figure()
+    plt.axis('equal')
+    for edge in graph.edges:
+        squares = graph.get_edge_data(*edge)['squares']
+        plt.plot([sq[0] for sq in squares], [sq[1] for sq in squares], '-')
+    
+    for node in graph.nodes:
+        plt.plot(node[0], node[1], 'ko')
+
+    if show:
+        plt.show()
 
 def get_grid_cells_to_fill(gdf, geometry):
     within = gdf.index.isin(gdf.sindex.query(geometry, predicate='contains'))
@@ -48,13 +74,39 @@ def get_grid_cells_to_fill(gdf, geometry):
 
     return to_fill
 
-def extract_connection_direction_from_node(node_id, other_node_id, road_graph):
-    squares = road_graph.edges[node_id, other_node_id]['squares']
-    node_square = node_id
-    if squares[0] != node_square:
-        squares = squares[::-1]
+def extract_connection_directions_from_node(node_id, other_node_id, road_graph, loop=None):
+    directions = []
+    edge_data = road_graph.get_edge_data(node_id, other_node_id)
+    for key, data in edge_data.items():
+        squares = data['squares']
+        node_square = node_id
+        if squares[0] != node_square:
+            squares = squares[::-1]
+
+        # in case of loops
+        if node_id == other_node_id:
+            if loop == 'end' and node_id == other_node_id:
+                directions.append(road_direction_dict[(squares[-2][0] - squares[0][0], squares[-2][1] - squares[0][1])])
+            elif loop == 'start' and node_id == other_node_id:
+                directions.append(road_direction_dict[(squares[1][0] - squares[0][0], squares[1][1] - squares[0][1])])
+            else:
+                directions.append(road_direction_dict[(squares[1][0] - squares[0][0], squares[1][1] - squares[0][1])])
+                directions.append(road_direction_dict[(squares[-2][0] - squares[0][0], squares[-2][1] - squares[0][1])])
+        else:
+            directions.append(road_direction_dict[(squares[1][0] - squares[0][0], squares[1][1] - squares[0][1])])
+
+
+        # if loop is not None:
+        #     if loop == 'end' and node_id == other_node_id:
+        #         directions.append(road_direction_dict[(squares[-2][0] - squares[0][0], squares[-2][1] - squares[0][1])])
+        #     elif loop == 'start' and node_id == other_node_id:
+        #         directions.append(road_direction_dict[(squares[1][0] - squares[0][0], squares[1][1] - squares[0][1])])
+        # else:
+        #     directions.append(road_direction_dict[(squares[1][0] - squares[0][0], squares[1][1] - squares[0][1])])
+        #     if node_id == other_node_id:
+        #         directions.append(road_direction_dict[(squares[-2][0] - squares[0][0], squares[-2][1] - squares[0][1])])
     
-    return road_direction_dict[(squares[1][0] - squares[0][0], squares[1][1] - squares[0][1])]
+    return directions
 
 def extract_valid_tiles_from_node(node_id, other_node_id, road_graph, edge_graphs):
     # direction_to_other_node = extract_connection_direction_from_node(node_id, other_node_id, road_graph)
@@ -76,17 +128,23 @@ def extract_valid_tiles_from_node(node_id, other_node_id, road_graph, edge_graph
     return valid_connections
 
 def extract_all_valid_node_tiles(node_id, square_graph, edge_graphs):
-    edges = [edge for edge in square_graph.edges(node_id)]
-    valid_tiles = None
+    edges = list({edge for edge in square_graph.edges(node_id)})
+    multi_edges = []
     for edge in edges:
+        edge_data = square_graph.get_edge_data(*edge)
+        for edge_key in edge_data:
+            multi_edges.append((edge[0], edge[1], edge_key))
+
+    valid_tiles = None
+    for edge in multi_edges:
         start_node = None
         if edge in edge_graphs:
             graph = edge_graphs[edge]['graph']
             if nx.has_path(graph, 'start', 'end'):
                 start_node = 'start'
                 end_node = 'end'
-        elif edge[::-1] in edge_graphs:
-            graph = nx.reverse_view(edge_graphs[edge[::-1]]['graph'])
+        elif (edge[1], edge[0], edge[2]) in edge_graphs:
+            graph = nx.reverse_view(edge_graphs[(edge[1], edge[0], edge[2])]['graph'])
             if nx.has_path(graph, 'end', 'start'):
                 start_node = 'end'
                 end_node = 'start'
@@ -104,15 +162,15 @@ def extract_all_valid_node_tiles(node_id, square_graph, edge_graphs):
 
     return list(valid_tiles) if valid_tiles is not None else []
     
-def extract_required_directions(node_id, neighbors, road_graph):
+def extract_required_directions(node_id, neighbors, road_graph, loop=None):
     required_directions = []
     if len(neighbors) > 0:
         for neighbor in neighbors:
-            direction_out = extract_connection_direction_from_node(node_id, neighbor, road_graph)
+            directions_out = extract_connection_directions_from_node(node_id, neighbor, road_graph, loop)
 
-            required_directions.append(direction_out)
+            required_directions.extend(directions_out)
 
-    return required_directions
+    return list(set(required_directions))
 
 def fix_tile_for_node(node_id, edge_graphs, tile):
     for node_pair in edge_graphs:
@@ -165,7 +223,7 @@ def create_line_graph(osm_processor, config, name):
     lines = osm_processor.network_graphs[name]['lines']
     lines_intersecting = lines.geometry.sindex.query_bulk(lines.geometry, 'intersects')
 
-    line_graph = nx.Graph()
+    line_graph = nx.MultiGraph()
 
     for line_idx in range(len(lines)):
         ls = lines.iloc[line_idx].geometry
@@ -198,13 +256,14 @@ def create_line_graph(osm_processor, config, name):
             else:
                 print('Warning: linestring split was type {}.'.format(type(ls_split)))
 
+    draw_line_graph(line_graph, show=True)
     osm_processor.network_graphs[name]['line_graph'] = line_graph
 
 
 def create_square_graph(osm_processor, config, name):
     line_graph = osm_processor.network_graphs[name]['line_graph']
     gdf = osm_processor.gdf
-    square_graph = nx.Graph()
+    square_graph = nx.MultiGraph()
 
     for edge in line_graph.edges:
         edge_data = line_graph.edges[edge]
@@ -243,31 +302,46 @@ def create_square_graph(osm_processor, config, name):
     
     nodes = list(square_graph.nodes)
     for node in nodes:
-        edges = [edge for edge in square_graph.edges(node)]
+        edges = list({edge for edge in square_graph.edges(node)})
         squares = []
         for edge in edges:
-            squares.extend(square_graph.edges[edge]['squares'][1:-1])
+            edge_data = square_graph.get_edge_data(*edge)
+            for key in edge_data:
+                squares.extend(edge_data[key]['squares'][1:-1])
         
         unique_squares, square_counts = np.unique(squares, axis=0, return_counts=True)
         if (square_counts > 1).any():
             duplicate_squares = unique_squares[np.where(square_counts > 1)[0]]
             for nb_node in list(square_graph.neighbors(node)):
-                squares_to_nb = square_graph.edges[(node, nb_node)]['squares']
-                element_idx = square_graph.edges[(node, nb_node)]['element_idx']
-                if squares_to_nb[0] != node:
-                    squares_to_nb = squares_to_nb[::-1]
-                square_lines = []
-                prev_node_idx = 0
-                for sq_idx, sq in enumerate(squares_to_nb):
-                    if ((duplicate_squares[:,0] == sq[0]) & (duplicate_squares[:,1] == sq[1])).any() or sq_idx == len(squares_to_nb) - 1:
-                        square_lines.append(squares_to_nb[prev_node_idx:sq_idx+1])
-                        prev_node_idx = sq_idx
+                # yay MultiGraphs!
+                to_remove = []
+                edge_data = square_graph.get_edge_data(node, nb_node)
+                for edge_key in edge_data:
+                    squares_to_nb = edge_data[edge_key]['squares']
+                    element_idx = edge_data[edge_key]['element_idx']
+                    if squares_to_nb[0] != node:
+                        squares_to_nb = squares_to_nb[::-1]
+                    square_lines = []
+                    prev_node_idx = 0
+                    for sq_idx, sq in enumerate(squares_to_nb):
+                        if ((duplicate_squares[:,0] == sq[0]) & (duplicate_squares[:,1] == sq[1])).any() or sq_idx == len(squares_to_nb) - 1:
+                            square_lines.append(squares_to_nb[prev_node_idx:sq_idx+1])
+                            prev_node_idx = sq_idx
 
-                if len(square_lines) > 1:
-                    square_graph.remove_edge(node, nb_node)
-                    for sq_line in square_lines:
-                        square_graph.add_edge(sq_line[0], sq_line[-1], squares=sq_line, element_idx=element_idx)
+                    if len(square_lines) > 1:
+                        to_remove.append(edge_key)
+                        # square_graph.remove_edge(node, nb_node)
+                        for sq_line in square_lines:
+                            square_graph.add_edge(sq_line[0], sq_line[-1], squares=sq_line, element_idx=element_idx)
 
+                for edge_key in to_remove:
+                    square_graph.remove_edge(node, nb_node, key=edge_key)
+
+    node_dict = {}
+    for node in square_graph.nodes:
+        node_dict[node] = node
+
+    draw_square_graph(square_graph, show=True)
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
 
@@ -456,10 +530,10 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
         graph = nx.DiGraph()
         node1_id = edge[0]
         node2_id = edge[1]
-        squares = square_graph.edges[node1_id, node2_id]['squares']
+        squares = square_graph.edges[edge]['squares']
 
-        other_node1_neighbors = [neighbor for neighbor in nx.neighbors(square_graph, node1_id) if neighbor != node2_id]
-        other_node2_neighbors = [neighbor for neighbor in nx.neighbors(square_graph, node2_id) if neighbor != node1_id]
+        other_node1_neighbors = [neighbor for neighbor in nx.neighbors(square_graph, node1_id) if neighbor != node2_id or node1_id == node2_id]
+        other_node2_neighbors = [neighbor for neighbor in nx.neighbors(square_graph, node2_id) if neighbor != node1_id or node1_id == node2_id]
 
         if len(squares) < 2:
             continue
@@ -484,7 +558,8 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
                     direction_in = opposite_road_direction_dict[direction_out]
                     valid_tiles = tile_df[(tile_df[direction_in] == (2,3)) & ~pandas.isnull(tile_df[direction_out]) & (tile_df['n_connections'] == 2)].index.values
                 else:
-                    directions_in = extract_required_directions(node1_id, other_node1_neighbors, square_graph)
+                    loop = 'start' if node1_id == node2_id else None
+                    directions_in = extract_required_directions(node1_id, other_node1_neighbors, square_graph, loop)
                     connection_condition = ~pandas.isnull(tile_df[directions_in[0]]) & (tile_df['n_connections'] == len(directions_in) + 1)
                     for dir_idx in range(1, len(directions_in)):
                         connection_condition = np.bitwise_and(connection_condition, ~pandas.isnull(tile_df[directions_in[dir_idx]]))
@@ -520,7 +595,8 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
                         direction_out = opposite_road_direction_dict[direction_in]
                         valid_tiles = tile_df.loc[(tile_df[direction_in] == tile_connection) & (tile_df[direction_out] == (2,3)) & (tile_df['n_connections'] == 2)].index.values
                     else:
-                        directions_out = extract_required_directions(node2_id, other_node2_neighbors, square_graph)
+                        loop = 'end' if node1_id == node2_id else None
+                        directions_out = extract_required_directions(node2_id, other_node2_neighbors, square_graph, loop)
                         connection_condition = ~pandas.isnull(tile_df[directions_out[0]]) & (tile_df['n_connections'] == len(directions_out) + 1)
                         for dir_idx in range(1, len(directions_out)):
                             connection_condition = np.bitwise_and(connection_condition, ~pandas.isnull(tile_df[directions_out[dir_idx]]))
@@ -531,7 +607,7 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
                         graph.add_edge((last_tile, i_square - 1), (tile, i_square), cost=tile_df.loc[tile, 'cost'])
                         graph.add_edge((tile, i_square), 'end')
 
-        edge_graphs[(node1_id, node2_id)] = {'graph': graph, 'squares': squares}
+        edge_graphs[edge] = {'graph': graph, 'squares': squares}
 
 
     valid_tiles_dict = {}
@@ -540,16 +616,16 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
 
     gdf = osm_processor.gdf
 
-    for node_pair in edge_graphs:
-        node1_id, node2_id = node_pair
+    for edge in edge_graphs:
+        node1_id, node2_id, edge_key = edge
 
         if node1_id not in valid_tiles_dict or len(valid_tiles_dict[node1_id]) == 0:
             continue
         if node2_id not in valid_tiles_dict or len(valid_tiles_dict[node2_id]) == 0:
             continue
 
-        graph = edge_graphs[node_pair]['graph']
-        squares = edge_graphs[node_pair]['squares']
+        graph = edge_graphs[edge]['graph']
+        squares = edge_graphs[edge]['squares']
 
         if not nx.has_path(graph, 'start', 'end'):
             continue
@@ -575,7 +651,7 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
         path = valid_paths[0]
 
         sub_df = osm_processor._get_sub_df(gdf.xidx.isin([sq[0] for sq in squares]) & gdf.yidx.isin([sq[1] for sq in squares]))
-        element_idx = square_graph.get_edge_data(node1_id, node2_id)['element_idx']
+        element_idx = square_graph.get_edge_data(*edge)['element_idx']
         element_entry = osm_processor.matched_elements[element_idx]
         cm_type = get_matched_cm_type(config, element_entry)
 
