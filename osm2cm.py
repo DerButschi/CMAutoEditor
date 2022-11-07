@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 from unicodedata import category
 from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
 from OSMPythonTools.api import Api
@@ -111,9 +111,10 @@ config = json.load(open('osm_roads_only_config.json', 'r'))
 
 
 class OSMProcessor:
-    def __init__(self, config: Dict, bbox=List[float]):
+    def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None):
         self.config = config
         self.bbox = bbox
+        self.bbox_lon_lat = bbox_lon_lat
         self.idx_bbox = None
         self.transformer = None
         self.gdf = None
@@ -213,6 +214,12 @@ class OSMProcessor:
     def preprocess_osm_data(self, osm_data: Dict):
         self.transformer = pyproj.Transformer.from_crs('epsg:4326', 'epsg:25832', always_xy=True)
 
+        if self.bbox_lon_lat is not None and self.bbox is None:
+            self.bbox = [
+                *self.transformer.transform(*self.bbox_lon_lat[0:2]), 
+                *self.transformer.transform(*self.bbox_lon_lat[2:4])
+            ]
+
         xmin, ymin = self.transformer.transform(osm_data['bbox'][0], osm_data['bbox'][1])
         xmax, ymax = self.transformer.transform(osm_data['bbox'][2], osm_data['bbox'][3])
 
@@ -286,7 +293,7 @@ class OSMProcessor:
                     else:
                         osm_utils.processing.__getattribute__(stage)(self, config, item)
 
-    def write_to_file(self):
+    def write_to_file(self, output_file_name):
         xmax = self.idx_bbox[2]
         ymax = self.idx_bbox[3]
         sub_df = self._get_sub_df((self.gdf.xidx == xmax) & (self.gdf.yidx == ymax))
@@ -300,7 +307,7 @@ class OSMProcessor:
         ]
         self.df.x = self.df.x - self.idx_bbox[0]
         self.df.y = self.df.y - self.idx_bbox[1]
-        self.df.to_csv('overath_extended_roads_only.csv')
+        self.df.to_csv(output_file_name)
 
 
 
@@ -440,12 +447,14 @@ class OSMProcessor:
 
 
 if __name__ == '__main__':
-    osm_data = geojson.load(open('overath_extended.geojson', encoding='utf8'))
+    # osm_data = geojson.load(open('overath_extended.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('test/t_intersection_and_closed_loop.geojson', encoding='utf8'))
 
-    osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
+    # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
+    osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file()
+    osm_processor.write_to_file('test/t_intersection_and_closed_loop.csv')
 
 
 
