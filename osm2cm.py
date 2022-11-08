@@ -38,7 +38,7 @@ import logging
 
 
 
-config = json.load(open('osm_roads_only_config.json', 'r'))
+config = json.load(open('osm_fences_only_config.json', 'r'))
 
 
 
@@ -144,6 +144,12 @@ class OSMProcessor:
                 (1, "create_line_graph", "by_config_name"), 
                 (2, "create_square_graph", "by_config_name"), 
                 (3, "assign_stream_tiles_to_network", "by_config_name")
+            ],
+            "fence_tiles": [
+                (0, "collect_network_data", "by_element"), 
+                (1, "create_line_graph", "by_config_name"), 
+                (2, "create_octagon_graph", "by_config_name"), 
+                (3, "assign_fence_tiles_to_network", "by_config_name")
             ]
         }
 
@@ -159,6 +165,8 @@ class OSMProcessor:
         self.logger.debug('Initialization complete.')
 
     def _init_grid(self, bounding_box_data):
+        if self.bbox is None:
+            self.bbox = bounding_box_data
         n_bins_x = np.floor((self.bbox[2] - self.bbox[0]) / 8).astype(int)
         n_bins_y = np.floor((self.bbox[3] - self.bbox[1]) / 8).astype(int)
         self.logger.info('Requested bounding box has {} x {} squares.'.format(n_bins_x, n_bins_y))
@@ -188,6 +196,7 @@ class OSMProcessor:
 
         geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, cap_style=3)
 
+
         self.gdf = geopandas.GeoDataFrame({
             'x': xarr, 
             'y': yarr, 
@@ -202,6 +211,26 @@ class OSMProcessor:
             'name': [-1] * len(xarr),
             'level': [-1] * len(xarr),
             }, geometry=geometry)
+
+        octagon_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4 / np.cos(22.5 / 180 * np.pi), cap_style=1, resolution=2)
+        octagon_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=octagon_geometry.rotate(22.5))
+
+        xarr = []
+        yarr = []
+        xiarr = []
+        yiarr = []
+        for xidx, x in enumerate(np.linspace(self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[0] - n_bins_pad_x_min * 8 + (n_bins_x_data) * 8, n_bins_x_data + 1)):
+            for yidx, y in enumerate(np.linspace(self.bbox[1] - n_bins_pad_y_min * 8, self.bbox[1] - n_bins_pad_y_min * 8 + (n_bins_y_data) * 8, n_bins_y_data + 1)):
+                xarr.append(x)
+                yarr.append(y)
+                xiarr.append(xidx-0.5)
+                yiarr.append(yidx-0.5)
+
+        filler_square_geometry = geopandas.points_from_xy(xarr, yarr).buffer(2 * 4 / np.sqrt(2) * np.tan(22.5 / 180 * np.pi), cap_style=3)
+        filler_square_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=filler_square_geometry.rotate(45))
+
+        self.octagon_gdf = pandas.concat((octagon_gdf, filler_square_gdf), ignore_index=True)
+        
 
     def _get_projected_geometry(self, geojson_geometry):
             geometry = geopandas.GeoSeries(shape(geojson_geometry))
@@ -448,13 +477,14 @@ class OSMProcessor:
 
 if __name__ == '__main__':
     # osm_data = geojson.load(open('overath_extended.geojson', encoding='utf8'))
-    osm_data = geojson.load(open('test/t_intersection_and_closed_loop.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
 
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
-    osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
+    # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
+    osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('test/t_intersection_and_closed_loop.csv')
+    osm_processor.write_to_file('test/industrial_fences.csv')
 
 
 
