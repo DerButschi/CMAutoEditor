@@ -260,16 +260,34 @@ def create_line_graph(osm_processor, config, name):
     osm_processor.network_graphs[name]['line_graph'] = line_graph
 
 
-def create_square_graph(osm_processor, config, name):
+def create_octagon_graph(osm_processor, config, name):
+    line_graph = osm_processor.network_graphs[name]['line_graph']
+    gdf = osm_processor.octagon_gdf
+                
+    square_graph = line_graph_to_square_graph(line_graph, gdf)
+    handle_square_graph_duplicate_edges(square_graph)
+
+    draw_square_graph(square_graph, show=True)
+    osm_processor.network_graphs[name]['square_graph'] = square_graph
+
+def create_square_graph(osm_processor, config: dict, name: str):
     line_graph = osm_processor.network_graphs[name]['line_graph']
     gdf = osm_processor.gdf
+
+    square_graph = line_graph_to_square_graph(line_graph, gdf)
+    handle_square_graph_duplicate_edges(square_graph)
+
+    draw_square_graph(square_graph, show=True)
+    osm_processor.network_graphs[name]['square_graph'] = square_graph
+
+def line_graph_to_square_graph(line_graph: nx.MultiGraph, grid_gdf: geopandas.GeoDataFrame) -> nx.MultiGraph:
     square_graph = nx.MultiGraph()
 
     for edge in line_graph.edges:
         edge_data = line_graph.edges[edge]
         ls = edge_data['ls']
         
-        squares = gdf.loc[gdf.sindex.query(ls, predicate='intersects')]
+        squares = grid_gdf.loc[grid_gdf.sindex.query(ls, predicate='intersects')]
         ls_intersection = squares.geometry.intersection(ls)
         intersection_mid_points = []
         for idx in range(len(ls_intersection.values)):
@@ -290,16 +308,18 @@ def create_square_graph(osm_processor, config, name):
 
         squares_along_way = []
         for p in sorted_intersection_mid_points:
-            gdf_point = gdf.loc[gdf.sindex.query(p, predicate='within')]
-            if len(gdf_point) > 0:
-                # xidx, yidx = gdf_ls.loc[gdf.contains(point), ['xidx', 'yidx']].values[0]
-                xidx, yidx = gdf_point.loc[:, ['xidx', 'yidx']].values[0]
+            grid_gdf_point = grid_gdf.loc[grid_gdf.sindex.query(p, predicate='within')]
+            if len(grid_gdf_point) > 0:
+                # xidx, yidx = grid_gdf_ls.loc[grid_gdf.contains(point), ['xidx', 'yidx']].values[0]
+                xidx, yidx = grid_gdf_point.loc[:, ['xidx', 'yidx']].values[0]
                 squares_along_way.append((xidx, yidx))
 
         if len(squares_along_way) > 1:
             square_graph.add_edge(squares_along_way[0], squares_along_way[-1], squares=squares_along_way, element_idx=edge_data['element_idx'])
-                
-    
+
+    return square_graph
+
+def handle_square_graph_duplicate_edges(square_graph: nx.MultiGraph):
     nodes = list(square_graph.nodes)
     for node in nodes:
         edges = list({edge for edge in square_graph.edges(node)})
@@ -336,133 +356,6 @@ def create_square_graph(osm_processor, config, name):
 
                 for edge_key in to_remove:
                     square_graph.remove_edge(node, nb_node, key=edge_key)
-
-    node_dict = {}
-    for node in square_graph.nodes:
-        node_dict[node] = node
-
-    draw_square_graph(square_graph, show=True)
-    osm_processor.network_graphs[name]['square_graph'] = square_graph
-
-
-
-def create_network_graph_old(df, gdf, element, cm_types):
-    if len(df) == 0:
-        return df
-
-    if name not in road_graphs:
-        road_graphs[name] = nx.MultiGraph()
-
-    road_graph = road_graphs[name]
-
-    coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
-    points = [Point(coord[0], coord[1]) for coord in coords]
-
-    ls = LineString(coords)
-    # ls_crosses = np.bitwise_or(gdf.geometry.crosses(ls), gdf.geometry.contains(ls))
-
-    # squares = gdf.loc[ls_crosses, ['x', 'y', 'xidx', 'yidx']]
-    squares = gdf.loc[gdf.sindex.query(ls, predicate='intersects')]
-    ls_intersection = squares.geometry.intersection(ls)
-    intersection_mid_points = []
-    for idx in range(len(ls_intersection.values)):
-        g = ls_intersection.values[idx]
-        if type(g) == LineString:
-            intersection_mid_points.append(g.interpolate(0.5, normalized=True))
-        elif type(g) == MultiLineString:
-            for gidx in range(len(g.geoms)):
-                intersection_mid_points.append(g.geoms[gidx].interpolate(0.5, normalized=True))
-        else:
-            raise Exception
-
-    if len(intersection_mid_points) > 1:
-        intersection_mid_points = np.array(intersection_mid_points, dtype=object)
-        intersection_mid_point_dist = [ls.project(mid_point) for mid_point in intersection_mid_points]
-        sorted_indices = np.argsort(intersection_mid_point_dist)
-        sorted_intersection_mid_points = intersection_mid_points[sorted_indices]
-    else:
-        sorted_intersection_mid_points = intersection_mid_points
-
-    squares_along_way = []
-    for p in sorted_intersection_mid_points:
-        gdf_point = gdf.loc[gdf.sindex.query(p, predicate='within')]
-        if len(gdf_point) > 0:
-            # xidx, yidx = gdf_ls.loc[gdf.contains(point), ['xidx', 'yidx']].values[0]
-            xidx, yidx = gdf_point.loc[:, ['xidx', 'yidx']].values[0]
-            squares_along_way.append((xidx, yidx))
-
-    # squares = squares.sort_index()
-
-    # normalized_dists = []
-    # s = gdf.loc[ls_crosses]
-    # for poly in s.geometry:
-    #     	plt.plot(poly.exterior.xy[0], poly.exterior.xy[1], '-k')
-    # for idx in range(len(squares)):
-    #     normalized_dists.append(ls.project(Point(squares['x'].values[idx], squares['y'].values[idx]), normalized=True))
-
-    # df['dist_along_way'] = normalized_dists
-
-    # gdf_ls = gdf.loc[ls_crosses]
-    nodes = []
-    for node_idx in range(element.countNodes()):
-        node_id = element.nodes()[node_idx].id()
-        point = Point(coords[node_idx])
-        # gdf_point = gdf_ls.loc[gdf.contains(point)]
-        gdf_point = gdf.loc[gdf.sindex.query(point, 'within')]
-        if len(gdf_point) > 0:
-            # xidx, yidx = gdf_ls.loc[gdf.contains(point), ['xidx', 'yidx']].values[0]
-            xidx, yidx = gdf_point.loc[:, ['xidx', 'yidx']].values[0]
-            nodes.append((node_id, xidx, yidx))
-
-    # sorted_df = df.sort_values(by='dist_along_way')
-
-    # remove duplicates
-    # filtered_squares_along_way = []
-    # for sidx in range(1, len(squares_along_way)):
-    #     if squares_along_way[sidx] != squares_along_way[sidx - 1]:
-    #         filtered_squares_along_way.append(squares_along_way[sidx])
-
-    # squares_along_way = filtered_squares_along_way
-
-
-    node_idx = 0
-    current_squares = []
-    current_nodes = []
-    for sq_idx, sq in enumerate(squares_along_way):
-        df_xidx, df_yidx = sq
-
-        current_squares.append((df_xidx, df_yidx))
-        if len(current_squares) > 1 and (np.abs(current_squares[-2][0] - current_squares[-1][0]) > 1 or np.abs(current_squares[-2][1] - current_squares[-1][1]) > 1):
-            current_squares = [current_squares[-1]]
-            current_nodes = []
-
-        while node_idx < len(nodes) and nodes[node_idx][1] == df_xidx and nodes[node_idx][2] == df_yidx:
-            node_id, node_xidx, node_yidx = nodes[node_idx]
-            current_nodes.append((node_id, node_xidx, node_yidx))
-            if len(current_nodes) == 2:
-                road_graph.add_edge(current_nodes[0][0], current_nodes[1][0], squares=current_squares)
-                square_diffs = [(current_squares[idx][0] - current_squares[idx-1][0], current_squares[idx][1] - current_squares[idx-1][1]) for idx in range(1, len(current_squares))]
-                road_graph.nodes[current_nodes[0][0]]['square'] = current_nodes[0][1:3]
-                road_graph.nodes[current_nodes[1][0]]['square'] = current_nodes[1][1:3]
-
-                current_nodes = [current_nodes[1]]
-                current_squares = [current_squares[-1]]
-            
-            node_idx += 1
-
-        if len(current_nodes) == 0:
-            current_nodes.append(('generic_{}'.format(globals()['generic_node_cnt']), df_xidx, df_yidx))
-            globals()['generic_node_cnt'] += 1
-
-        if sq_idx == len(squares_along_way) - 1 and len(current_squares) > 1 and len(current_nodes) == 1:
-            current_nodes.append(('generic_{}'.format(globals()['generic_node_cnt']), df_xidx, df_yidx))
-            globals()['generic_node_cnt'] += 1
-            road_graph.add_edge(current_nodes[0][0], current_nodes[1][0], squares=current_squares)
-            square_diffs = [(current_squares[idx][0] - current_squares[idx-1][0], current_squares[idx][1] - current_squares[idx-1][1]) for idx in range(1, len(current_squares))]
-            road_graph.nodes[current_nodes[0][0]]['square'] = current_nodes[0][1:3]
-            road_graph.nodes[current_nodes[1][0]]['square'] = current_nodes[1][1:3]
-        
-    return df
 
 
 def assign_type_randomly_in_area(osm_processor, config, element_entry):
