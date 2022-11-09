@@ -15,12 +15,12 @@
 
 import numpy as np
 import networkx as nx
-from shapely.geometry import LineString, Point, MultiPoint, MultiLineString
-from shapely.ops import split
+from shapely.geometry import LineString, Point, MultiPoint, MultiLineString, Polygon
+from shapely.ops import split, substring
 import geopandas
 import pandas
 import logging
-from profiles.general import road_tiles, rail_tiles, stream_tiles
+from profiles.general import road_tiles, rail_tiles, stream_tiles, fence_tiles
 import matplotlib.pyplot as plt
 
 road_direction_dict = {
@@ -28,13 +28,23 @@ road_direction_dict = {
     (0, -1): 'd',
     (1, 0): 'r',
     (-1, 0): 'l',
+
+    (1, 1): 'ur',
+    (1, -1): 'dr',
+    (-1, 1): 'ul',
+    (-1, -1): 'dl',
 }
 
 opposite_road_direction_dict = {
     'u': 'd',
     'd': 'u',
     'r': 'l',
-    'l': 'r'
+    'l': 'r',
+
+    'ur': 'dl',
+    'ul': 'dr',
+    'dr': 'ul',
+    'dl': 'ur'
 }
 
 def draw_line_graph(graph: nx.MultiGraph, show: bool = False):
@@ -50,15 +60,27 @@ def draw_line_graph(graph: nx.MultiGraph, show: bool = False):
     if show:
         plt.show()
 
-def draw_square_graph(graph: nx.MultiGraph, show: bool = False):
+def draw_square_graph(graph: nx.MultiGraph, gdf: geopandas.GeoDataFrame = None, show: bool = False):
     plt.figure()
     plt.axis('equal')
     for edge in graph.edges:
         squares = graph.get_edge_data(*edge)['squares']
-        plt.plot([sq[0] for sq in squares], [sq[1] for sq in squares], '-')
+        if gdf is not None:
+            square_centers = [gdf.loc[(gdf.xidx == sq[0]) & (gdf.yidx == sq[1]), ['x', 'y']].values[0] for sq in squares]
+            square_geometries = [gdf.loc[(gdf.xidx == sq[0]) & (gdf.yidx == sq[1])].geometry.values[0] for sq in squares]
+            for polygon in square_geometries:
+                plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], '-r')
+
+            plt.plot([sq[0] for sq in square_centers], [sq[1] for sq in square_centers], '-+')
+        else:
+            plt.plot([sq[0] for sq in square_centers], [sq[1] for sq in square_centers], '-')
     
     for node in graph.nodes:
-        plt.plot(node[0], node[1], 'ko')
+        if gdf is not None:
+            node_coord = gdf.loc[(gdf.xidx == node[0]) & (gdf.yidx == node[1]), ['x', 'y']].values[0]
+            plt.plot(node_coord[0], node_coord[1], 'ko')
+        else:
+            plt.plot(node[0], node[1], 'ko')
 
     if show:
         plt.show()
@@ -69,7 +91,9 @@ def get_grid_cells_to_fill(gdf, geometry):
     # within = gdf.geometry.within(geometry)
     # intersecting = gdf.geometry.intersects(geometry)
     is_border = np.bitwise_and(intersecting, ~within)
-    is_largest_square_area = gdf.index.isin((gdf.loc[is_border].geometry.intersection(geometry).area > 32).index)
+    gdf_border = gdf.loc[is_border]
+    gdf_border_largest_square_area = gdf_border.loc[gdf_border.geometry.intersection(geometry).area > 32]
+    is_largest_square_area = gdf.index.isin(gdf_border_largest_square_area.index)
     to_fill = np.bitwise_or(within, is_largest_square_area)
 
     return to_fill
@@ -225,6 +249,7 @@ def create_line_graph(osm_processor, config, name):
 
     line_graph = nx.MultiGraph()
 
+
     for line_idx in range(len(lines)):
         ls = lines.iloc[line_idx].geometry
         other_line_indices = lines_intersecting[1][np.where(np.bitwise_and(lines_intersecting[0] == line_idx, lines_intersecting[1] != line_idx))[0]]
@@ -244,9 +269,12 @@ def create_line_graph(osm_processor, config, name):
             intersection_points = sorted(intersection_points, key=lambda p: ls.project(p))
         else:
             intersection_points = [p for p in ls.boundary.geoms]
-        
-        ls_splits = split(ls, MultiPoint(intersection_points))
-        ls_splits = [geom for geom in ls_splits.geoms]
+
+        if len(intersection_points) > 0:
+            ls_splits = split(ls, MultiPoint(intersection_points))
+            ls_splits = [geom for geom in ls_splits.geoms]
+        else:
+            ls_splits = [ls]
 
         for lidx, ls_split in enumerate(ls_splits):
             if type(ls_split) == LineString:
@@ -256,7 +284,7 @@ def create_line_graph(osm_processor, config, name):
             else:
                 print('Warning: linestring split was type {}.'.format(type(ls_split)))
 
-    draw_line_graph(line_graph, show=True)
+    draw_line_graph(line_graph, show=False)
     osm_processor.network_graphs[name]['line_graph'] = line_graph
 
 
@@ -264,31 +292,57 @@ def create_octagon_graph(osm_processor, config, name):
     line_graph = osm_processor.network_graphs[name]['line_graph']
     gdf = osm_processor.octagon_gdf
                 
-    square_graph = line_graph_to_square_graph(line_graph, gdf)
+    square_graph = line_graph_to_square_graph(line_graph, grid_gdf=osm_processor.gdf, snap_gdf=gdf, snap_to_grid=True)
     handle_square_graph_duplicate_edges(square_graph)
 
-    draw_square_graph(square_graph, show=True)
+    go_on = True
+    while go_on:
+        go_on = False
+        for edge in square_graph.edges:
+            np_squares = np.array(square_graph.get_edge_data(*edge)['squares'])
+            sharp_angle_idx = None
+            for idx in range(len(np_squares)-2):
+                if np.linalg.norm(np_squares[idx+2] - np_squares[idx]) == 1:
+                    sharp_angle_idx = idx + 1
+                    break
+            if sharp_angle_idx is not None:
+                squares = square_graph.get_edge_data(*edge)['squares']
+                squares.pop(sharp_angle_idx)
+                square_graph.get_edge_data(*edge)['squares'] = squares
+                go_on = True
+
+    draw_square_graph(square_graph, gdf=gdf, show=False)
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
 def create_square_graph(osm_processor, config: dict, name: str):
     line_graph = osm_processor.network_graphs[name]['line_graph']
     gdf = osm_processor.gdf
 
-    square_graph = line_graph_to_square_graph(line_graph, gdf)
+    square_graph = line_graph_to_square_graph(line_graph, grid_gdf=gdf, snap_gdf=gdf)
     handle_square_graph_duplicate_edges(square_graph)
 
-    draw_square_graph(square_graph, show=True)
+    draw_square_graph(square_graph, gdf=gdf, show=False)
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
-def line_graph_to_square_graph(line_graph: nx.MultiGraph, grid_gdf: geopandas.GeoDataFrame) -> nx.MultiGraph:
+def line_graph_to_square_graph(line_graph: nx.MultiGraph, grid_gdf: geopandas.GeoDataFrame, snap_gdf: geopandas.GeoDataFrame, snap_to_grid=False) -> nx.MultiGraph:
     square_graph = nx.MultiGraph()
 
     for edge in line_graph.edges:
         edge_data = line_graph.edges[edge]
         ls = edge_data['ls']
+        if snap_to_grid:
+            ls_coords = np.array(ls.coords)
+            ls_coords[:,0] = ls_coords[:,0] - grid_gdf.x.min()
+            ls_coords[:,1] = ls_coords[:,1] - grid_gdf.y.min()
+            ls_coords = np.round(ls_coords / 8 ) * 8
+            ls_coords[:, 0] = ls_coords[:, 0] + grid_gdf.x.min()
+            ls_coords[:, 1] = ls_coords[:, 1] + grid_gdf.y.min()
+            ls = LineString(ls_coords)
         
-        squares = grid_gdf.loc[grid_gdf.sindex.query(ls, predicate='intersects')]
+        squares = snap_gdf.loc[snap_gdf.sindex.query(ls, predicate='intersects')]
         ls_intersection = squares.geometry.intersection(ls)
+        if ls_intersection.is_empty.all():
+            continue
         intersection_mid_points = []
         for idx in range(len(ls_intersection.values)):
             g = ls_intersection.values[idx]
@@ -308,14 +362,22 @@ def line_graph_to_square_graph(line_graph: nx.MultiGraph, grid_gdf: geopandas.Ge
 
         squares_along_way = []
         for p in sorted_intersection_mid_points:
-            grid_gdf_point = grid_gdf.loc[grid_gdf.sindex.query(p, predicate='within')]
-            if len(grid_gdf_point) > 0:
+            snap_gdf_point = snap_gdf.loc[snap_gdf.sindex.query(p, predicate='within')]
+            if len(snap_gdf_point) > 0:
                 # xidx, yidx = grid_gdf_ls.loc[grid_gdf.contains(point), ['xidx', 'yidx']].values[0]
-                xidx, yidx = grid_gdf_point.loc[:, ['xidx', 'yidx']].values[0]
+                xidx, yidx = snap_gdf_point.loc[:, ['xidx', 'yidx']].values[0]
                 squares_along_way.append((xidx, yidx))
 
+
         if len(squares_along_way) > 1:
-            square_graph.add_edge(squares_along_way[0], squares_along_way[-1], squares=squares_along_way, element_idx=edge_data['element_idx'])
+            square_graph.add_edge(squares_along_way[0], squares_along_way[-1], squares=squares_along_way, element_idx=edge_data['element_idx'], 
+            square_node_order=[squares_along_way[0], squares_along_way[-1]])
+                    
+
+                
+
+
+
 
     return square_graph
 
@@ -414,6 +476,9 @@ def assign_rail_tiles_to_network(osm_processor, config, name):
 
 def assign_stream_tiles_to_network(osm_processor, config, name):
     assign_tiles_to_network(osm_processor, config, name, stream_tiles)
+
+def assign_fence_tiles_to_network(osm_processor, config, name):
+    assign_tiles_to_network(osm_processor, config, name, fence_tiles)
 
 def assign_tiles_to_network(osm_processor, config, name, tile_df):
     logger = logging.getLogger('osm2cm')
@@ -579,37 +644,54 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
         a = 1
 
     # df = df.drop(df.loc[(df.name == name) & (df.direction == -1)].index)
-                        
+
+def remove_duplicate_linestring_coordinates(ls):
+    unique_coords, unique_coord_counts = np.unique(ls.coords, axis=0, return_counts=True)
+    linestrings = [ls]
+    if (unique_coord_counts > 1).any():
+        duplicate_idx = np.where(unique_coord_counts > 1)[0]
+        duplicate_coords = unique_coords[duplicate_idx][0]
+        didx = np.where((ls.xy[0] == duplicate_coords[0]) & (ls.xy[1] == duplicate_coords[1]))[0]
+        didx = didx[(didx > 0) & (didx < len(ls.xy[0]) - 1)]
+        if len(didx) > 0:
+            linestrings = [LineString(ls.coords[0:didx[0]+1]), LineString(ls.coords[didx[0]:])]
+        else:
+            pass
+    return linestrings
+
 def collect_network_data(osm_processor, config, element_entry):
+    logger = logging.getLogger('osm2cm')
     name = element_entry['name']
     if element_entry['name'] not in osm_processor.network_graphs:
         osm_processor.network_graphs[name] = {}
 
-    if type(element_entry['geometry']) == LineString:
-        ls = element_entry['geometry'] 
-        unique_coords, unique_coord_counts = np.unique(ls.coords, axis=0, return_counts=True)
-        linestrings = [ls]
-        if (unique_coord_counts > 1).any():
-            duplicate_idx = np.where(unique_coord_counts > 1)[0]
-            duplicate_coords = unique_coords[duplicate_idx][0]
-            didx = np.where((ls.xy[0] == duplicate_coords[0]) & (ls.xy[1] == duplicate_coords[1]))[0]
-            didx = didx[(didx > 0) & (didx < len(ls.xy[0]) - 1)]
-            if len(didx) > 0:
-                linestrings = [LineString(ls.coords[0:didx[0]+1]), LineString(ls.coords[didx[0]:])]
-            else:
-                pass
-        
+    geometry = element_entry['geometry']
+    geometry = osm_processor.effective_bbox_polygon.intersection(geometry)
+
+    linestrings = []
+    if type(geometry) == LineString:
+        ls = geometry 
+        linestrings = remove_duplicate_linestring_coordinates(ls)
+    elif type(geometry) == Polygon:
+        exterior_ls = LineString(geometry.exterior.coords)
+        # closed rings don't work with the rest of the tooling...
+        linestrings.extend(remove_duplicate_linestring_coordinates(substring(exterior_ls, 0, 0.5, normalized=True)))
+        linestrings.extend(remove_duplicate_linestring_coordinates(substring(exterior_ls, 0.5, 1.0, normalized=True)))
+        for interior in geometry.interiors:
+            linestrings.extend(remove_duplicate_linestring_coordinates(substring(interior, 0, 0.5, normalized=True)))
+            linestrings.extend(remove_duplicate_linestring_coordinates(substring(interior, 0.5, 1.0, normalized=True)))
+
+    else:
+        logger.warn('Network geometry should be LineString but found {}.'.format(type(geometry)))
+        return
+
+    if len(linestrings) > 0:
         element_entry_indices = [element_entry['idx']] * len(linestrings)
-
-
-
 
         element_gdf = geopandas.GeoDataFrame({'element_idx': element_entry_indices, 'geometry': linestrings})
         if 'lines' not in osm_processor.network_graphs[name]:
             osm_processor.network_graphs[name]['lines'] = element_gdf
         else:
             osm_processor.network_graphs[name]['lines'] = pandas.concat((osm_processor.network_graphs[name]['lines'], element_gdf), ignore_index=True)
-    else:
-        print('Warning, network geometry should be LineString but found {}.'.format(type(element_entry['geometry'])))
         
     

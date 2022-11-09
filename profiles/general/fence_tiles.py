@@ -58,6 +58,10 @@ def build_fence_tile_df():
         'd': [],
         'r': [],
         'l': [],
+        'ur': [],
+        'ul': [],
+        'dr': [],
+        'dl': [],
         'direction': [],
         'row': [],
         'col': [],
@@ -78,6 +82,10 @@ def build_fence_tile_df():
         d_val = None
         r_val = None
         l_val = None
+        ur_val = None
+        ul_val = None
+        dr_val = None
+        dl_val = None
         cost = 1.0
 
         n_connections = 0
@@ -94,6 +102,18 @@ def build_fence_tile_df():
             if entry[0] == 'l':
                 l_val = entry[1]
                 n_connections += 1
+            if entry[0] == 'ur':
+                ur_val = entry[1]
+                n_connections += 1
+            if entry[0] == 'ul':
+                ul_val = entry[1]
+                n_connections += 1
+            if entry[0] == 'dr':
+                dr_val = entry[1]
+                n_connections += 1
+            if entry[0] == 'dl':
+                dl_val = entry[1]
+                n_connections += 1
             if entry[0] == 'cost':
                 cost = entry[1]
 
@@ -101,6 +121,10 @@ def build_fence_tile_df():
         fence_tile_df_dict['d'].append(d_val)
         fence_tile_df_dict['r'].append(r_val)
         fence_tile_df_dict['l'].append(l_val)
+        fence_tile_df_dict['ur'].append(ur_val)
+        fence_tile_df_dict['ul'].append(ul_val)
+        fence_tile_df_dict['dr'].append(dr_val)
+        fence_tile_df_dict['dl'].append(dl_val)
         fence_tile_df_dict['n_connections'].append(n_connections)
         fence_tile_df_dict['cost'].append(cost)
 

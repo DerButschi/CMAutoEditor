@@ -38,7 +38,7 @@ import logging
 
 
 
-config = json.load(open('osm_fences_only_config.json', 'r'))
+config = json.load(open('default_osm_config.json', 'r'))
 
 
 
@@ -116,6 +116,7 @@ class OSMProcessor:
         self.bbox = bbox
         self.bbox_lon_lat = bbox_lon_lat
         self.idx_bbox = None
+        self.effective_bbox_polygon = None
         self.transformer = None
         self.gdf = None
         self.df = None
@@ -150,7 +151,7 @@ class OSMProcessor:
                 (1, "create_line_graph", "by_config_name"), 
                 (2, "create_octagon_graph", "by_config_name"), 
                 (3, "assign_fence_tiles_to_network", "by_config_name")
-            ]
+            ],
         }
 
         self.logger = logging.getLogger('osm2cm')
@@ -182,6 +183,12 @@ class OSMProcessor:
         n_bins_y_data = n_bins_y + n_bins_pad_y_min + n_bins_pad_y_max
 
         self.idx_bbox = [n_bins_pad_x_min, n_bins_pad_y_min, n_bins_pad_x_min + n_bins_x - 1, n_bins_pad_y_min + n_bins_y - 1]
+        self.effective_bbox_polygon = Polygon([
+            (self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[1] - n_bins_pad_y_min * 8),
+            (self.bbox[0] - n_bins_pad_x_min * 8 + n_bins_x_data * 8, self.bbox[1] - n_bins_pad_y_min * 8),
+            (self.bbox[0] - n_bins_pad_x_min * 8 + n_bins_x_data * 8, self.bbox[1] - n_bins_pad_y_min * 8 + n_bins_y_data * 8),
+            (self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[1] - n_bins_pad_y_min * 8 + n_bins_y_data * 8),
+        ])
 
         xarr = []
         yarr = []
@@ -213,7 +220,9 @@ class OSMProcessor:
             }, geometry=geometry)
 
         octagon_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4 / np.cos(22.5 / 180 * np.pi), cap_style=1, resolution=2)
-        octagon_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=octagon_geometry.rotate(22.5))
+        self.octagon_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=octagon_geometry.rotate(22.5))
+        circle_geometry1 = geopandas.points_from_xy(xarr, yarr).buffer(2 * np.sqrt(2), cap_style=1)
+        self.circle_geometry1_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=circle_geometry1)
 
         xarr = []
         yarr = []
@@ -226,10 +235,13 @@ class OSMProcessor:
                 xiarr.append(xidx-0.5)
                 yiarr.append(yidx-0.5)
 
-        filler_square_geometry = geopandas.points_from_xy(xarr, yarr).buffer(2 * 4 / np.sqrt(2) * np.tan(22.5 / 180 * np.pi), cap_style=3)
+        filler_square_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4 * np.tan(22.5 / 180 * np.pi), cap_style=3)
         filler_square_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=filler_square_geometry.rotate(45))
+        circle_geometry2 = geopandas.points_from_xy(xarr, yarr).buffer(2 * np.sqrt(2), cap_style=1)
+        self.circle_geometry2_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=circle_geometry2)
 
-        self.octagon_gdf = pandas.concat((octagon_gdf, filler_square_gdf), ignore_index=True)
+        # self.octagon_gdf = pandas.concat((self.octagon_gdf, filler_square_gdf), ignore_index=True)
+        self.circle_gdf = pandas.concat((self.circle_geometry1_gdf, self.circle_geometry2_gdf), ignore_index=True)
         
 
     def _get_projected_geometry(self, geojson_geometry):
@@ -476,15 +488,15 @@ class OSMProcessor:
 
 
 if __name__ == '__main__':
-    # osm_data = geojson.load(open('overath_extended.geojson', encoding='utf8'))
-    osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('overath_extended.geojson', encoding='utf8'))
+    # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
 
-    # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
+    osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
     # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
-    osm_processor = OSMProcessor(config=config)
+    # osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('test/industrial_fences.csv')
+    osm_processor.write_to_file('scenarios/overath_extended/overath_extended_osm.csv')
 
 
 

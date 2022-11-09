@@ -52,8 +52,10 @@ MENU_DICT = {
     'Ground 1': pyautogui.Point(113, 107),
     'Ground 2': pyautogui.Point(105, 123),
     'Ground 3': pyautogui.Point(105, 144),
+    'Brush': pyautogui.Point(107, 165),
     'Foliage': pyautogui.Point(110, 185),
     'Roads': pyautogui.Point(107, 203),
+    "Walls/Fences": pyautogui.Point(105, 224),
     'Water': pyautogui.Point(81, 438),
     'Plow NS': pyautogui.Point(135, 552),
     'Plow EW': pyautogui.Point(188, 552),
@@ -114,7 +116,20 @@ MENU_DICT = {
     'Sand': pyautogui.Point(134, 440),
     'Railroad': pyautogui.Point(36, 497),
     'Stream': pyautogui.Point(108, 497),
-
+    'Stone': pyautogui.Point(81, 381),
+    'Tall Stone': pyautogui.Point(135, 381),
+    'Brick': pyautogui.Point(189, 381),
+    'Tall Brick': pyautogui.Point(27, 441),
+    'Rural Stone': pyautogui.Point(81, 441),
+    'Hedge': pyautogui.Point(135, 441),
+    'Low Bocage': pyautogui.Point(189, 441),
+    'Wood Fence': pyautogui.Point(27, 498),
+    'Wire Fence': pyautogui.Point(81, 498),
+    'Picket': pyautogui.Point(135, 498),
+    'Sticks': pyautogui.Point(189, 498),
+    'Lt Forest': pyautogui.Point(27, 383),
+    'Deep Marsh': pyautogui.Point(27, 440),
+    'Brush_brush': pyautogui.Point(110, 383),
 }
 
 GROUND_2_DICT = {
