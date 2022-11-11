@@ -21,6 +21,7 @@ import geopandas
 import pandas
 import logging
 from profiles.general import road_tiles, rail_tiles, stream_tiles, fence_tiles
+from .path_search import search_path
 import matplotlib.pyplot as plt
 
 road_direction_dict = {
@@ -249,7 +250,6 @@ def create_line_graph(osm_processor, config, name):
 
     line_graph = nx.MultiGraph()
 
-
     for line_idx in range(len(lines)):
         ls = lines.iloc[line_idx].geometry
         other_line_indices = lines_intersecting[1][np.where(np.bitwise_and(lines_intersecting[0] == line_idx, lines_intersecting[1] != line_idx))[0]]
@@ -261,8 +261,10 @@ def create_line_graph(osm_processor, config, name):
                     filtered_intersection_points.append(p)
                 elif type(p) == MultiPoint:
                     filtered_intersection_points.extend([g for g in p.geoms])
+                elif type(p) == LineString or type(p) == MultiLineString:
+                    filtered_intersection_points.extend([g for g in p.boundary.geoms])
                 else:
-                    logger.warning('Warning, intersection geometry is of type {}!'.format(type(p)))
+                    logger.warning('Intersection geometry of type {} is not handled.'.format(type(p)))
             
             intersection_points = filtered_intersection_points
             intersection_points.extend([p for p in ls.boundary.geoms if p not in intersection_points])
@@ -280,11 +282,11 @@ def create_line_graph(osm_processor, config, name):
             if type(ls_split) == LineString:
                 p1 = Point(ls_split.coords[0])
                 p2 = Point(ls_split.coords[-1])
-                line_graph.add_edge((p1.x, p1.y), (p2.x, p2.y), ls=ls_split, element_idx=lines.iloc[line_idx].element_idx)
+                line_graph.add_edge((p1.x, p1.y), (p2.x, p2.y), ls=ls_split, element_idx=lines.iloc[line_idx].element_idx, from_node_to_node=[(p1.x, p1.y), (p2.x, p2.y)])
             else:
-                print('Warning: linestring split was type {}.'.format(type(ls_split)))
+                logger.warn('LineString split was of type {}.'.format(type(ls_split)))
 
-    draw_line_graph(line_graph, show=False)
+    draw_line_graph(line_graph, show=True)
     osm_processor.network_graphs[name]['line_graph'] = line_graph
 
 
@@ -311,7 +313,7 @@ def create_octagon_graph(osm_processor, config, name):
                 square_graph.get_edge_data(*edge)['squares'] = squares
                 go_on = True
 
-    draw_square_graph(square_graph, gdf=gdf, show=False)
+    draw_square_graph(square_graph, gdf=gdf, show=True)
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
 def create_square_graph(osm_processor, config: dict, name: str):
@@ -321,7 +323,7 @@ def create_square_graph(osm_processor, config: dict, name: str):
     square_graph = line_graph_to_square_graph(line_graph, grid_gdf=gdf, snap_gdf=gdf)
     handle_square_graph_duplicate_edges(square_graph)
 
-    draw_square_graph(square_graph, gdf=gdf, show=False)
+    draw_square_graph(square_graph, gdf=gdf, show=True)
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
 def line_graph_to_square_graph(line_graph: nx.MultiGraph, grid_gdf: geopandas.GeoDataFrame, snap_gdf: geopandas.GeoDataFrame, snap_to_grid=False) -> nx.MultiGraph:
@@ -371,13 +373,7 @@ def line_graph_to_square_graph(line_graph: nx.MultiGraph, grid_gdf: geopandas.Ge
 
         if len(squares_along_way) > 1:
             square_graph.add_edge(squares_along_way[0], squares_along_way[-1], squares=squares_along_way, element_idx=edge_data['element_idx'], 
-            square_node_order=[squares_along_way[0], squares_along_way[-1]])
-                    
-
-                
-
-
-
+            from_node_to_node=[squares_along_way[0], squares_along_way[-1]])
 
     return square_graph
 
@@ -414,10 +410,17 @@ def handle_square_graph_duplicate_edges(square_graph: nx.MultiGraph):
                         to_remove.append(edge_key)
                         # square_graph.remove_edge(node, nb_node)
                         for sq_line in square_lines:
-                            square_graph.add_edge(sq_line[0], sq_line[-1], squares=sq_line, element_idx=element_idx)
+                            square_graph.add_edge(sq_line[0], sq_line[-1], squares=sq_line, element_idx=element_idx, from_node_to_node=[sq_line[0], sq_line[-1]])
 
                 for edge_key in to_remove:
                     square_graph.remove_edge(node, nb_node, key=edge_key)
+
+def remove_degree_two_nodes_from_graph(graph: nx.MultiGraph, edge_type: str = 'ls') -> None:
+    degree_two_nodes = [node for node, degree in graph.degree if degree == 2]
+    for node in degree_two_nodes:
+        neighbors = [nb for nb in nx.neighbors(graph, node)]
+        pass
+        
 
 
 def assign_type_randomly_in_area(osm_processor, config, element_entry):
@@ -628,6 +631,7 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
             sub_df.loc[tile_condition, 'cat1'] = cm_type['cat1']
             sub_df.loc[tile_condition, 'direction'] = 'Direction {}'.format(direction + 1)
             sub_df.loc[tile_condition, 'cat2'] = 'Road Tile {}'.format(row * 3 + col + 1)
+            sub_df.loc[tile_condition, 'priority'] = config[name]['priority']
         
         osm_processor._append_to_df(sub_df)
 
@@ -672,6 +676,9 @@ def collect_network_data(osm_processor, config, element_entry):
     if type(geometry) == LineString:
         ls = geometry 
         linestrings = remove_duplicate_linestring_coordinates(ls)
+    elif type(geometry) == MultiLineString:
+        for ls in geometry.geoms:
+            linestrings.extend(remove_duplicate_linestring_coordinates(ls))
     elif type(geometry) == Polygon:
         exterior_ls = LineString(geometry.exterior.coords)
         # closed rings don't work with the rest of the tooling...
@@ -694,4 +701,5 @@ def collect_network_data(osm_processor, config, element_entry):
         else:
             osm_processor.network_graphs[name]['lines'] = pandas.concat((osm_processor.network_graphs[name]['lines'], element_gdf), ignore_index=True)
         
-    
+def create_square_graph_path_search(osm_processor, config, name):
+    search_path(osm_processor.network_graphs[name]['line_graph'], osm_processor.gdf, osm_processor.df)

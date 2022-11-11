@@ -149,8 +149,8 @@ class OSMProcessor:
             "fence_tiles": [
                 (0, "collect_network_data", "by_element"), 
                 (1, "create_line_graph", "by_config_name"), 
-                (2, "create_octagon_graph", "by_config_name"), 
-                (3, "assign_fence_tiles_to_network", "by_config_name")
+                (4, "create_square_graph_path_search", "by_config_name"), 
+                (5, "assign_fence_tiles_to_network", "by_config_name")
             ],
         }
 
@@ -216,7 +216,7 @@ class OSMProcessor:
             'direction': [-1] * len(xarr),
             'id': [-1] * len(xarr),
             'name': [-1] * len(xarr),
-            'level': [-1] * len(xarr),
+            'priority': [-1] * len(xarr),
             }, geometry=geometry)
 
         octagon_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4 / np.cos(22.5 / 180 * np.pi), cap_style=1, resolution=2)
@@ -315,7 +315,7 @@ class OSMProcessor:
         return stages
 
     def _get_sub_df(self, idx):
-        return self.gdf.loc[idx, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name', 'level']].copy(deep=True)
+        return self.gdf.loc[idx, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name', 'priority']].copy(deep=True)
 
     def _append_to_df(self, sub_df: pandas.DataFrame):
         if self.df is None:
@@ -488,15 +488,15 @@ class OSMProcessor:
 
 
 if __name__ == '__main__':
-    osm_data = geojson.load(open('overath_extended.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
     # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
 
-    osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
+    # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
     # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
-    # osm_processor = OSMProcessor(config=config)
+    osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('scenarios/overath_extended/overath_extended_osm.csv')
+    osm_processor.write_to_file('test/industrial_fences.csv')
 
 
 
