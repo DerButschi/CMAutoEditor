@@ -85,8 +85,8 @@ MENU_DICT = {
     'Grass T': pyautogui.Point(191, 498),
     'Grass TY': pyautogui.Point(27, 554),
     'Weeds': pyautogui.Point(80, 554),
-    'Grass XT': pyautogui.Point(135, 657),
-    'Grass XTY': pyautogui.Point(191, 657),
+    'Grass XT': pyautogui.Point(135, 554),
+    'Grass XTY': pyautogui.Point(191, 554),
     'Dirt': pyautogui.Point(27, 383),
     'Pavement 1': pyautogui.Point(81, 495),
     'Direction 1': pyautogui.Point(248,17),
@@ -130,6 +130,8 @@ MENU_DICT = {
     'Lt Forest': pyautogui.Point(27, 383),
     'Deep Marsh': pyautogui.Point(27, 440),
     'Brush_brush': pyautogui.Point(110, 383),
+    'Ground 2 Paved 2': pyautogui.Point(135, 497),
+    'Cobblestone': pyautogui.Point(190, 497),
 }
 
 GROUND_2_DICT = {
