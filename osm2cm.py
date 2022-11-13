@@ -121,6 +121,7 @@ class OSMProcessor:
         self.gdf = None
         self.df = None
         self.network_graphs = {}
+        self.building_outlines = {}
 
         self.matched_elements = []
 
@@ -152,6 +153,10 @@ class OSMProcessor:
                 (4, "create_square_graph_path_search", "by_config_name"), 
                 (5, "assign_fence_tiles_to_network", "by_config_name")
             ],
+            "type_from_building_outline": [
+                (0, "collect_building_outlines", "by_element"),
+                # (1, "assing_buildings_to_outlines", "by_config_name")
+            ]
         }
 
         self.logger = logging.getLogger('osm2cm')
@@ -223,6 +228,23 @@ class OSMProcessor:
         self.octagon_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=octagon_geometry.rotate(22.5))
         circle_geometry1 = geopandas.points_from_xy(xarr, yarr).buffer(2 * np.sqrt(2), cap_style=1)
         self.circle_geometry1_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=circle_geometry1)
+        sub_square_grid_geometry1 = geopandas.points_from_xy(xarr, yarr)
+
+        sub_square_grid_geometry1_gdf = geopandas.GeoDataFrame({
+            'x': xarr, 
+            'y': yarr, 
+            'xidx': xiarr, 
+            'yidx': yiarr, 
+            'z': [-1] * len(xarr),
+            'menu': [-1] * len(xarr),
+            'cat1': [-1] * len(xarr),
+            'cat2': [-1] * len(xarr),
+            'direction': [-1] * len(xarr),
+            'id': [-1] * len(xarr),
+            'name': [-1] * len(xarr),
+            'priority': [-1] * len(xarr),
+            }, geometry=sub_square_grid_geometry1)
+
 
         xarr = []
         yarr = []
@@ -239,10 +261,52 @@ class OSMProcessor:
         filler_square_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=filler_square_geometry.rotate(45))
         circle_geometry2 = geopandas.points_from_xy(xarr, yarr).buffer(2 * np.sqrt(2), cap_style=1)
         self.circle_geometry2_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=circle_geometry2)
+        sub_square_grid_geometry2 = geopandas.points_from_xy(xarr, yarr)
+        sub_square_grid_geometry2_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=sub_square_grid_geometry2)
+
+        sub_square_grid_geometry2_gdf = geopandas.GeoDataFrame({
+            'x': xarr, 
+            'y': yarr, 
+            'xidx': xiarr, 
+            'yidx': yiarr, 
+            'z': [-1] * len(xarr),
+            'menu': [-1] * len(xarr),
+            'cat1': [-1] * len(xarr),
+            'cat2': [-1] * len(xarr),
+            'direction': [-1] * len(xarr),
+            'id': [-1] * len(xarr),
+            'name': [-1] * len(xarr),
+            'priority': [-1] * len(xarr),
+            }, geometry=sub_square_grid_geometry2)
 
         # self.octagon_gdf = pandas.concat((self.octagon_gdf, filler_square_gdf), ignore_index=True)
         self.circle_gdf = pandas.concat((self.circle_geometry1_gdf, self.circle_geometry2_gdf), ignore_index=True)
+        self.sub_square_grid_diagonal_gdf = pandas.concat((sub_square_grid_geometry1_gdf, sub_square_grid_geometry2_gdf))
         
+        for xidx, x in enumerate(np.linspace(self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[0] - n_bins_pad_x_min * 8 + (n_bins_x_data) * 8, n_bins_x_data * 2 + 1)):
+            for yidx, y in enumerate(np.linspace(self.bbox[1] - n_bins_pad_y_min * 8, self.bbox[1] - n_bins_pad_y_min * 8 + (n_bins_y_data) * 8, n_bins_y_data * 2 + 1)):
+                xarr.append(x)
+                yarr.append(y)
+                xiarr.append(xidx / 2 - 0.5)
+                yiarr.append(yidx / 2 - 0.5)
+
+        geometry = geopandas.points_from_xy(xarr, yarr)
+
+        self.sub_square_grid_gdf = geopandas.GeoDataFrame({
+            'x': xarr, 
+            'y': yarr, 
+            'xidx': xiarr, 
+            'yidx': yiarr, 
+            'z': [-1] * len(xarr),
+            'menu': [-1] * len(xarr),
+            'cat1': [-1] * len(xarr),
+            'cat2': [-1] * len(xarr),
+            'direction': [-1] * len(xarr),
+            'id': [-1] * len(xarr),
+            'name': [-1] * len(xarr),
+            'priority': [-1] * len(xarr),
+            }, geometry=geometry)
+
 
     def _get_projected_geometry(self, geojson_geometry):
             geometry = geopandas.GeoSeries(shape(geojson_geometry))
@@ -314,8 +378,11 @@ class OSMProcessor:
 
         return stages
 
-    def _get_sub_df(self, idx):
-        return self.gdf.loc[idx, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name', 'priority']].copy(deep=True)
+    def _get_sub_df(self, idx, gdf=None):
+        if gdf is None:
+            return self.gdf.loc[idx, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name', 'priority']].copy(deep=True)
+        else:
+            return gdf.loc[idx, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name', 'priority']].copy(deep=True)
 
     def _append_to_df(self, sub_df: pandas.DataFrame):
         if self.df is None:

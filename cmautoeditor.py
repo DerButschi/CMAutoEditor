@@ -56,6 +56,8 @@ MENU_DICT = {
     'Foliage': pyautogui.Point(110, 185),
     'Roads': pyautogui.Point(107, 203),
     "Walls/Fences": pyautogui.Point(105, 224),
+    "Independent Buildings": pyautogui.Point(105, 264),
+    "Modular Buildings": pyautogui.Point(105, 245),
     'Water': pyautogui.Point(81, 438),
     'Plow NS': pyautogui.Point(135, 552),
     'Plow EW': pyautogui.Point(188, 552),
@@ -132,6 +134,26 @@ MENU_DICT = {
     'Brush_brush': pyautogui.Point(110, 383),
     'Ground 2 Paved 2': pyautogui.Point(135, 497),
     'Cobblestone': pyautogui.Point(190, 497),
+    'House': pyautogui.Point(110, 383),
+    '1 Story': pyautogui.Point(81, 383),
+    '2 Story': pyautogui.Point(134, 383),
+    '3 Story': pyautogui.Point(189, 383),
+    'Building 1': pyautogui.Point(27, 617),
+    'Building 2': pyautogui.Point(80, 617),
+    'Building 3': pyautogui.Point(135, 617),
+    'Building 4': pyautogui.Point(188, 617),
+    'Building 5': pyautogui.Point(27, 657),
+    'Building 6': pyautogui.Point(80, 657),
+    'Building 7': pyautogui.Point(135, 657),
+    'Building 8': pyautogui.Point(188, 657),
+    'Building 9': pyautogui.Point(27, 699),
+    'Building 10': pyautogui.Point(80, 699),
+    'Building 11': pyautogui.Point(135, 699),
+    'Building 12': pyautogui.Point(188, 699),
+    'Building 13': pyautogui.Point(27, 740),
+    'Building 14': pyautogui.Point(80, 740),
+    'Building 15': pyautogui.Point(135, 740),
+    'Building 16': pyautogui.Point(188, 740),
 }
 
 GROUND_2_DICT = {
@@ -201,6 +223,12 @@ pyautogui.PAUSE = 0.2  # 0.12 almost!! works
 
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
+
+# def rolling_test(input, y=None):
+#     if y is not None:
+#         y.rolling(3).apply(rolling_test)
+#     a = 1
+
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -355,6 +383,7 @@ if __name__ == '__main__':
 
     try:    
         map_df = map_df[map_df['done'] == 0]
+        # map_df.rolling(3, on='x').apply(rolling_test, kwargs={'y': map_df.y})
 
         # x = np.array(map_df.x.values, dtype=int)
         # y = np.array(map_df.y.values, dtype=int)

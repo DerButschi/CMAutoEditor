@@ -17,12 +17,18 @@ import numpy as np
 import networkx as nx
 from shapely.geometry import LineString, Point, MultiPoint, MultiLineString, Polygon
 from shapely.ops import split, substring
+from shapely.affinity import scale, rotate, translate
 import geopandas
 import pandas
 import logging
 from profiles.general import road_tiles, rail_tiles, stream_tiles, fence_tiles
-from .path_search import search_path
+from profiles.cold_war import buildings
+from .path_search import search_path, _get_closest_node_in_gdf, _remove_nodes_from_gdf
 import matplotlib.pyplot as plt
+
+
+
+DRAW_DEBUG_PLOTS = False
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -47,6 +53,16 @@ opposite_road_direction_dict = {
     'dr': 'ul',
     'dl': 'ur'
 }
+
+def _direction_from_square_to_square(square1, square2):
+    diff_tuple = (square2[0] - square1[0], square2[1] - square1[1])
+    if diff_tuple in road_direction_dict:
+        direction = road_direction_dict[diff_tuple]
+    else:
+        direction = None
+    
+    return direction, diff_tuple
+
 
 def draw_line_graph(graph: nx.MultiGraph, show: bool = False):
     plt.figure()
@@ -197,6 +213,19 @@ def extract_required_directions(node_id, neighbors, road_graph, loop=None):
 
     return list(set(required_directions))
 
+def extract_directions(node, graph):
+    directions = []
+    for node1, node2, edge_key, edge_data in graph.edges(node, keys=True, data=True):
+        squares = edge_data['squares']
+        if edge_data['from_node_to_node'][0] == node:
+            direction, _ = _direction_from_square_to_square(squares[0], squares[1])
+            directions.append(direction)
+        if edge_data['from_node_to_node'][1] == node:
+            direction, _ = _direction_from_square_to_square(squares[-1], squares[-2])
+            directions.append(direction)
+        
+    return list(set(directions))
+
 def fix_tile_for_node(node_id, edge_graphs, tile):
     for node_pair in edge_graphs:
         if node_id in node_pair:
@@ -286,7 +315,8 @@ def create_line_graph(osm_processor, config, name):
             else:
                 logger.warn('LineString split was of type {}.'.format(type(ls_split)))
 
-    draw_line_graph(line_graph, show=True)
+    if DRAW_DEBUG_PLOTS:
+        draw_line_graph(line_graph, show=True)
     osm_processor.network_graphs[name]['line_graph'] = line_graph
 
 
@@ -313,7 +343,8 @@ def create_octagon_graph(osm_processor, config, name):
                 square_graph.get_edge_data(*edge)['squares'] = squares
                 go_on = True
 
-    draw_square_graph(square_graph, gdf=gdf, show=True)
+    if DRAW_DEBUG_PLOTS:
+        draw_square_graph(square_graph, gdf=gdf, show=True)
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
 def create_square_graph(osm_processor, config: dict, name: str):
@@ -323,7 +354,8 @@ def create_square_graph(osm_processor, config: dict, name: str):
     square_graph = line_graph_to_square_graph(line_graph, grid_gdf=gdf, snap_gdf=gdf)
     handle_square_graph_duplicate_edges(square_graph)
 
-    draw_square_graph(square_graph, gdf=gdf, show=True)
+    if DRAW_DEBUG_PLOTS:
+        draw_square_graph(square_graph, gdf=gdf, show=True)
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
 def line_graph_to_square_graph(line_graph: nx.MultiGraph, grid_gdf: geopandas.GeoDataFrame, snap_gdf: geopandas.GeoDataFrame, snap_to_grid=False) -> nx.MultiGraph:
@@ -515,17 +547,26 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
                 direction_in = road_direction_dict[(squares[i_square - 1][0] - square[0], squares[i_square - 1][1] - square[1])]
 
             if i_square == 0:
-                if len(other_node1_neighbors) == 0:
-                    direction_in = opposite_road_direction_dict[direction_out]
-                    valid_tiles = tile_df[(tile_df[direction_in] == (2,3)) & ~pandas.isnull(tile_df[direction_out]) & (tile_df['n_connections'] == 2)].index.values
-                else:
-                    loop = 'start' if node1_id == node2_id else None
-                    directions_in = extract_required_directions(node1_id, other_node1_neighbors, square_graph, loop)
-                    connection_condition = ~pandas.isnull(tile_df[directions_in[0]]) & (tile_df['n_connections'] == len(directions_in) + 1)
-                    for dir_idx in range(1, len(directions_in)):
-                        connection_condition = np.bitwise_and(connection_condition, ~pandas.isnull(tile_df[directions_in[dir_idx]]))
+                # if square_graph.degree(edge[0]) == 1:
+                #     direction_in = opposite_road_direction_dict[direction_out]
+                #     valid_tiles = tile_df[(tile_df[direction_in] == (2,3)) & ~pandas.isnull(tile_df[direction_out]) & (tile_df['n_connections'] == 2)].index.values
+                # else:
+                    # loop = 'start' if node1_id == node2_id else None
+                    # directions_in = extract_required_directions(node1_id, other_node1_neighbors, square_graph, loop)
+                    # connection_condition = ~pandas.isnull(tile_df[directions_in[0]]) & (tile_df['n_connections'] == len(directions_in) + 1)
+                    # for dir_idx in range(1, len(directions_in)):
+                    #     connection_condition = np.bitwise_and(connection_condition, ~pandas.isnull(tile_df[directions_in[dir_idx]]))
+                    #
+                    # valid_tiles = tile_df[~pandas.isnull(tile_df[direction_out]) & connection_condition].index.values
 
-                    valid_tiles = tile_df[~pandas.isnull(tile_df[direction_out]) & connection_condition].index.values
+                directions = extract_directions(node1_id, square_graph)
+                if len(directions) == 1:
+                    directions.append(opposite_road_direction_dict[directions[0]])
+                condition = tile_df['n_connections'] == len(directions)
+                for direction in directions:
+                    condition = condition & ~pandas.isnull(tile_df[direction])
+
+                valid_tiles = tile_df.loc[condition].index.values
                     
                 last_tiles = valid_tiles
                 for tile in valid_tiles:
@@ -552,17 +593,26 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
                 last_direction_out = opposite_road_direction_dict[direction_in]
                 for last_tile in last_tiles:
                     tile_connection = tile_df.loc[last_tile, last_direction_out]
-                    if len(other_node2_neighbors) == 0:
-                        direction_out = opposite_road_direction_dict[direction_in]
-                        valid_tiles = tile_df.loc[(tile_df[direction_in] == tile_connection) & (tile_df[direction_out] == (2,3)) & (tile_df['n_connections'] == 2)].index.values
-                    else:
-                        loop = 'end' if node1_id == node2_id else None
-                        directions_out = extract_required_directions(node2_id, other_node2_neighbors, square_graph, loop)
-                        connection_condition = ~pandas.isnull(tile_df[directions_out[0]]) & (tile_df['n_connections'] == len(directions_out) + 1)
-                        for dir_idx in range(1, len(directions_out)):
-                            connection_condition = np.bitwise_and(connection_condition, ~pandas.isnull(tile_df[directions_out[dir_idx]]))
+                    # if square_graph.degree(edge[1]) == 1:
+                    #     direction_out = opposite_road_direction_dict[direction_in]
+                    #     valid_tiles = tile_df.loc[(tile_df[direction_in] == tile_connection) & (tile_df[direction_out] == (2,3)) & (tile_df['n_connections'] == 2)].index.values
+                    # else:
+                        # loop = 'end' if node1_id == node2_id else None
+                        # directions_out = extract_required_directions(node2_id, other_node2_neighbors, square_graph, loop)
+                        # connection_condition = ~pandas.isnull(tile_df[directions_out[0]]) & (tile_df['n_connections'] == len(directions_out) + 1)
+                        # for dir_idx in range(1, len(directions_out)):
+                        #     connection_condition = np.bitwise_and(connection_condition, ~pandas.isnull(tile_df[directions_out[dir_idx]]))
 
-                        valid_tiles = tile_df.loc[(tile_df[direction_in] == tile_connection) & connection_condition].index.values
+                        # valid_tiles = tile_df.loc[(tile_df[direction_in] == tile_connection) & connection_condition].index.values
+
+                    directions = extract_directions(node2_id, square_graph)
+                    if len(directions) == 1:
+                        directions.append(opposite_road_direction_dict[directions[0]])
+                    condition = (tile_df['n_connections'] == len(directions)) & (tile_df[direction_in] == tile_connection)
+                    for direction in directions:
+                        condition = condition & ~pandas.isnull(tile_df[direction])
+
+                    valid_tiles = tile_df.loc[condition].index.values
 
                     for tile in valid_tiles:
                         graph.add_edge((last_tile, i_square - 1), (tile, i_square), cost=tile_df.loc[tile, 'cost'])
@@ -682,11 +732,14 @@ def collect_network_data(osm_processor, config, element_entry):
     elif type(geometry) == Polygon:
         exterior_ls = LineString(geometry.exterior.coords)
         # closed rings don't work with the rest of the tooling...
-        linestrings.extend(remove_duplicate_linestring_coordinates(substring(exterior_ls, 0, 0.5, normalized=True)))
-        linestrings.extend(remove_duplicate_linestring_coordinates(substring(exterior_ls, 0.5, 1.0, normalized=True)))
+        # linestrings.extend(remove_duplicate_linestring_coordinates(substring(exterior_ls, 0, 0.5, normalized=True)))
+        # linestrings.extend(remove_duplicate_linestring_coordinates(substring(exterior_ls, 0.5, 1.0, normalized=True)))
+        # for interior in geometry.interiors:
+        #     linestrings.extend(remove_duplicate_linestring_coordinates(substring(interior, 0, 0.5, normalized=True)))
+        #     linestrings.extend(remove_duplicate_linestring_coordinates(substring(interior, 0.5, 1.0, normalized=True)))
+        linestrings.extend(remove_duplicate_linestring_coordinates(exterior_ls))
         for interior in geometry.interiors:
-            linestrings.extend(remove_duplicate_linestring_coordinates(substring(interior, 0, 0.5, normalized=True)))
-            linestrings.extend(remove_duplicate_linestring_coordinates(substring(interior, 0.5, 1.0, normalized=True)))
+            linestrings.extend(remove_duplicate_linestring_coordinates(interior))
 
     else:
         logger.warn('Network geometry should be LineString but found {}.'.format(type(geometry)))
@@ -702,4 +755,131 @@ def collect_network_data(osm_processor, config, element_entry):
             osm_processor.network_graphs[name]['lines'] = pandas.concat((osm_processor.network_graphs[name]['lines'], element_gdf), ignore_index=True)
         
 def create_square_graph_path_search(osm_processor, config, name):
-    search_path(osm_processor.network_graphs[name]['line_graph'], osm_processor.gdf, osm_processor.df)
+    # search_path(osm_processor.network_graphs[name]['line_graph'], osm_processor.gdf, osm_processor.df)
+    search_path(osm_processor, config, name)
+
+def collect_building_outlines(osm_processor, config, element_entry):
+    grid_gdf = osm_processor.sub_square_grid_gdf
+    geometry = element_entry['geometry']
+    min_rot_rectangle = geometry.minimum_rotated_rectangle
+    scaled_min_rot_rectangle = scale(min_rot_rectangle, np.sqrt(geometry.area / min_rot_rectangle.area), np.sqrt(geometry.area / min_rot_rectangle.area))
+
+    xmin = np.min(scaled_min_rot_rectangle.boundary.xy[0])
+    xmax = np.max(scaled_min_rot_rectangle.boundary.xy[0])
+    ymin = np.min(scaled_min_rot_rectangle.boundary.xy[1])
+    ymax = np.max(scaled_min_rot_rectangle.boundary.xy[1])
+
+    llc_rectangle = _get_rectangle_coords_starting_at_lower_left_corner(scaled_min_rot_rectangle)
+    llc_rectangle_coords = list(llc_rectangle.exterior.coords)
+    base_angle = np.arctan2(llc_rectangle_coords[1][1] - llc_rectangle_coords[0][1], llc_rectangle_coords[1][0] - llc_rectangle_coords[0][0])
+
+    if np.abs(base_angle) < np.pi / 8:
+        # llc_rectangle = rotate(llc_rectangle, -base_angle, origin=llc_rectangle_coords[0], use_radians=True)
+        llc_rectangle = rotate(llc_rectangle, -base_angle, use_radians=True)
+        is_diagonal = False
+        matching_gdf = grid_gdf
+    else:
+        # llc_rectangle = rotate(llc_rectangle, np.sign(base_angle) * np.pi / 4 - base_angle, origin=llc_rectangle_coords[0], use_radians=True)
+        llc_rectangle = rotate(llc_rectangle, np.sign(base_angle) * np.pi / 4 - base_angle, use_radians=True)
+        is_diagonal = True
+        matching_gdf = osm_processor.sub_square_grid_diagonal_gdf
+    
+    stories = None
+    # if "building:levels" in element_entry["element"]["properties"]:
+    #     stories = element_entry["element"]["properties"]["building:levels"] + 1  # OSM bulding level does not contain attic floor
+    
+    index_llc, llc_idx, llc_xy, building = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
+    condition = (matching_gdf.xidx == llc_idx[0]) & (matching_gdf.yidx == llc_idx[1])
+
+    sub_df = osm_processor._get_sub_df(condition, matching_gdf)
+
+    direction, row, col, menu, cat1 = building[['direction', 'row', 'col', 'menu', 'cat1']].values[0]
+
+    # tile_condition = (sub_df.xidx == square[0]) & (sub_df.yidx == square[1]) & (sub_df.name == name)
+    sub_df['menu'] = menu
+    sub_df['cat1'] = cat1
+    sub_df['direction'] = 'Direction {}'.format(direction + 1)
+    sub_df['cat2'] = 'Building {}'.format(row * 4 + col + 1)
+    sub_df['priority'] = config[element_entry['name']]['priority']
+    
+    osm_processor._append_to_df(sub_df)
+
+    # building_rectangle = Polygon([
+    #     llc_xy,
+    #     (llc_xy[0] + building.x1.values[0] * 8, llc_xy[1] + building.y1.values[0] * 8),
+    #     (llc_xy[0] + building.x2.values[0] * 8, llc_xy[1] + building.y2.values[0] * 8),
+    #     (llc_xy[0] + building.x2.values[0] * 8 - building.x1.values[0] * 8, llc_xy[1] + building.y2.values[0] * 8 - building.y1.values[0] * 8)
+    # ])
+
+
+
+    # plt.figure()
+    # plt.axis('equal')
+    # plt.plot(grid_gdf.x, grid_gdf.y, 'k+')
+    # plt.plot(geometry.exterior.xy[0], geometry.exterior.xy[1], '-ko')
+    # plt.plot(geometry.minimum_rotated_rectangle.exterior.xy[0], geometry.minimum_rotated_rectangle.exterior.xy[1], '-bo')
+    # plt.plot(scaled_min_rot_rectangle.exterior.xy[0], scaled_min_rot_rectangle.exterior.xy[1], ':bo')
+    # plt.plot(llc_rectangle.exterior.xy[0], llc_rectangle.exterior.xy[1], ':go')
+    # plt.plot(building_rectangle.exterior.xy[0], building_rectangle.exterior.xy[1], '-go')
+    # plt.show()
+
+def _get_rectangle_coords_starting_at_lower_left_corner(rectangle):
+    # make counter-clock wise (though should alread be)
+    exterior = rectangle.exterior
+    if exterior.is_ccw:
+        coords = list(rectangle.exterior.coords)
+    else:
+        coords = list(rectangle.exterior.coords)[::-1]
+    
+    if coords[0] == coords[-1]:
+        coords = coords[0:-1]
+
+    centroid = rectangle.centroid
+    # get coords left of center:
+    left_coords = list({coord for coord in coords if coord[0] < centroid.x})
+    # get lower one:
+    lower_left_coord = sorted(left_coords, key=lambda c: c[1])[0]
+    lower_left_coord_index = coords.index(lower_left_coord)
+
+    new_coords = coords[lower_left_coord_index::] + coords[0:lower_left_coord_index]
+    return Polygon(new_coords)
+
+def _match_building(rectangle, grid_gdf, is_diagonal, stories=None):
+    building_candidates = buildings.loc[buildings.is_diagonal == is_diagonal]
+
+    p0 = rectangle.exterior.coords[0]
+
+    index_p0, p0idx_on_grid, p0_on_grid = _get_closest_node_in_gdf(grid_gdf, rectangle.exterior.coords[0], return_xy=True, return_gdf_index=True)
+
+    rectangle = translate(rectangle, p0_on_grid[0] - p0[0], p0_on_grid[1] - p0[1])
+    p1 = rectangle.exterior.coords[1]
+    p2 = rectangle.exterior.coords[2]
+
+    p1_rel = ((p1[0] - p0_on_grid[0]) / 8, (p1[1] - p0_on_grid[1]) / 8)
+    p2_rel = ((p2[0] - p0_on_grid[0]) / 8, (p2[1] - p0_on_grid[1]) / 8)
+
+    x1_val_candidates = building_candidates.x1.unique()
+    p1x = x1_val_candidates[np.argmin(np.abs(x1_val_candidates - p1_rel[0]))]
+    building_candidates = building_candidates.loc[building_candidates.x1 == p1x]
+
+    y1_val_candidates = building_candidates.y1.unique()
+    p1y = y1_val_candidates[np.argmin(np.abs(y1_val_candidates - p1_rel[1]))]
+    building_candidates = building_candidates.loc[building_candidates.y1 == p1y]
+    
+    x2_val_candidates = building_candidates.x2.unique()
+    p2x = x2_val_candidates[np.argmin(np.abs(x2_val_candidates - p2_rel[0]))]
+    building_candidates = building_candidates.loc[building_candidates.x2 == p2x]
+
+    y2_val_candidates = building_candidates.y2.unique()
+    p2y = y2_val_candidates[np.argmin(np.abs(y2_val_candidates - p2_rel[1]))]
+    building_candidates = building_candidates.loc[building_candidates.y2 == p2y]
+
+    if stories is not None:
+        building_candidates = building_candidates.loc[building_candidates.stories == stories]
+
+    return index_p0, p0idx_on_grid, p0_on_grid, building_candidates.sample(n=1, weights=building_candidates.weight)
+
+
+
+
+ 
