@@ -788,11 +788,21 @@ def collect_building_outlines(osm_processor, config, element_entry):
         idx = diamonds.sindex.query(geometry, predicate='intersects')
         # idx = diag_grid_gdf.loc[idx].index
         intersecting_diamonds = diamonds.iloc[idx].geometry
+        is_majority_square = intersecting_diamonds.intersection(geometry).area > 12.8
+        idx = intersecting_diamonds[is_majority_square].index
         perimeter = diamonds.iloc[idx].geometry.unary_union
     else:
-        squares = grid_gdf.geometry.buffer(4, cap_style=3)
+        squares = grid_gdf.geometry.buffer(2, cap_style=3)
         idx = squares.sindex.query(geometry, predicate='intersects')
+        intersecting_squares = intersecting_squares = squares.iloc[idx]
+        # 40 % of 16 m²
+        is_majority_square = intersecting_squares.intersection(geometry).area > 6.4
+        idx = intersecting_squares[is_majority_square].index
         perimeter = squares.iloc[idx].geometry.unary_union
+
+    if perimeter is None:
+        # such a small building is probably just a shed or garage.
+        return
 
     print(type(perimeter))
 
@@ -800,12 +810,12 @@ def collect_building_outlines(osm_processor, config, element_entry):
         # TODO: Handle MultiPolygons!
         return
         
-    concave_vertices = find_concave_vertices(perimeter)
+    # concave_vertices = find_concave_vertices(perimeter)
 
 
-    horizontal_chords, vertical_chords = find_chords(perimeter, concave_vertices, is_diagonal)
-    find_subdividing_chords(horizontal_chords, vertical_chords)
-    rectangulate_polygon(perimeter, is_diagonal)
+    # horizontal_chords, vertical_chords = find_chords(perimeter, concave_vertices, is_diagonal)
+    # find_subdividing_chords(horizontal_chords, vertical_chords)
+    rectangulate_polygon(perimeter, is_diagonal, geometry)
 
     # plt.figure()
     # plt.axis('equal')

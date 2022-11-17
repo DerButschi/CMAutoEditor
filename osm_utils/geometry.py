@@ -13,31 +13,40 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import List, Tuple, Any
+from typing import List, Optional, Tuple, Any
 import numpy as np
 from shapely.geometry import Polygon, LinearRing, LineString, MultiLineString
 from shapely.ops import split
 import networkx as nx
 import matplotlib.pyplot as plt
 
-def find_concave_vertices(polygon: Polygon) -> List[int]:
-    # get perimeter ring, check if it is counter-clockwise and if not make it ccw
-    ring = polygon.exterior
-    if not ring.is_ccw:
-        ring = LinearRing(ring.coords[::-1])
-
+def _ring_cross_product(ring: LinearRing) -> np.array:
     # get vertex coordinate append last point before first and first point after last, 
     # so we can calculate the cross product between last and first line
-    vertices = [ring.coords[-1]]
+    vertices = [ring.coords[-2]]
     vertices.extend([coord for coord in ring.coords])
-    vertices.append(ring.coords[0])
+    # vertices.append(ring.coords[0])
     vertices = np.array(vertices)
 
     # calculate vectors between vertices and the cross product between consecutive vectors
     cross_product = np.cross(np.diff(vertices, axis=0)[1::], np.diff(vertices, axis=0)[:-1])
 
+    return cross_product
+
+def _ccw_ring(ring: LinearRing) -> LinearRing:
+    if not ring.is_ccw:
+        ring = LinearRing(ring.coords[::-1])
+
+    return ring
+
+def find_concave_vertices(polygon: Polygon) -> List[int]:
+    # get perimeter ring, check if it is counter-clockwise and if not make it ccw
+    ring = _ccw_ring(polygon.exterior)
+
+    cross_product = _ring_cross_product(ring)
+
     # concave vertices are those which (in a counter-clockwise ring) have crossproduct > 0.
-    concave_vertices = np.array(ring.coords)[cross_product > 0]
+    concave_vertices = np.array(ring.coords[:-1])[cross_product > 0]
 
     return concave_vertices
     
@@ -161,14 +170,41 @@ def find_subdividing_chords(horizontal_chords: List[LineString], vertical_chords
 
     return chords
 
-def rectangulate_polygon(polygon: Polygon, is_diagonal: bool) -> List[Polygon]:
+def remove_one_square_appendages(polygon: Polygon) -> Polygon:
+    ring = _ccw_ring(polygon.exterior)
+    cross_product_signs = np.sign(_ring_cross_product(ring))
+
+    indices_to_remove = []
+    for idx in range(len(cross_product_signs)):
+        seq = [cross_product_signs[idx-2], cross_product_signs[idx-1], cross_product_signs[idx]]
+        if seq == [1, -1, -1]:
+            indices_to_remove.extend([idx-1, idx])
+        if seq == [-1, -1, 1]:
+            indices_to_remove.extend([idx-2, idx-1])
+
+    if len(indices_to_remove) > 0:
+        ring_coords = [coord for coord in ring.coords][:-1]
+        ring_coords = np.delete(ring_coords, indices_to_remove, axis=0)
+        polygon = Polygon(ring_coords)
+    
+    return polygon
+
+
+def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Optional[Polygon]) -> List[Polygon]:
     # Input: P a simple orthogonal polygon with no chords.
     # For each concave vertex, select one of its incident edges.  (Two edges are incident to each concave vertex.)
     # Extend this edge until it hits another such extended edge, or a boundary edge of P.
     # Return the extensions of edges as the rectangulation.
 
     plt.figure()
+    plt.axis('equal')
+    plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], ':ko')
+    if orig_geometry is not None:
+        plt.plot(orig_geometry.exterior.xy[0], orig_geometry.exterior.xy[1], '-mo')
+
+    polygon = remove_one_square_appendages(polygon)
     plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], '-ko')
+    plt.plot(polygon.exterior.xy[0][0], polygon.exterior.xy[1][0], 'kD')
 
     concave_vertices = find_concave_vertices(polygon)
 
