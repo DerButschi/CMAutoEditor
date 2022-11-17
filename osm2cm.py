@@ -38,7 +38,7 @@ import logging
 
 
 
-config = json.load(open('default_osm_config.json', 'r'))
+config = json.load(open('default_osm_config_delta.json', 'r'))
 
 
 
@@ -555,7 +555,7 @@ class OSMProcessor:
 
 
 if __name__ == '__main__':
-    osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('test/buildings_ringmauer.geojson', encoding='utf8'))
     # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
 
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
@@ -563,7 +563,7 @@ if __name__ == '__main__':
     osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('test/industrial_fences.csv')
+    osm_processor.write_to_file('test/buildings_ringmauer.csv')
 
 
 
