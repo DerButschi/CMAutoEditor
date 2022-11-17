@@ -15,8 +15,8 @@
 
 import numpy as np
 import networkx as nx
-from shapely.geometry import LineString, Point, MultiPoint, MultiLineString, Polygon
-from shapely.ops import split, substring
+from shapely.geometry import LineString, Point, MultiPoint, MultiLineString, Polygon, MultiPolygon
+from shapely.ops import split, substring, snap
 from shapely.affinity import scale, rotate, translate
 import geopandas
 import pandas
@@ -25,7 +25,7 @@ from profiles.general import road_tiles, rail_tiles, stream_tiles, fence_tiles
 from profiles.cold_war import buildings
 from .path_search import search_path, _get_closest_node_in_gdf, _remove_nodes_from_gdf
 import matplotlib.pyplot as plt
-
+from osm_utils.geometry import find_concave_vertices, find_chords, find_subdividing_chords, rectangulate_polygon
 
 
 DRAW_DEBUG_PLOTS = False
@@ -524,6 +524,9 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
         node1_id = edge[0]
         node2_id = edge[1]
         squares = square_graph.edges[edge]['squares']
+        if not _check_if_squares_are_valid(squares):
+            logging.warn('Squares of edge {} -> {} ({}) are invalid'.format(*edge))
+            continue
 
         other_node1_neighbors = [neighbor for neighbor in nx.neighbors(square_graph, node1_id) if neighbor != node2_id or node1_id == node2_id]
         other_node2_neighbors = [neighbor for neighbor in nx.neighbors(square_graph, node2_id) if neighbor != node1_id or node1_id == node2_id]
@@ -774,6 +777,60 @@ def collect_building_outlines(osm_processor, config, element_entry):
     base_angle = np.arctan2(llc_rectangle_coords[1][1] - llc_rectangle_coords[0][1], llc_rectangle_coords[1][0] - llc_rectangle_coords[0][0])
 
     if np.abs(base_angle) < np.pi / 8:
+        is_diagonal = False
+    else:
+        is_diagonal = True
+
+    if is_diagonal:
+        diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
+        # diamonds = diag_grid_gdf.geometry.buffer(np.sqrt(8), cap_style=3).rotate(45)
+        diamonds = diag_grid_gdf.geometry.buffer(4, resolution=1)
+        idx = diamonds.sindex.query(geometry, predicate='intersects')
+        # idx = diag_grid_gdf.loc[idx].index
+        intersecting_diamonds = diamonds.iloc[idx].geometry
+        perimeter = diamonds.iloc[idx].geometry.unary_union
+    else:
+        squares = grid_gdf.geometry.buffer(4, cap_style=3)
+        idx = squares.sindex.query(geometry, predicate='intersects')
+        perimeter = squares.iloc[idx].geometry.unary_union
+
+    print(type(perimeter))
+
+    if type(perimeter) == MultiPolygon:
+        # TODO: Handle MultiPolygons!
+        return
+        
+    concave_vertices = find_concave_vertices(perimeter)
+
+
+    horizontal_chords, vertical_chords = find_chords(perimeter, concave_vertices, is_diagonal)
+    find_subdividing_chords(horizontal_chords, vertical_chords)
+    rectangulate_polygon(perimeter, is_diagonal)
+
+    # plt.figure()
+    # plt.axis('equal')
+    # plt.plot(geometry.exterior.xy[0], geometry.exterior.xy[1], '-ko')
+    # for d in intersecting_diamonds:
+    #     plt.plot(d.exterior.xy[0], d.exterior.xy[1], '-g')
+    # # plt.plot(grid_gdf.x, grid_gdf.y, 'k+')
+    # plt.plot(perimeter.exterior.xy[0], perimeter.exterior.xy[1], '-b')
+    # plt.plot([v[0] for v in concave_vertices], [v[1] for v in concave_vertices], 'ro')
+    # for ls in horizontal_chords:
+    #     plt.plot(ls.xy[0], ls.xy[1], ':r')
+    # for ls in vertical_chords:
+    #     plt.plot(ls.xy[0], ls.xy[1], ':m')
+    # plt.plot()
+    # plt.show()
+
+
+
+
+    # for p in d:
+    #     plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-b')
+    # plt.plot(geometry.exterior.xy[0], geometry.exterior.xy[1], '-ko')
+    # plt.show()
+
+    if np.abs(base_angle) < np.pi / 8:
         # llc_rectangle = rotate(llc_rectangle, -base_angle, origin=llc_rectangle_coords[0], use_radians=True)
         llc_rectangle = rotate(llc_rectangle, -base_angle, use_radians=True)
         is_diagonal = False
@@ -879,7 +936,12 @@ def _match_building(rectangle, grid_gdf, is_diagonal, stories=None):
 
     return index_p0, p0idx_on_grid, p0_on_grid, building_candidates.sample(n=1, weights=building_candidates.weight)
 
+def _check_if_squares_are_valid(squares):
+    valid = True
+    for idx in range(len(squares)-1):
+        valid = valid and (squares[idx + 1][0] - squares[idx][0], squares[idx + 1][1] - squares[idx][1]) in road_direction_dict
 
+    return valid
 
 
  

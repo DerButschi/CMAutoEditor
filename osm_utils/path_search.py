@@ -157,12 +157,14 @@ def search_path(osm_processor, config, name):
 
 def _remove_nodes_from_gdf(gdf, nodes_to_remove):
     points = MultiPoint([Point((node[0] * 8 + gdf.x.min(), node[1] * 8 + gdf.y.min())) for node in nodes_to_remove])
-    index = gdf.iloc[gdf.geometry.centroid.sindex.nearest(points)[1]].index
+    index = gdf.iloc[gdf.geometry.centroid.sindex.nearest(points, max_distance=0.1)[1]].index
     # invalid_indices = []
     # for node in nodes_to_remove:
     #     idx = gdf.loc[(gdf.xidx == node[0]) & (gdf.yidx == node[1])].index
     #     if len(idx) > 0:
     #         invalid_indices.append(idx[0])
+
+    # assert np.array_equal(sorted(index.to_list()), sorted(invalid_indices))
 
     # return gdf.loc[~np.isin(gdf.index, invalid_indices)]
     return gdf.drop(index)
