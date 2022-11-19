@@ -20,6 +20,8 @@ from shapely.ops import split
 import networkx as nx
 import matplotlib.pyplot as plt
 
+DRAW_DEBUG_PLOTS = False
+
 def _ring_cross_product(ring: LinearRing) -> np.array:
     # get vertex coordinate append last point before first and first point after last, 
     # so we can calculate the cross product between last and first line
@@ -189,6 +191,98 @@ def remove_one_square_appendages(polygon: Polygon) -> Polygon:
     
     return polygon
 
+def get_axis_parallel_cuts_through_point(bounds: List[float], vertex: Tuple[float], is_diagonal: bool) -> List[LineString]:
+    min_x, min_y, max_x, max_y = bounds
+    if is_diagonal:
+        d1 = min(vertex[0] - min_x, vertex[1] - min_y)
+        d2 = min(max_x - vertex[0], max_y - vertex[1])
+        d3 = min(vertex[0] - min_x, max_y - vertex[1])
+        d4 = min(max_x - vertex[0], vertex[1] - min_y)
+
+        splitting_ls1 = LineString([
+            (vertex[0] - d1, vertex[1] - d1),
+            (vertex[0] + d2, vertex[1] + d2)
+        ])
+        splitting_ls2 = LineString([
+            (vertex[0] + d4, vertex[1] - d4),
+            (vertex[0] - d3, vertex[1] + d3),
+        ])
+    else:
+        splitting_ls1 = LineString([
+            (min_x, vertex[1]),
+            (max_x, vertex[1])
+        ])
+        splitting_ls2 = LineString([
+            (vertex[0], min_y),
+            (vertex[0], max_y)
+        ])
+
+    return [splitting_ls1, splitting_ls2]
+
+def is_one_square_wide(polygon: Polygon):
+    ring = _ccw_ring(polygon.exterior)
+    cross_product_signs = np.sign(_ring_cross_product(ring))
+
+    one_square_wide = False
+    for idx in range(len(cross_product_signs)):
+        seq = [cross_product_signs[idx-1], cross_product_signs[idx]]
+        if seq == [-1, -1]:
+            one_square_wide = True
+            break
+
+    return one_square_wide
+
+
+def split_polygon(polygon: Polygon, is_diagonal: bool) -> Polygon:
+    concave_vertices = find_concave_vertices(polygon).tolist()
+    if len(concave_vertices) == 0:
+        return [polygon]
+    
+    vtx = concave_vertices[0]
+    cut_lines = get_axis_parallel_cuts_through_point(polygon.bounds, vtx, is_diagonal)
+
+    valid_splits = []
+    semi_valid_splits = []
+    invalid_splits = []
+    for line in cut_lines:
+        sub_polygons = split(polygon, line)
+        assert len(sub_polygons.geoms) == 2
+        assert type(sub_polygons.geoms[0]) == Polygon
+        assert type(sub_polygons.geoms[1]) == Polygon
+
+        polygon1_valid = not is_one_square_wide(sub_polygons.geoms[0])        
+        polygon2_valid = not is_one_square_wide(sub_polygons.geoms[1])
+
+        if polygon1_valid and polygon2_valid:
+            valid_splits.append([sub_polygons.geoms[0], sub_polygons.geoms[1]])
+        elif polygon1_valid or polygon2_valid:
+            semi_valid_splits.append([
+                (sub_polygons.geoms[0], polygon1_valid, sub_polygons.geoms[0].exterior.length), 
+                (sub_polygons.geoms[1], polygon2_valid, sub_polygons.geoms[1].exterior.length)
+            ])
+        else:
+            invalid_splits.append([
+                (sub_polygons.geoms[0], polygon1_valid, sub_polygons.geoms[0].exterior.length), 
+                (sub_polygons.geoms[1], polygon2_valid, sub_polygons.geoms[1].exterior.length)
+            ])
+
+    if len(valid_splits) > 0:
+        rng = np.random.default_rng()
+        split_polygons = rng.choice(valid_splits, 1)
+    elif len(semi_valid_splits) > 0:
+        semi_valid_splits = sorted(semi_valid_splits, key=lambda split: sum([p[2] for p in split if not p[1]]))
+        split_polygons = [p[0] for p in semi_valid_splits[0]]
+    else:
+        invalid_splits = sorted(invalid_splits, key=lambda split: sum([p[2] for p in split]))
+        split_polygons = [p[0] for p in invalid_splits[0]]
+    
+    sub_split_polygons = []
+    for p in split_polygons:
+        sub_split_polygons.extend(split_polygon(p, is_diagonal))
+
+    return sub_split_polygons
+
+
 
 def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Optional[Polygon]) -> List[Polygon]:
     # Input: P a simple orthogonal polygon with no chords.
@@ -196,15 +290,17 @@ def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Opt
     # Extend this edge until it hits another such extended edge, or a boundary edge of P.
     # Return the extensions of edges as the rectangulation.
 
-    plt.figure()
-    plt.axis('equal')
-    plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], ':ko')
+    if DRAW_DEBUG_PLOTS:
+        plt.figure()
+        plt.axis('equal')
+        plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], ':ko')
     if orig_geometry is not None:
         plt.plot(orig_geometry.exterior.xy[0], orig_geometry.exterior.xy[1], '-mo')
 
     polygon = remove_one_square_appendages(polygon)
-    plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], '-ko')
-    plt.plot(polygon.exterior.xy[0][0], polygon.exterior.xy[1][0], 'kD')
+    if DRAW_DEBUG_PLOTS:
+        plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], '-ko')
+        plt.plot(polygon.exterior.xy[0][0], polygon.exterior.xy[1][0], 'kD')
 
     concave_vertices = find_concave_vertices(polygon)
 
@@ -212,10 +308,11 @@ def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Opt
         return [polygon]
 
     horizontal_chords, vertical_chords = find_chords(polygon, concave_vertices, is_diagonal)
-    for ls in horizontal_chords:
-        plt.plot(ls.xy[0], ls.xy[1], '-.g')
-    for ls in vertical_chords:
-        plt.plot(ls.xy[0], ls.xy[1], '-.g')
+    if DRAW_DEBUG_PLOTS:
+        for ls in horizontal_chords:
+            plt.plot(ls.xy[0], ls.xy[1], '-.g')
+        for ls in vertical_chords:
+            plt.plot(ls.xy[0], ls.xy[1], '-.g')
 
     splitting_chords = find_subdividing_chords(horizontal_chords, vertical_chords)
 
@@ -231,30 +328,19 @@ def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Opt
                     new_polygons.append(p)
             polygons = new_polygons
 
+    split_polygons = []
     for p in polygons:
-        plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-')
-        min_x, min_y, max_x, max_y = polygon.bounds
-        concave_vertices = find_concave_vertices(p)
-        for vtx in concave_vertices:
-            plt.plot(vtx[0], vtx[1], 'ro')
-            if is_diagonal:
-                d = min(vtx[0] - min_x, vtx[1] - min_y)
-                d2 = min(max_x - vtx[0], max_y - vtx[1])
-            
-                p1 = (vtx[0] - d, vtx[1] - d)
-                p2 = (vtx[0] + d2, vtx[1] + d2)
-
-                splitting_ls = LineString([p1, p2])
-            else:
-                p1 = (min_x, vtx[1])
-                p2 = (max_x, vtx[1])
-
-                splitting_ls = LineString([p1, p2])
+        if DRAW_DEBUG_PLOTS:
+            plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-')
+        split_polygons.extend(split_polygon(p, is_diagonal))
 
 
-            plt.plot(splitting_ls.xy[0], splitting_ls.xy[1], ':k')
+    if DRAW_DEBUG_PLOTS:
+        for p in split_polygons:
+            plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-')
+                # plt.plot(splitting_ls.xy[0], splitting_ls.xy[1], ':k')
 
-    plt.show()
+        plt.show()
     
 
 
