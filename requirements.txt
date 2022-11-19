@@ -2,3 +2,8 @@ numpy
 pandas
 pyautogui
 keyboard
+rasterio
+pyproj
+matplotlib
+tqdm
+scipy
