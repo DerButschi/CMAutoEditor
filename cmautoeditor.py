@@ -135,6 +135,7 @@ MENU_DICT = {
     'Ground 2 Paved 2': pyautogui.Point(135, 497),
     'Cobblestone': pyautogui.Point(190, 497),
     'House': pyautogui.Point(110, 383),
+    'Barn': pyautogui.Point(36, 440),
     '1 Story': pyautogui.Point(81, 383),
     '2 Story': pyautogui.Point(134, 383),
     '3 Story': pyautogui.Point(189, 383),

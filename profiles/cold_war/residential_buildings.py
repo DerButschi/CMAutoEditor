@@ -52,6 +52,13 @@ buildings = [
     ["Independent Buildings",   "House",    1, 3, 2,    True,  1.5,   -1.5,   2.5,    -0.5,     3,    0.5],
     ["Independent Buildings",   "House",    1, 3, 3,    True,  1.5,   -1.5,   2.5,    -0.5,     2,    1.0],
 
+    ["Independent Buildings",   "Barn",    0, 0, 2,    False,  1,     0,      1,      0.5,      1,    1.0],
+    ["Independent Buildings",   "Barn",    0, 1, 0,    False,  1,     0,      1,      0.5,      1,    1.0],
+
+    ["Independent Buildings",   "Barn",    1, 0, 2,    False,  0.5,   0,      0.5,    1,        1,    1.0],
+    ["Independent Buildings",   "Barn",    1, 1, 0,    False,  0.5,   0,      0.5,    1,        1,    1.0],
+
+
     ["Modular Buildings",       "1 Story",    0, 0, 0,    False,  1,    0,      1,      1,      1,    0.25],
     ["Modular Buildings",       "1 Story",    0, 0, 1,    False,  1.5,  0,      1.5,    1,      1,    0.25],
     ["Modular Buildings",       "1 Story",    0, 0, 2,    False,  1,    0,      1,      1.5,    1,    0.25],
@@ -135,7 +142,6 @@ buildings = [
     ["Modular Buildings",       "3 Story",    1, 2, 2,    True,  1.5,  -1.5,    2.5,    -0.5,   3,    0.5],
     ["Modular Buildings",       "3 Story",    1, 2, 3,    True,  1,    -1,      2.5,    0.5,    3,    0.5],
     ["Modular Buildings",       "3 Story",    1, 3, 0,    True,  1.5,  -1.5,    3,      0,      3,    0.5],
-
 
 ]
 

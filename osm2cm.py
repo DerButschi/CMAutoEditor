@@ -281,7 +281,7 @@ class OSMProcessor:
 
         # self.octagon_gdf = pandas.concat((self.octagon_gdf, filler_square_gdf), ignore_index=True)
         self.circle_gdf = pandas.concat((self.circle_geometry1_gdf, self.circle_geometry2_gdf), ignore_index=True)
-        self.sub_square_grid_diagonal_gdf = pandas.concat((sub_square_grid_geometry1_gdf, sub_square_grid_geometry2_gdf))
+        self.sub_square_grid_diagonal_gdf = pandas.concat((sub_square_grid_geometry1_gdf, sub_square_grid_geometry2_gdf), ignore_index=True)
         
         for xidx, x in enumerate(np.linspace(self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[0] - n_bins_pad_x_min * 8 + (n_bins_x_data) * 8, n_bins_x_data * 2 + 1)):
             for yidx, y in enumerate(np.linspace(self.bbox[1] - n_bins_pad_y_min * 8, self.bbox[1] - n_bins_pad_y_min * 8 + (n_bins_y_data) * 8, n_bins_y_data * 2 + 1)):

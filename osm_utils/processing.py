@@ -767,11 +767,6 @@ def collect_building_outlines(osm_processor, config, element_entry):
     min_rot_rectangle = geometry.minimum_rotated_rectangle
     scaled_min_rot_rectangle = scale(min_rot_rectangle, np.sqrt(geometry.area / min_rot_rectangle.area), np.sqrt(geometry.area / min_rot_rectangle.area))
 
-    xmin = np.min(scaled_min_rot_rectangle.boundary.xy[0])
-    xmax = np.max(scaled_min_rot_rectangle.boundary.xy[0])
-    ymin = np.min(scaled_min_rot_rectangle.boundary.xy[1])
-    ymax = np.max(scaled_min_rot_rectangle.boundary.xy[1])
-
     llc_rectangle = _get_rectangle_coords_starting_at_lower_left_corner(scaled_min_rot_rectangle)
     llc_rectangle_coords = list(llc_rectangle.exterior.coords)
     base_angle = np.arctan2(llc_rectangle_coords[1][1] - llc_rectangle_coords[0][1], llc_rectangle_coords[1][0] - llc_rectangle_coords[0][0])
@@ -804,91 +799,42 @@ def collect_building_outlines(osm_processor, config, element_entry):
         # such a small building is probably just a shed or garage.
         return
 
-    print(type(perimeter))
-
     if type(perimeter) == MultiPolygon:
         # TODO: Handle MultiPolygons!
         return
         
-    # concave_vertices = find_concave_vertices(perimeter)
+    building_rectangles = rectangulate_polygon(perimeter, is_diagonal, geometry)
 
-
-    # horizontal_chords, vertical_chords = find_chords(perimeter, concave_vertices, is_diagonal)
-    # find_subdividing_chords(horizontal_chords, vertical_chords)
-    rectangulate_polygon(perimeter, is_diagonal, geometry)
-
-    # plt.figure()
-    # plt.axis('equal')
-    # plt.plot(geometry.exterior.xy[0], geometry.exterior.xy[1], '-ko')
-    # for d in intersecting_diamonds:
-    #     plt.plot(d.exterior.xy[0], d.exterior.xy[1], '-g')
-    # # plt.plot(grid_gdf.x, grid_gdf.y, 'k+')
-    # plt.plot(perimeter.exterior.xy[0], perimeter.exterior.xy[1], '-b')
-    # plt.plot([v[0] for v in concave_vertices], [v[1] for v in concave_vertices], 'ro')
-    # for ls in horizontal_chords:
-    #     plt.plot(ls.xy[0], ls.xy[1], ':r')
-    # for ls in vertical_chords:
-    #     plt.plot(ls.xy[0], ls.xy[1], ':m')
-    # plt.plot()
-    # plt.show()
-
-
-
-
-    # for p in d:
-    #     plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-b')
-    # plt.plot(geometry.exterior.xy[0], geometry.exterior.xy[1], '-ko')
-    # plt.show()
-
-    if np.abs(base_angle) < np.pi / 8:
-        # llc_rectangle = rotate(llc_rectangle, -base_angle, origin=llc_rectangle_coords[0], use_radians=True)
-        llc_rectangle = rotate(llc_rectangle, -base_angle, use_radians=True)
-        is_diagonal = False
-        matching_gdf = grid_gdf
-    else:
-        # llc_rectangle = rotate(llc_rectangle, np.sign(base_angle) * np.pi / 4 - base_angle, origin=llc_rectangle_coords[0], use_radians=True)
-        llc_rectangle = rotate(llc_rectangle, np.sign(base_angle) * np.pi / 4 - base_angle, use_radians=True)
-        is_diagonal = True
+    if is_diagonal:
         matching_gdf = osm_processor.sub_square_grid_diagonal_gdf
+    else:
+        matching_gdf = grid_gdf
     
     stories = None
     # if "building:levels" in element_entry["element"]["properties"]:
     #     stories = element_entry["element"]["properties"]["building:levels"] + 1  # OSM bulding level does not contain attic floor
-    
-    index_llc, llc_idx, llc_xy, building = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
-    condition = (matching_gdf.xidx == llc_idx[0]) & (matching_gdf.yidx == llc_idx[1])
 
-    sub_df = osm_processor._get_sub_df(condition, matching_gdf)
+    for rectangle in building_rectangles:
+        llc_rectangle = _get_rectangle_coords_starting_at_lower_left_corner(rectangle)
 
-    direction, row, col, menu, cat1 = building[['direction', 'row', 'col', 'menu', 'cat1']].values[0]
+        # index_llc, llc_idx, llc_xy, building = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
+        matched_buildings = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
 
-    # tile_condition = (sub_df.xidx == square[0]) & (sub_df.yidx == square[1]) & (sub_df.name == name)
-    sub_df['menu'] = menu
-    sub_df['cat1'] = cat1
-    sub_df['direction'] = 'Direction {}'.format(direction + 1)
-    sub_df['cat2'] = 'Building {}'.format(row * 4 + col + 1)
-    sub_df['priority'] = config[element_entry['name']]['priority']
-    
-    osm_processor._append_to_df(sub_df)
+        for llc_idx, building in matched_buildings:
+            condition = (matching_gdf.xidx == llc_idx[0]) & (matching_gdf.yidx == llc_idx[1])
 
-    # building_rectangle = Polygon([
-    #     llc_xy,
-    #     (llc_xy[0] + building.x1.values[0] * 8, llc_xy[1] + building.y1.values[0] * 8),
-    #     (llc_xy[0] + building.x2.values[0] * 8, llc_xy[1] + building.y2.values[0] * 8),
-    #     (llc_xy[0] + building.x2.values[0] * 8 - building.x1.values[0] * 8, llc_xy[1] + building.y2.values[0] * 8 - building.y1.values[0] * 8)
-    # ])
+            sub_df = osm_processor._get_sub_df(condition, matching_gdf)
 
+            direction, row, col, menu, cat1 = building[['direction', 'row', 'col', 'menu', 'cat1']].values[0]
 
+            sub_df['menu'] = menu
+            sub_df['cat1'] = cat1
+            sub_df['direction'] = 'Direction {}'.format(direction + 1)
+            sub_df['cat2'] = 'Building {}'.format(row * 4 + col + 1)
+            sub_df['priority'] = config[element_entry['name']]['priority']
+            
+            osm_processor._append_to_df(sub_df)
 
-    # plt.figure()
-    # plt.axis('equal')
-    # plt.plot(grid_gdf.x, grid_gdf.y, 'k+')
-    # plt.plot(geometry.exterior.xy[0], geometry.exterior.xy[1], '-ko')
-    # plt.plot(geometry.minimum_rotated_rectangle.exterior.xy[0], geometry.minimum_rotated_rectangle.exterior.xy[1], '-bo')
-    # plt.plot(scaled_min_rot_rectangle.exterior.xy[0], scaled_min_rot_rectangle.exterior.xy[1], ':bo')
-    # plt.plot(llc_rectangle.exterior.xy[0], llc_rectangle.exterior.xy[1], ':go')
-    # plt.plot(building_rectangle.exterior.xy[0], building_rectangle.exterior.xy[1], '-go')
-    # plt.show()
 
 def _get_rectangle_coords_starting_at_lower_left_corner(rectangle):
     # make counter-clock wise (though should alread be)
@@ -925,26 +871,68 @@ def _match_building(rectangle, grid_gdf, is_diagonal, stories=None):
     p1_rel = ((p1[0] - p0_on_grid[0]) / 8, (p1[1] - p0_on_grid[1]) / 8)
     p2_rel = ((p2[0] - p0_on_grid[0]) / 8, (p2[1] - p0_on_grid[1]) / 8)
 
-    x1_val_candidates = building_candidates.x1.unique()
-    p1x = x1_val_candidates[np.argmin(np.abs(x1_val_candidates - p1_rel[0]))]
-    building_candidates = building_candidates.loc[building_candidates.x1 == p1x]
+    first_side = np.linalg.norm(p1_rel)
+    second_side = np.linalg.norm((p2_rel[0] - p1_rel[0], p2_rel[1] - p1_rel[1]))
 
-    y1_val_candidates = building_candidates.y1.unique()
-    p1y = y1_val_candidates[np.argmin(np.abs(y1_val_candidates - p1_rel[1]))]
-    building_candidates = building_candidates.loc[building_candidates.y1 == p1y]
-    
-    x2_val_candidates = building_candidates.x2.unique()
-    p2x = x2_val_candidates[np.argmin(np.abs(x2_val_candidates - p2_rel[0]))]
-    building_candidates = building_candidates.loc[building_candidates.x2 == p2x]
+    first_side_building_candidates = np.linalg.norm((building_candidates.x1, building_candidates.y1), axis=0)
+    second_side_building_candidates = np.linalg.norm((building_candidates.x2 - building_candidates.x1, building_candidates.y2 - building_candidates.y1), axis=0)
 
-    y2_val_candidates = building_candidates.y2.unique()
-    p2y = y2_val_candidates[np.argmin(np.abs(y2_val_candidates - p2_rel[1]))]
-    building_candidates = building_candidates.loc[building_candidates.y2 == p2y]
+    matched_buildings = []
+    # first check if the first side is larger than any of the available buildings
+    if (first_side_building_candidates < first_side).all():
+        first_side_decomposition = get_side_decomposition(first_side, first_side_building_candidates)
+        second_side_decomposition = get_side_decomposition(second_side, second_side_building_candidates)
 
-    if stories is not None:
-        building_candidates = building_candidates.loc[building_candidates.stories == stories]
+        x_norms = []
+        y_norms = []
+        for entry in first_side_decomposition:
+            x_norms.extend(int(entry[0]) * [entry[1]])
+        for entry in second_side_decomposition:
+            y_norms.extend(int(entry[0]) * [entry[1]])
 
-    return index_p0, p0idx_on_grid, p0_on_grid, building_candidates.sample(n=1, weights=building_candidates.weight)
+        lower_left_corner_point = list(p0idx_on_grid)
+
+        for y_norm_idx, y_norm in enumerate(y_norms):
+            for x_norm_idx, x_norm in enumerate(x_norms):
+                building_segment = building_candidates[
+                    (first_side_building_candidates == x_norm) 
+                    & (second_side_building_candidates == y_norm) 
+                    & (building_candidates.menu == 'Modular Buildings')
+                ].sample(n=1, weights=building_candidates.weight)
+
+                matched_buildings.append(((lower_left_corner_point[0], lower_left_corner_point[1]) , building_segment))
+
+                lower_left_corner_point[0] += building_segment.x1.values[0]
+                lower_left_corner_point[1] += building_segment.y1.values[0]
+                if x_norm_idx == len(x_norms) - 1:
+                    lower_left_corner_point[0] = building_segment.x2.values[0] - lower_left_corner_point[0] 
+                    lower_left_corner_point[1] = building_segment.y2.values[0] - lower_left_corner_point[1] 
+                a = 1
+    else:
+        x1_val_candidates = building_candidates.x1.unique()
+        p1x = x1_val_candidates[np.argmin(np.abs(x1_val_candidates - p1_rel[0]))]
+        building_candidates = building_candidates.loc[building_candidates.x1 == p1x]
+
+        y1_val_candidates = building_candidates.y1.unique()
+        p1y = y1_val_candidates[np.argmin(np.abs(y1_val_candidates - p1_rel[1]))]
+        building_candidates = building_candidates.loc[building_candidates.y1 == p1y]
+
+        x2_val_candidates = building_candidates.x2.unique()
+        p2x = x2_val_candidates[np.argmin(np.abs(x2_val_candidates - p2_rel[0]))]
+        building_candidates = building_candidates.loc[building_candidates.x2 == p2x]
+
+        y2_val_candidates = building_candidates.y2.unique()
+        p2y = y2_val_candidates[np.argmin(np.abs(y2_val_candidates - p2_rel[1]))]
+        building_candidates = building_candidates.loc[building_candidates.y2 == p2y]
+
+        if stories is not None:
+            building_candidates = building_candidates.loc[building_candidates.stories == stories]
+
+        building_segment = building_candidates.sample(n=1, weights=building_candidates.weight)
+        matched_buildings = [(p0idx_on_grid, building_segment)]
+
+    return matched_buildings
+    # return index_p0, p0idx_on_grid, p0_on_grid, building_candidates.sample(n=1, weights=building_candidates.weight)
 
 def _check_if_squares_are_valid(squares):
     valid = True
@@ -953,5 +941,20 @@ def _check_if_squares_are_valid(squares):
 
     return valid
 
+def get_side_decomposition(side_length, side_candidates):
+    # sort available segment lengths in descending order
+    unique_segment_lengths = np.sort(np.unique(side_candidates))[::-1]
 
- 
+    # divide side_length by available segment lengths and get those that fit in at least once
+    partition = np.divmod(side_length, unique_segment_lengths)
+
+    side_decomposition = []
+    for sidx, segment_length in enumerate(unique_segment_lengths):
+        if partition[0][sidx] >= 1 and partition[1][sidx] == 0:
+            side_decomposition.append((partition[0][sidx], segment_length))
+            break
+        elif partition[0][sidx] >= 1 and partition[1][sidx] > 0 and sidx < len(unique_segment_lengths) - 1:
+            side_decomposition.extend(get_side_decomposition(side_length - partition[0][sidx] * segment_length, unique_segment_lengths[sidx+1:]))
+
+    return side_decomposition
+            

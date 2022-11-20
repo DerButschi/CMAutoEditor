@@ -283,6 +283,13 @@ def split_polygon(polygon: Polygon, is_diagonal: bool) -> Polygon:
     return sub_split_polygons
 
 
+def remove_non_corner_vertices(polygon: Polygon) -> Polygon:
+    ring = _ccw_ring(polygon.exterior)
+    ring_coords = np.array(ring.coords[:-1])
+    cross_product_signs = np.sign(_ring_cross_product(ring))
+    ring_coords = ring_coords[cross_product_signs != 0]
+
+    return Polygon(ring_coords)
 
 def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Optional[Polygon]) -> List[Polygon]:
     # Input: P a simple orthogonal polygon with no chords.
@@ -294,8 +301,8 @@ def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Opt
         plt.figure()
         plt.axis('equal')
         plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], ':ko')
-    if orig_geometry is not None:
-        plt.plot(orig_geometry.exterior.xy[0], orig_geometry.exterior.xy[1], '-mo')
+        if orig_geometry is not None:
+            plt.plot(orig_geometry.exterior.xy[0], orig_geometry.exterior.xy[1], '-mo')
 
     polygon = remove_one_square_appendages(polygon)
     if DRAW_DEBUG_PLOTS:
@@ -305,7 +312,7 @@ def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Opt
     concave_vertices = find_concave_vertices(polygon)
 
     if len(concave_vertices) == 0:
-        return [polygon]
+        return [remove_non_corner_vertices(polygon)]
 
     horizontal_chords, vertical_chords = find_chords(polygon, concave_vertices, is_diagonal)
     if DRAW_DEBUG_PLOTS:
@@ -332,8 +339,10 @@ def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Opt
     for p in polygons:
         if DRAW_DEBUG_PLOTS:
             plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-')
-        split_polygons.extend(split_polygon(p, is_diagonal))
+        split_polygons.extend((split_polygon(p, is_diagonal)))
 
+    split_polygons = [remove_non_corner_vertices(p) for p in split_polygons]
+    
 
     if DRAW_DEBUG_PLOTS:
         for p in split_polygons:
@@ -342,6 +351,7 @@ def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Opt
 
         plt.show()
     
+    return split_polygons
 
 
 
