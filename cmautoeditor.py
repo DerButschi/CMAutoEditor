@@ -24,10 +24,10 @@ import keyboard
 import os
 
 # constants:
-UPPER_LEFT_SQUARE = pyautogui.Point(234,52)
-UPPER_RIGHT_SQUARE = pyautogui.Point(1882,52)
-LOWER_LEFT_SQUARE = pyautogui.Point(234,996)
-LOWER_RIGHT_SQUARE = pyautogui.Point(1882,996)
+UPPER_LEFT_SQUARE = pyautogui.Point(233,51) # center (233,51) 
+# UPPER_RIGHT_SQUARE = pyautogui.Point(1882,52)
+# LOWER_LEFT_SQUARE = pyautogui.Point(234,996)
+LOWER_RIGHT_SQUARE = pyautogui.Point(1881,994) # center (233, 51)
 
 SQUARE_SIZE_X = 16
 SQUARE_SIZE_Y = 16
@@ -351,8 +351,8 @@ def set_ground(df, map_df):
             pyautogui.click(MENU_DICT[group_info[3]])
 
         for row_idx, row in group.iterrows():
-            x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
-            y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
+            x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x - SQUARE_SIZE_X / 4)
+            y_pos = int(LOWER_RIGHT_SQUARE.y + SQUARE_SIZE_Y / 4 - row.y * SQUARE_SIZE_Y)
             pyautogui.click(x=x_pos, y=y_pos)
 
             map_df.loc[row_idx, 'done'] = 1
