@@ -38,7 +38,7 @@ import logging
 
 
 
-config = json.load(open('default_osm_config_delta.json', 'r'))
+config = json.load(open('osm_buildings_only_config.json', 'r'))
 
 
 
@@ -121,7 +121,9 @@ class OSMProcessor:
         self.gdf = None
         self.df = None
         self.network_graphs = {}
-        self.building_outlines = {}
+        self.grids = {}
+        self.building_outlines = None
+        self.occupancy_gdf = geopandas.GeoDataFrame(columns=['geometry', 'priority', 'name'])
 
         self.matched_elements = []
 
@@ -364,16 +366,19 @@ class OSMProcessor:
         stages = {}
         for entry_idx, entry in enumerate(self.matched_elements):
             name = entry['name']
+            priority = config[name]['priority']
+            if priority not in stages:
+                stages[priority] = {}
             for process in config[name]['process']:
                 for stage_idx, stage, processing_type in self.processing_stages[process]:
-                    if stage_idx not in stages:
-                        stages[stage_idx] = {}
-                    if stage not in stages[stage_idx]:
-                        stages[stage_idx][stage] = []
+                    if stage_idx not in stages[priority]:
+                        stages[priority][stage_idx] = {}
+                    if stage not in stages[priority][stage_idx]:
+                        stages[priority][stage_idx][stage] = []
                     if processing_type == "by_element":
-                        stages[stage_idx][stage].append(entry_idx)
-                    elif processing_type == "by_config_name" and name not in stages[stage_idx][stage]:
-                        stages[stage_idx][stage].append(name)
+                        stages[priority][stage_idx][stage].append(entry_idx)
+                    elif processing_type == "by_config_name" and name not in stages[priority][stage_idx][stage]:
+                        stages[priority][stage_idx][stage].append(name)
                     
 
         return stages
@@ -393,13 +398,19 @@ class OSMProcessor:
     def run_processors(self):
         stages = self._collect_stages()
 
-        for stage_idx in sorted(stages.keys()):
-            for stage in stages[stage_idx]:
-                for item in tqdm(stages[stage_idx][stage], 'Processing Stage {}, processor {}'.format(stage_idx, stage)):
-                    if type(item) == int:
-                        osm_utils.processing.__getattribute__(stage)(self, config, self.matched_elements[item])
-                    else:
-                        osm_utils.processing.__getattribute__(stage)(self, config, item)
+        # plt.figure()
+        for priority in sorted(stages.keys()):
+            for stage_idx in sorted(stages[priority].keys()):
+                for stage in stages[priority][stage_idx]:
+                    for item in tqdm(stages[priority][stage_idx][stage], 'Processing Priority {}, Stage {}, processor {}'.format(priority, stage_idx, stage)):
+                        if type(item) == int:
+                            osm_utils.processing.__getattribute__(stage)(self, config, self.matched_elements[item])
+                        else:
+                            osm_utils.processing.__getattribute__(stage)(self, config, item)
+
+        # plt.axis('equal')
+        # plt.show()
+        
 
     def write_to_file(self, output_file_name):
         xmax = self.idx_bbox[2]

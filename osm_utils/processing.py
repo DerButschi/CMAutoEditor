@@ -692,6 +692,10 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
         valid_tiles_dict[node1_id] = [path[0][0]]
         valid_tiles_dict[node2_id] = [path[-1][0]]
 
+        for square in squares:
+            polygon = osm_processor.gdf[(osm_processor.gdf.xidx == square[0]) & (osm_processor.gdf.yidx == square[1])].geometry.values[0]
+            occupancy_entry = geopandas.GeoDataFrame({'geometry': [polygon], 'priority': [config[name]['priority']], 'name': name})
+            osm_processor.occupancy_gdf = pandas.concat((osm_processor.occupancy_gdf, occupancy_entry), ignore_index=True)
 
         # if len(node1_neighbors) > 0:
         # fix_tile_for_node(node1_id, edge_graphs, path[0][0])
@@ -784,27 +788,53 @@ def collect_building_outlines(osm_processor, config, element_entry):
         idx = diamonds.sindex.query(geometry, predicate='intersects')
         # idx = diag_grid_gdf.loc[idx].index
         intersecting_diamonds = diamonds.iloc[idx].geometry
-        oidx = osm_processor.occupancy_gdf.sindex.query_bulk(intersecting_diamonds.geometry, predicate='intersects')
-        is_majority_square = intersecting_diamonds.intersection(geometry).area > 12.8
-        idx = intersecting_diamonds[is_majority_square].index
+        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < config[element_entry['name']]['priority']].sindex.query_bulk(intersecting_diamonds.geometry, predicate='overlaps')
+        intersecting_diamonds = intersecting_diamonds.drop(intersecting_diamonds.iloc[oidx[0]].index)
+
+        # is_majority_square = intersecting_diamonds.intersection(geometry).area > 12.8
+        # idx = intersecting_diamonds[is_majority_square].index
+        idx = intersecting_diamonds.index
         perimeter = diamonds.iloc[idx].geometry.unary_union
+        if perimeter is not None:
+            perimeter = perimeter.buffer(-2 * np.sqrt(2), cap_style=2, join_style=2, single_sided=True)
     else:
         squares = grid_gdf.geometry.buffer(2, cap_style=3)
         idx = squares.sindex.query(geometry, predicate='intersects')
         intersecting_squares = intersecting_squares = squares.iloc[idx]
+        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < config[element_entry['name']]['priority']].sindex.query_bulk(intersecting_squares.geometry, predicate='overlaps')
+        intersecting_squares = intersecting_squares.drop(intersecting_squares.iloc[oidx[0]].index)
         # 40 % of 16 m²
-        is_majority_square = intersecting_squares.intersection(geometry).area > 6.4
-        idx = intersecting_squares[is_majority_square].index
+        # is_majority_square = intersecting_squares.intersection(geometry).area > 6.4
+        # idx = intersecting_squares[is_majority_square].index
+        idx = intersecting_squares.index
         perimeter = squares.iloc[idx].geometry.unary_union
 
-    if perimeter is None:
+        if perimeter is not None:
+            perimeter = perimeter.buffer(-2, cap_style=2, join_style=2, single_sided=True)
+
+    if perimeter is None or perimeter.is_empty:
         # such a small building is probably just a shed or garage.
         return
 
     if type(perimeter) == MultiPolygon:
         # TODO: Handle MultiPolygons!
         return
-        
+
+    # plt.figure()
+    # plt.axis('equal')
+    # for p in osm_processor.occupancy_gdf.geometry:
+    #     plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-ko') 
+    # if is_diagonal:   
+    #     for p in intersecting_diamonds.geometry:
+    #         plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-bo')
+    # else:
+    #     for p in intersecting_squares.geometry:
+    #         plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-bo')
+    # plt.plot(perimeter.exterior.xy[0], perimeter.exterior.xy[1],'-o')
+    # plt.show()
+
+    
+
     building_rectangles = rectangulate_polygon(perimeter, is_diagonal, geometry)
 
     if is_diagonal:
@@ -816,7 +846,7 @@ def collect_building_outlines(osm_processor, config, element_entry):
     # if "building:levels" in element_entry["element"]["properties"]:
     #     stories = element_entry["element"]["properties"]["building:levels"] + 1  # OSM bulding level does not contain attic floor
 
-    plt.figure()
+    # plt.figure()
     for rectangle in building_rectangles:
         llc_rectangle = _get_rectangle_coords_starting_at_lower_left_corner(rectangle)
 
@@ -849,12 +879,20 @@ def collect_building_outlines(osm_processor, config, element_entry):
             
             osm_processor._append_to_df(sub_df)
 
+            building_polygon = scale(building_polygon, 8, 8, origin=(llc_idx[0], llc_idx[1]))
+            building_polygon = translate(building_polygon, llc_idx[0] * 7 + osm_processor.gdf.x.min(), llc_idx[1] * 7 + osm_processor.gdf.y.min())
+
+            # origin = translate(Point((llc_idx[0] * 8, llc_idx[1] * 8)), osm_processor.gdf.x.min(), osm_processor.gdf.y.min())
+            # building_polygon = translate(scale(building_polygon, 8, 8, origin=(llc_idx[0], llc_idx[1])), origin.x, origin.y)
+
+
             occupancy_entry = geopandas.GeoDataFrame({'geometry': [building_polygon], 'priority': [config[element_entry['name']]['priority']], 'name': element_entry['name']})
 
-            osm_processor.occupancy_gdf = pandas.concat((osm_processor.occupancy_gdf, occupancy_entry))
+
+            osm_processor.occupancy_gdf = pandas.concat((osm_processor.occupancy_gdf, occupancy_entry), ignore_index=True)
             # osm_processor.occupancy_gdf.plot()
             plt.plot(building_polygon.exterior.xy[0], building_polygon.exterior.xy[1], '-ko')
-    plt.show()
+    # plt.show()
     a = 1
 
 
@@ -926,6 +964,9 @@ def _match_building(rectangle, grid_gdf, is_diagonal, stories=None):
             condition = (first_side_building_candidates == x_norm) & (second_side_building_candidates == y_norm)
             if (first_side_building_candidates < first_side).all():
                 condition = condition & (building_candidates.menu == 'Modular Buildings')
+            
+            if len(building_candidates[condition]) == 0:
+                continue
             building_segment = building_candidates[condition].sample(n=1, weights=building_candidates.weight)
 
             matched_buildings.append((
@@ -978,6 +1019,8 @@ def _check_if_squares_are_valid(squares):
     return valid
 
 def get_side_decomposition(side_length, side_candidates):
+    # TODO: handle situations where not the *entire* lengths can be filled but a part of it
+
     # sort available segment lengths in descending order
     unique_segment_lengths = np.sort(np.unique(side_candidates))[::-1]
 
@@ -992,9 +1035,15 @@ def get_side_decomposition(side_length, side_candidates):
     #     elif partition[0][sidx] >= 1 and partition[1][sidx] > 0 and sidx < len(unique_segment_lengths) - 1:
     #         side_decomposition.extend(get_side_decomposition(side_length - partition[0][sidx] * segment_length, unique_segment_lengths[sidx+1:]))
 
+    min_diff = np.inf
+    min_diff_list = []
     for factor_tuple in itertools.product(*[range(a,-1,-1) for a in partition[0].astype(int)]):
-        if sum([factor_tuple[idx] * unique_segment_lengths[idx] for idx in range(len(factor_tuple))]) - side_length == 0:
+        diff = side_length - sum([factor_tuple[idx] * unique_segment_lengths[idx] for idx in range(len(factor_tuple))])
+        if diff == 0:
             return [(factor_tuple[idx], unique_segment_lengths[idx]) for idx in range(len(factor_tuple))]
+        elif diff > 0 and diff < min_diff:
+            min_diff = diff
+            min_diff_list = [(factor_tuple[idx], unique_segment_lengths[idx]) for idx in range(len(factor_tuple))]
 
-    return []
+    return min_diff_list
             

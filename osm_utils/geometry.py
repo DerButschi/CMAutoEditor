@@ -15,7 +15,7 @@
 
 from typing import List, Optional, Tuple, Any
 import numpy as np
-from shapely.geometry import Polygon, LinearRing, LineString, MultiLineString
+from shapely.geometry import Polygon, LinearRing, LineString, MultiLineString, Point, GeometryCollection
 from shapely.ops import split
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -246,6 +246,10 @@ def split_polygon(polygon: Polygon, is_diagonal: bool) -> Polygon:
     invalid_splits = []
     for line in cut_lines:
         sub_polygons = split(polygon, line)
+        if len(sub_polygons.geoms) > 2:
+            vtx_point = Point(vtx)
+            sub_polygons = GeometryCollection([poly for poly in sub_polygons if vtx_point.touches(poly)])
+            
         assert len(sub_polygons.geoms) == 2
         assert type(sub_polygons.geoms[0]) == Polygon
         assert type(sub_polygons.geoms[1]) == Polygon
@@ -304,7 +308,7 @@ def rectangulate_polygon(polygon: Polygon, is_diagonal: bool, orig_geometry: Opt
         if orig_geometry is not None:
             plt.plot(orig_geometry.exterior.xy[0], orig_geometry.exterior.xy[1], '-mo')
 
-    polygon = remove_one_square_appendages(polygon)
+    # polygon = remove_one_square_appendages(polygon)
     if DRAW_DEBUG_PLOTS:
         plt.plot(polygon.exterior.xy[0], polygon.exterior.xy[1], '-ko')
         plt.plot(polygon.exterior.xy[0][0], polygon.exterior.xy[1][0], 'kD')
