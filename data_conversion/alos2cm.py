@@ -28,6 +28,7 @@ from tqdm import tqdm
 
 # bbox_utm = [404574.5693375174, 5321911.884501877, 409440.47559354035, 5326019.8956525605]
 bbox_utm = [404906.392,5323566.913, 407839.804,5326576.343]
+# bbox_utm = [404906.392,5323566.913, 405884.196, 5325071.6280000005]
 # https://gis.stackexchange.com/questions/428728/get-lanlon-and-values-from-geotiff-using-python
 
 # data = rasterio.open("alos/N048E037/ALPSMLC30_N048E037_DSM.tif")
@@ -53,7 +54,7 @@ bbox_utm = [404906.392,5323566.913, 407839.804,5326576.343]
 # transformer = Transformer.from_crs('epsg:{}'.format(crs.code), 'epsg:{}'.format(data.crs.to_epsg()), always_xy=True)
 
 # dst = np.zeros((width, height))
-with rasterio.open('alos/N048E037/ALPSMLC30_N048E037_DSM.tif') as src:
+with rasterio.open('E:\Spiele\CMAutoEditor\scenarios\loope\dgm1_32_383_5647_1_nw.tif') as src:
     aoi = AreaOfInterest(*src.bounds)
 
     crs_list = query_utm_crs_info(area_of_interest=aoi)
@@ -95,41 +96,54 @@ with rasterio.open('alos/N048E037/ALPSMLC30_N048E037_DSM.tif') as src:
             n_bins_y = int(np.floor((bbox_utm[3] - bbox_utm[1]) / 8) + 1)
             data = np.zeros((n_bins_x, n_bins_y))
 
-            pic_xmin_idx, pic_ymin_idx = dst.index(bbox_utm[0], bbox_utm[1])
-            pic_xmax_idx, pic_ymax_idx = dst.index(bbox_utm[2], bbox_utm[3])
+            pic_bottom, pic_left = dst.index(bbox_utm[0], bbox_utm[1])
+            pic_top, pic_right = dst.index(bbox_utm[2], bbox_utm[3])
+
 
             pic_data = dst.read(1)
-            pic_data_bbox = pic_data[pic_xmax_idx:pic_xmin_idx+1, pic_ymin_idx:pic_ymax_idx+1]
-
-            pic_grid_x, pic_grid_y = np.mgrid[bbox_utm[0]:bbox_utm[2]:complex(pic_xmin_idx-pic_xmax_idx+1), bbox_utm[1]:bbox_utm[3]:complex(pic_ymax_idx-pic_ymin_idx+1)]
-            points = np.zeros((pic_grid_x.shape[0] * pic_grid_x.shape[1], 2))
-            values = pic_data_bbox.flatten()
-            points[:,0] = pic_grid_x.flatten()
-            points[:,1] = pic_grid_y.flatten()
-            grid_x, grid_y = np.mgrid[bbox_utm[0]:bbox_utm[2]:complex(n_bins_y), bbox_utm[1]:bbox_utm[3]:complex(n_bins_x)]
-            interp_data = griddata(points, values, (grid_x, grid_y))
-
-            # maxima_yindices, maxima_xindices = argrelextrema(interp_data, np.greater)
-            # minima_yindices, minima_xindices = argrelextrema(interp_data, np.less)
             x_arr = []
             y_arr = []
             z_arr = []
-            for xidx in range(n_bins_x):
-                for yidx in range(n_bins_y):
-            # for idx in range(len(maxima_xindices)):
-            #     xidx = maxima_xindices[idx]
-            #     yidx = maxima_yindices[idx]
-            #     x_arr.append(xidx)
-            #     y_arr.append(yidx)
-            #     z_arr.append(interp_data[n_bins_y-yidx-1, xidx])
-            # for idx in range(len(minima_yindices)):
-            #     xidx = minima_xindices[idx]
-            #     yidx = minima_yindices[idx]
-                    x_arr.append(xidx)
-                    y_arr.append(yidx)
-                    z_arr.append(interp_data[n_bins_y-yidx-1, xidx])
+            for row in range(pic_top-1, pic_bottom+2):
+                for col in range(pic_left-1, pic_right+2):
+                    x, y = dst.xy(row, col)
+                    z = pic_data[row, col]
+                    x_arr.append(x)
+                    y_arr.append(y)
+                    z_arr.append(z)
 
-            df = pandas.DataFrame({'x': x_arr, 'y': y_arr, 'z': z_arr})
+            points = np.zeros((len(x_arr), 2))
+            points[:,0] = x_arr
+            points[:,1] = y_arr
+
+            # picture is (row, col) with (0, 0) at top left!
+            # pic_data_bbox = pic_data_bbox[::-1,:].transpose(0,1)
+
+
+            # pic_grid_x, pic_grid_y = np.mgrid[bbox_utm[0]:bbox_utm[2]:complex(pic_xmin_idx-pic_xmax_idx+1), bbox_utm[1]:bbox_utm[3]:complex(pic_ymax_idx-pic_ymin_idx+1)]
+            # points = np.zeros((pic_grid_x.shape[0] * pic_grid_x.shape[1], 2))
+            # values = pic_data_bbox.flatten('F')
+            # points[:,0] = pic_grid_x.flatten()
+            # points[:,1] = pic_grid_y.flatten()
+            # grid_x, grid_y = np.mgrid[bbox_utm[0]:bbox_utm[2]:complex(n_bins_x), bbox_utm[1]:bbox_utm[3]:complex(n_bins_y)]
+            # interp_data = griddata(points, values, (grid_x, grid_y))
+
+            # maxima_yindices, maxima_xindices = argrelextrema(interp_data, np.greater)
+            # minima_yindices, minima_xindices = argrelextrema(interp_data, np.less)
+            x_interp_arr = []
+            y_interp_arr = []
+            xidx_arr = []
+            yidx_arr = []
+            for xidx, x in enumerate(np.linspace(bbox_utm[0] + 4, bbox_utm[0] + 4 + (n_bins_x - 1) * 8, n_bins_x)):
+                for yidx, y in enumerate(np.linspace(bbox_utm[1] + 4, bbox_utm[1] + 4 + (n_bins_y - 1) * 8, n_bins_y)):
+                    x_interp_arr.append(x)
+                    y_interp_arr.append(y)
+                    xidx_arr.append(xidx)
+                    yidx_arr.append(yidx)
+
+            interp_data = griddata(points, z_arr, (x_interp_arr, y_interp_arr))
+
+            df = pandas.DataFrame({'x': xidx_arr, 'y': yidx_arr, 'z': interp_data})
 
             df.to_csv('alos_test.csv')
 
