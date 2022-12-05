@@ -284,6 +284,7 @@ class OSMProcessor:
         # self.octagon_gdf = pandas.concat((self.octagon_gdf, filler_square_gdf), ignore_index=True)
         self.circle_gdf = pandas.concat((self.circle_geometry1_gdf, self.circle_geometry2_gdf), ignore_index=True)
         self.sub_square_grid_diagonal_gdf = pandas.concat((sub_square_grid_geometry1_gdf, sub_square_grid_geometry2_gdf), ignore_index=True)
+        self.sub_square_grid_diagonal_gdf.geometry = self.sub_square_grid_diagonal_gdf.geometry.buffer(4, resolution=1)
         
         for xidx, x in enumerate(np.linspace(self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[0] - n_bins_pad_x_min * 8 + (n_bins_x_data) * 8, n_bins_x_data * 2 + 1)):
             for yidx, y in enumerate(np.linspace(self.bbox[1] - n_bins_pad_y_min * 8, self.bbox[1] - n_bins_pad_y_min * 8 + (n_bins_y_data) * 8, n_bins_y_data * 2 + 1)):
@@ -292,7 +293,7 @@ class OSMProcessor:
                 xiarr.append(xidx / 2 - 0.5)
                 yiarr.append(yidx / 2 - 0.5)
 
-        geometry = geopandas.points_from_xy(xarr, yarr)
+        geometry = geopandas.points_from_xy(xarr, yarr).buffer(2, cap_style=3)
 
         self.sub_square_grid_gdf = geopandas.GeoDataFrame({
             'x': xarr, 
@@ -308,6 +309,7 @@ class OSMProcessor:
             'name': [-1] * len(xarr),
             'priority': [-1] * len(xarr),
             }, geometry=geometry)
+
 
 
     def _get_projected_geometry(self, geojson_geometry):
@@ -566,15 +568,16 @@ class OSMProcessor:
 
 
 if __name__ == '__main__':
-    osm_data = geojson.load(open('test/buildings_ringmauer.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('scenarios/loope/loope2.geojson', encoding='utf8'))
     # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
-
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
+    osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
+
     # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
-    osm_processor = OSMProcessor(config=config)
+    # osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('test/buildings_ringmauer.csv')
+    osm_processor.write_to_file('scenarios/loope/loope2.csv')
 
 
 
