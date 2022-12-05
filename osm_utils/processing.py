@@ -309,6 +309,10 @@ def create_line_graph(osm_processor, config, name):
             ls_splits = [ls]
 
         for lidx, ls_split in enumerate(ls_splits):
+            if len(ls_split.coords) == 0:
+                # TODO: check how this can happen
+                logger.warn('LineString split is empty.')
+                continue
             if type(ls_split) == LineString:
                 p1 = Point(ls_split.coords[0])
                 p2 = Point(ls_split.coords[-1])
@@ -770,6 +774,9 @@ def collect_building_outlines(osm_processor, config, element_entry):
     grid_gdf = osm_processor.sub_square_grid_gdf
     geometry = element_entry['geometry']
     min_rot_rectangle = geometry.minimum_rotated_rectangle
+    if min_rot_rectangle.area == 0:
+        return
+        
     scaled_min_rot_rectangle = scale(min_rot_rectangle, np.sqrt(geometry.area / min_rot_rectangle.area), np.sqrt(geometry.area / min_rot_rectangle.area))
 
     llc_rectangle = _get_rectangle_coords_starting_at_lower_left_corner(scaled_min_rot_rectangle)
@@ -784,7 +791,8 @@ def collect_building_outlines(osm_processor, config, element_entry):
     if is_diagonal:
         diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
         # diamonds = diag_grid_gdf.geometry.buffer(np.sqrt(8), cap_style=3).rotate(45)
-        diamonds = diag_grid_gdf.geometry.buffer(4, resolution=1)
+        # diamonds = diag_grid_gdf.geometry.buffer(4, resolution=1)
+        diamonds = diag_grid_gdf.geometry
         idx = diamonds.sindex.query(geometry, predicate='intersects')
         # idx = diag_grid_gdf.loc[idx].index
         intersecting_diamonds = diamonds.iloc[idx].geometry
@@ -798,7 +806,8 @@ def collect_building_outlines(osm_processor, config, element_entry):
         if perimeter is not None:
             perimeter = perimeter.buffer(-2 * np.sqrt(2), cap_style=2, join_style=2, single_sided=True)
     else:
-        squares = grid_gdf.geometry.buffer(2, cap_style=3)
+        # squares = grid_gdf.geometry.buffer(2, cap_style=3)
+        squares = grid_gdf.geometry
         idx = squares.sindex.query(geometry, predicate='intersects')
         intersecting_squares = intersecting_squares = squares.iloc[idx]
         oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < config[element_entry['name']]['priority']].sindex.query_bulk(intersecting_squares.geometry, predicate='overlaps')
