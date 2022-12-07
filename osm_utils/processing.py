@@ -771,10 +771,13 @@ def create_square_graph_path_search(osm_processor, config, name):
     search_path(osm_processor, config, name)
 
 def collect_building_outlines(osm_processor, config, element_entry):
+    logger = logging.getLogger('osm2cm')
+
     grid_gdf = osm_processor.sub_square_grid_gdf
     geometry = element_entry['geometry']
     min_rot_rectangle = geometry.minimum_rotated_rectangle
     if min_rot_rectangle.area == 0:
+        logger.debug('Minimum rotated building outline (element idx {}) has 0 area.'.format(element_entry['idx']))
         return
         
     scaled_min_rot_rectangle = scale(min_rot_rectangle, np.sqrt(geometry.area / min_rot_rectangle.area), np.sqrt(geometry.area / min_rot_rectangle.area))
@@ -823,10 +826,12 @@ def collect_building_outlines(osm_processor, config, element_entry):
 
     if perimeter is None or perimeter.is_empty:
         # such a small building is probably just a shed or garage.
+        logger.debug('Perimeter of building {} is None or empty.'.format(element_entry['idx']))
         return
 
     if type(perimeter) == MultiPolygon:
         # TODO: Handle MultiPolygons!
+        logger.debug('Perimeter of building {} is a multipolygon.'.format(element_entry['idx']))
         return
 
     # plt.figure()
@@ -845,6 +850,8 @@ def collect_building_outlines(osm_processor, config, element_entry):
     
 
     building_rectangles = rectangulate_polygon(perimeter, is_diagonal, geometry)
+    if len(building_rectangles) == 0:
+        logger.debug('Polygon rectangulation for building {} is yielded no results.'.format(element_entry['idx']))
 
     if is_diagonal:
         matching_gdf = osm_processor.sub_square_grid_diagonal_gdf
@@ -861,6 +868,9 @@ def collect_building_outlines(osm_processor, config, element_entry):
 
         # index_llc, llc_idx, llc_xy, building = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
         matched_buildings = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
+
+        if len(matched_buildings) == 0:
+            logger.debug('No matching CM building was found for building {}.'.format(element_entry['idx']))
 
         for llc_idx, building in matched_buildings:
             building_polygon = Polygon([
@@ -1055,4 +1065,34 @@ def get_side_decomposition(side_length, side_candidates):
             min_diff_list = [(factor_tuple[idx], unique_segment_lengths[idx]) for idx in range(len(factor_tuple))]
 
     return min_diff_list
+
+def single_object_random(osm_processor, config, element_entry):
+    cm_types = config[element_entry['name']]['cm_types']
+    n_types = len(cm_types)
+    df = osm_processor.df
+
+    grid_cell = osm_processor.gdf.sindex.query(element_entry["geometry"], predicate='within')
+    if len(grid_cell) == 0:
+        return
+    
+
+    sub_df = osm_processor._get_sub_df(grid_cell)
+
+    sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
+    probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
+
+    rng = np.random.default_rng()
+    type_indices = rng.choice(list(range(n_types)), p=probabilities, size=(len(sub_df),))
+
+    # type_indices = np.random.randint(0, n_types, size=(len(sub_df),))
+    for type_idx in range(n_types):
+        idx = np.where(type_indices == type_idx)[0]
+        if len(idx) > 0:
+            cm_type = cm_types[type_idx]
+            for key in cm_type:
+                if type(cm_type[key]) != list and key in sub_df.columns:
+                    sub_df.loc[sub_df.index[idx], key] = cm_type[key]
+
+    osm_processor._append_to_df(sub_df)
+
             
