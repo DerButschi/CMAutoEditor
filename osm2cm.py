@@ -22,7 +22,7 @@ import pyproj
 import pandas
 import numpy as np
 from shapely.geometry import LineString, Polygon, MultiPolygon, MultiLineString, Point, MultiPoint, shape
-from shapely.ops import split, snap
+from shapely.ops import split, snap, transform
 import matplotlib.pyplot as plt
 # from skimage.draw import line, line_aa, line_nd, polygon
 import geopandas
@@ -37,8 +37,7 @@ import osm_utils.processing
 import logging
 
 
-
-config = json.load(open('osm_buildings_only_config.json', 'r'))
+config = json.load(open('osm_single_trees_only_config.json', 'r'))
 
 
 
@@ -131,6 +130,7 @@ class OSMProcessor:
             "type_from_tag": [(0, "assign_type_from_tag", "by_element")],
             "type_random_area": [(0, "assign_type_randomly_in_area", "by_element")],
             "type_random_individual": [(0, "assign_type_randomly_for_each_square", "by_element")],
+            "single_object_random": [(0, "single_object_random", "by_element")],
             "road_tiles": [
                 (0, "collect_network_data", "by_element"), 
                 (1, "create_line_graph", "by_config_name"), 
@@ -226,10 +226,6 @@ class OSMProcessor:
             'priority': [-1] * len(xarr),
             }, geometry=geometry)
 
-        octagon_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4 / np.cos(22.5 / 180 * np.pi), cap_style=1, resolution=2)
-        self.octagon_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=octagon_geometry.rotate(22.5))
-        circle_geometry1 = geopandas.points_from_xy(xarr, yarr).buffer(2 * np.sqrt(2), cap_style=1)
-        self.circle_geometry1_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=circle_geometry1)
         sub_square_grid_geometry1 = geopandas.points_from_xy(xarr, yarr)
 
         sub_square_grid_geometry1_gdf = geopandas.GeoDataFrame({
@@ -259,10 +255,6 @@ class OSMProcessor:
                 xiarr.append(xidx-0.5)
                 yiarr.append(yidx-0.5)
 
-        filler_square_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4 * np.tan(22.5 / 180 * np.pi), cap_style=3)
-        filler_square_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=filler_square_geometry.rotate(45))
-        circle_geometry2 = geopandas.points_from_xy(xarr, yarr).buffer(2 * np.sqrt(2), cap_style=1)
-        self.circle_geometry2_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=circle_geometry2)
         sub_square_grid_geometry2 = geopandas.points_from_xy(xarr, yarr)
         sub_square_grid_geometry2_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=sub_square_grid_geometry2)
 
@@ -282,7 +274,6 @@ class OSMProcessor:
             }, geometry=sub_square_grid_geometry2)
 
         # self.octagon_gdf = pandas.concat((self.octagon_gdf, filler_square_gdf), ignore_index=True)
-        self.circle_gdf = pandas.concat((self.circle_geometry1_gdf, self.circle_geometry2_gdf), ignore_index=True)
         self.sub_square_grid_diagonal_gdf = pandas.concat((sub_square_grid_geometry1_gdf, sub_square_grid_geometry2_gdf), ignore_index=True)
         self.sub_square_grid_diagonal_gdf.geometry = self.sub_square_grid_diagonal_gdf.geometry.buffer(4, resolution=1)
         
@@ -313,10 +304,15 @@ class OSMProcessor:
 
 
     def _get_projected_geometry(self, geojson_geometry):
-            geometry = geopandas.GeoSeries(shape(geojson_geometry))
-            geometry = geometry.set_crs(epsg=4326)
-            geometry = geometry.to_crs(epsg=25832)
-            return geometry[0]
+            # geometry = geopandas.GeoSeries(shape(geojson_geometry))
+            # geometry = geometry.set_crs(epsg=4326)
+            # geometry = geometry.to_crs(epsg=25832)
+            # return geometry[0]
+
+            geometry_object = shape(geojson_geometry)
+            projected_geometry_object = transform(self.transformer.transform, geometry_object)
+
+            return projected_geometry_object
 
 
 
@@ -329,14 +325,23 @@ class OSMProcessor:
                 *self.transformer.transform(*self.bbox_lon_lat[2:4])
             ]
 
+        # xmin = np.inf
+        # xmax = -np.inf
+        # ymin = np.inf
+        # ymax = -np.inf
+
         xmin, ymin = self.transformer.transform(osm_data['bbox'][0], osm_data['bbox'][1])
         xmax, ymax = self.transformer.transform(osm_data['bbox'][2], osm_data['bbox'][3])
 
-        self._init_grid([xmin, ymin, xmax, ymax])
 
         element_idx = 0
         for element in tqdm(osm_data.features, 'Preprocessing OSM Data'):
             geometry = self._get_projected_geometry(element.geometry)
+
+            # xmin = min(xmin, geometry.bounds[0])
+            # xmax = max(xmax, geometry.bounds[2])
+            # ymin = min(ymin, geometry.bounds[1])
+            # ymax = max(ymax, geometry.bounds[3])
 
             element_tags = element.properties
 
@@ -363,6 +368,8 @@ class OSMProcessor:
                 if matched:
                     self.matched_elements.append({'element': element, 'geometry': geometry, 'name': name, 'idx': element_idx})
                     element_idx += 1
+
+        self._init_grid([xmin, ymin, xmax, ymax])
 
     def _collect_stages(self):
         stages = {}
@@ -429,8 +436,6 @@ class OSMProcessor:
         self.df.x = self.df.x - self.idx_bbox[0]
         self.df.y = self.df.y - self.idx_bbox[1]
         self.df.to_csv(output_file_name)
-
-
 
 
 
@@ -568,7 +573,7 @@ class OSMProcessor:
 
 
 if __name__ == '__main__':
-    osm_data = geojson.load(open('scenarios/loope/loope2.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
     # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
     osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
@@ -577,7 +582,7 @@ if __name__ == '__main__':
     # osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('scenarios/loope/loope2.csv')
+    osm_processor.write_to_file('test/industrial_fences.csv')
 
 
 
