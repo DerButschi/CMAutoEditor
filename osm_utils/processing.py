@@ -245,7 +245,11 @@ def fix_tile_for_node(node_id, edge_graphs, tile):
 
 def get_matched_cm_type(config, element_entry):
     cm_types = config[element_entry['name']]['cm_types']
-    tags = element_entry['element'].properties
+
+    if 'tags' in element_entry['element'].properties:
+        tags = element_entry['element'].properties['tags']
+    else: 
+        tags = element_entry['element'].properties
 
     matched_cm_type = None
     for cm_type in cm_types:
@@ -870,7 +874,7 @@ def collect_building_outlines(osm_processor, config, element_entry):
         matched_buildings = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
 
         if len(matched_buildings) == 0:
-            logger.debug('No matching CM building was found for building {}.'.format(element_entry['idx']))
+            logger.debug('No matching CM building was found for building {}. Area: {}'.format(element_entry['idx'], geometry.area))
 
         for llc_idx, building in matched_buildings:
             building_polygon = Polygon([
@@ -945,6 +949,8 @@ def _get_rectangle_coords_starting_at_lower_left_corner(rectangle):
     return Polygon(new_coords)
 
 def _match_building(rectangle, grid_gdf, is_diagonal, stories=None):
+    logger = logging.getLogger('osm2cm')
+
     building_candidates = buildings.loc[buildings.is_diagonal == is_diagonal]
 
     p0 = rectangle.exterior.coords[0]
@@ -1026,6 +1032,9 @@ def _match_building(rectangle, grid_gdf, is_diagonal, stories=None):
 
     #     building_segment = building_candidates.sample(n=1, weights=building_candidates.weight)
     #     matched_buildings = [(p0idx_on_grid, building_segment)]
+
+    if len(matched_buildings) == 0:
+        logger.debug('  sides: {}, {}, decomposition: {}, {}'.format(first_side, second_side, first_side_decomposition, second_side_decomposition))
 
     return matched_buildings
     # return index_p0, p0idx_on_grid, p0_on_grid, building_candidates.sample(n=1, weights=building_candidates.weight)

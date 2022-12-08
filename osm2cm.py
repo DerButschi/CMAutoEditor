@@ -14,9 +14,9 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from typing import Dict, List, Optional
-from unicodedata import category
-from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
-from OSMPythonTools.api import Api
+# from unicodedata import category
+# from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
+# from OSMPythonTools.api import Api
 from matplotlib.font_manager import json_load
 import pyproj
 import pandas
@@ -35,9 +35,11 @@ import geojson
 from tqdm import tqdm
 import osm_utils.processing
 import logging
+import codecs
+import osm2geojson
 
 
-config = json.load(open('osm_single_trees_only_config.json', 'r'))
+config = json.load(open('default_osm_config.json', 'r'))
 
 
 
@@ -325,27 +327,39 @@ class OSMProcessor:
                 *self.transformer.transform(*self.bbox_lon_lat[2:4])
             ]
 
-        # xmin = np.inf
-        # xmax = -np.inf
-        # ymin = np.inf
-        # ymax = -np.inf
 
-        xmin, ymin = self.transformer.transform(osm_data['bbox'][0], osm_data['bbox'][1])
-        xmax, ymax = self.transformer.transform(osm_data['bbox'][2], osm_data['bbox'][3])
+        if 'bbox' in osm_data:
+            xmin, ymin = self.transformer.transform(osm_data['bbox'][0], osm_data['bbox'][1])
+            xmax, ymax = self.transformer.transform(osm_data['bbox'][2], osm_data['bbox'][3])
+        else:
+            xmin = np.inf
+            xmax = -np.inf
+            ymin = np.inf
+            ymax = -np.inf
 
 
         element_idx = 0
         for element in tqdm(osm_data.features, 'Preprocessing OSM Data'):
             geometry = self._get_projected_geometry(element.geometry)
 
-            # xmin = min(xmin, geometry.bounds[0])
-            # xmax = max(xmax, geometry.bounds[2])
-            # ymin = min(ymin, geometry.bounds[1])
-            # ymax = max(ymax, geometry.bounds[3])
+            if 'bbox' not in osm_data:
+                xmin = min(xmin, geometry.bounds[0])
+                xmax = max(xmax, geometry.bounds[2])
+                ymin = min(ymin, geometry.bounds[1])
+                ymax = max(ymax, geometry.bounds[3])
 
-            element_tags = element.properties
+            element_tags = {}
+            if 'tags' in element.properties:
+                element_tags = element.properties['tags']
+            else:
+                element_tags = element.properties
+            element_id = None
+            if 'id' in element.properties:
+                element_id = element.properties["id"]
 
             for name in config:
+                if 'active' in config[name] and not config[name]['active']:
+                    continue
                 matched = False
                 excluded = False
                 if 'exclude_tags' in config[name]:
@@ -357,6 +371,16 @@ class OSMProcessor:
                     for key, value in config[name]['required_tags']:
                         if not (key in element_tags.keys() and element_tags[key] == value):
                             excluded = True
+
+                if 'exclude_ids' in config[name]:
+                    exclude_ids = config[name]['exclude_ids']
+                    if element_id in exclude_ids:
+                        excluded = True
+
+                if 'allowed_ids' in config[name]:
+                    allowed_ids = config[name]['allowed_ids']
+                    if not element_id in allowed_ids:
+                        excluded = True
 
                 if excluded:
                     continue
@@ -573,7 +597,16 @@ class OSMProcessor:
 
 
 if __name__ == '__main__':
-    osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
+
+
+    # with codecs.open('scenarios/loope/loope3.osm', 'r', encoding='utf-8') as data:
+    #     xml = data.read()
+
+    # osm_data2 = osm2geojson.xml2geojson(xml, filter_used_refs=False, log_level='ERROR')
+    # with open('scenarios/loope/loope3.geojson', 'w', encoding='utf8') as geojson_file:
+    #     geojson_file.write(json.dumps(osm_data2))
+
+    osm_data = geojson.load(open('scenarios/loope/loope3.geojson', encoding='utf8'))
     # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
     osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
@@ -582,7 +615,7 @@ if __name__ == '__main__':
     # osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('test/industrial_fences.csv')
+    osm_processor.write_to_file('scenarios/loope/loope3.csv')
 
 
 
