@@ -26,10 +26,12 @@
     "foot_path": {
         "tags": [
             ["highway", "footway"],
-            ["highway", "path"]
+            ["highway", "path"],
+            ["highway", "track"]
         ],
         "cm_types": [
-                {"menu": "Roads", "cat1": "Gravel Road", "tags": [["highway", "footway"], ["highway", "path"]]}
+                {"menu": "Roads", "cat1": "Gravel Road", "tags": [["highway", "footway"], ["highway", "path"]]},
+                {"menu": "Roads", "cat1": "Foot Path", "tags": [["highway", "track"]]}
         ],
         "process": [
             "road_tiles"
@@ -544,8 +546,82 @@
         "cm_types": [
             {"menu": "Flavor Objects 1", "cat1": "Fountain", "cat2": "Object 7", "weight": 1},
             {"menu": "Flavor Objects 1", "cat1": "Fountain", "cat2": "Object 8", "weight": 1}
-        ]
+        ],
+        "process": [
+            "single_object_random"
+        ],
+        "priority": 3,
+        "active": true
+    },
+
+    "water_well": {
+        "tags": [
+            ["man_made", "water_well"]
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 1", "cat1": "Pond", "cat2": "Object 7", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Pond", "cat2": "Object 8", "weight": 1}
+        ],
+        "process": [
+            "single_object_random"
+        ],
+        "priority": 3,
+        "active": true
+    },
+
+    "wayside_shrine_christian": {
+        "tags": [
+            ["historic", "wayside_shrine"]
+        ],
+        "required_tags": [
+            "religion", "christian"
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 1", "cat1": "Roadside", "cat2": "Object 5", "weight": 1}
+        ],
+        "process": [
+            "single_object_random"
+        ],
+        "priority": 3,
+        "active": true
+    },
+
+    "post_box": {
+        "tags": [
+            ["amenity", "post_box"]
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 1", "cat1": "Roadside", "cat2": "Object 2", "weight": 1}
+        ],
+        "process": [
+            "single_object_random"
+        ],
+        "priority": 3,
+        "active": true
+    },
+
+    "bench": {
+        "tags": [
+            ["amenity", "bench"]
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 1", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 2", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 3", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 4", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 5", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 6", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 7", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 8", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Bench", "cat2": "Object 9", "weight": 1}
+        ],
+        "process": [
+            "single_object_random"
+        ],
+        "priority": 3,
+        "active": true
     }
+
 
 
 
