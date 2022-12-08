@@ -1,0 +1,552 @@
+{
+    "road": {
+        "tags": [
+            ["highway", "primary"],
+            ["highway", "secondary"],
+            ["highway", "residential"],
+            ["highway", "living_street"],
+            ["highway", "unclassified"],
+            ["highway", "service"]
+        ],
+        "exclude_tags": [
+            ["service", "parking_aisle"],
+            ["service", "driveway"]
+        ],
+        "cm_types": [
+                {"menu": "Roads", "cat1": "Paved 1", "tags": [["highway", "primary"], ["highway", "secondary"]]},
+                {"menu": "Roads", "cat1": "Paved 2", "tags": [["highway", "residential"], ["highway", "living_street"], ["highway", "unclassified"]]}
+        ],
+        "process": [
+            "road_tiles"
+        ],
+        "priority": 1,
+        "active": true
+    },
+
+    "foot_path": {
+        "tags": [
+            ["highway", "footway"],
+            ["highway", "path"]
+        ],
+        "cm_types": [
+                {"menu": "Roads", "cat1": "Gravel Road", "tags": [["highway", "footway"], ["highway", "path"]]}
+        ],
+        "process": [
+            "road_tiles"
+        ],
+        "priority": 1,
+        "active": true
+    },
+
+    "rail": {
+        "tags": [
+            ["railway", "rail"]
+        ],
+        "cm_types": [
+                {"menu": "Roads", "cat1": "Railroad", "tags": [["railway", "rail"]]}
+        ],
+        "process": [
+            "rail_tiles"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "river": {
+        "tags": [
+            ["water", "river"]
+        ],
+        "cm_types": [
+                {"menu": "Ground 2", "cat1": "Water", "tags": [["water", "river"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "stream": {
+        "tags": [
+            ["waterway", "stream"]
+        ],
+        "exclude_tags": [
+            ["tunnel", "culvert"]
+        ],
+        "cm_types": [
+                {"menu": "Roads", "cat1": "Stream", "tags": [["waterway", "stream"]]}
+        ],
+        "process": [
+            "stream_tiles"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "wetland": {
+        "tags": [
+            ["natural", "wetland"],
+            ["natural", "water"],
+            ["water", "moat"]
+        ],
+        "exclude_tags": [
+            ["water", "river"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 2", "cat1": "Marsh", "tags": [["natural", "wetland"]]},
+            {"menu": "Ground 2", "cat1": "Deep Marsh", "tags": [["natural", "water"], ["water", "moat"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "garden": {
+        "tags": [
+            ["leisure", "garden"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 3", "cat1": "Crop 1", "weight": 1.0},
+            {"menu": "Ground 2", "cat1": "Plow NS", "weight": 0.5},
+            {"menu": "Ground 2", "cat1": "Plow EW", "weight": 0.5},
+            {"menu": "Ground 1", "cat1": "Grass", "weight": 1.0},
+            {"menu": "Ground 1", "cat1": "Flowers", "weight": 1.0},
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 1", "weight": 0.5},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 1", "weight": 0.5}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "mixed_forest": {
+        "tags": [
+            ["landuse", "forest"],
+            ["natural", "wood"]
+        ],
+        "exclude_tags": [
+            ["leaf_type", "broadleaved"]
+        ],
+        "cm_types": [
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree B", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree B", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree B", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree C", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree C", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree C", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree E", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree E", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree E", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 3", "weight": 1}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "broadleaved_forest": {
+        "tags": [
+            ["landuse", "forest"],
+            ["natural", "wood"]
+        ],
+        "required_tags": [
+            ["leaf_type", "broadleaved"]
+        ],
+        "cm_types": [
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree B", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree B", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree B", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree C", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree C", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree C", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 3", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 2", "weight": 2},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 3", "weight": 1}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "forest_ground": {
+        "tags": [
+            ["landuse", "forest"],
+            ["natural", "wood"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 2", "cat1": "Lt Forest", "tags": [["landuse", "forest"], ["natural", "wood"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+
+    "mixed_bushes": {
+        "tags": [
+            ["natural", "scrub"]
+        ],
+        "cm_types": [
+            {"menu": "Foliage", "cat1": "Bush A", "cat2": "density 1", "weight": 1.0},
+            {"menu": "Foliage", "cat1": "Bush A", "cat2": "density 2", "weight": 2.0},
+            {"menu": "Foliage", "cat1": "Bush A", "cat2": "density 3", "weight": 1.0},
+            {"menu": "Foliage", "cat1": "Bush B", "cat2": "density 1", "weight": 1.0},
+            {"menu": "Foliage", "cat1": "Bush B", "cat2": "density 2", "weight": 2.0},
+            {"menu": "Foliage", "cat1": "Bush B", "cat2": "density 3", "weight": 1.0},
+            {"menu": "Foliage", "cat1": "Bush C", "cat2": "density 1", "weight": 1.0},
+            {"menu": "Foliage", "cat1": "Bush C", "cat2": "density 2", "weight": 2.0},
+            {"menu": "Foliage", "cat1": "Bush C", "cat2": "density 3", "weight": 1.0}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "bushland_ground": {
+        "tags": [
+            ["natural", "scrub"]
+        ],
+        "cm_types": [
+            {"menu": "Brush", "cat1": "Brush_brush", "tags": [["natural", "scrub"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "farmland": {
+        "tags": [
+            ["landuse", "farmland"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 2", "cat1": "Plow NS", "weight": 1.0},
+            {"menu": "Ground 2", "cat1": "Plow EW", "weight": 1.0},
+            {"menu": "Ground 3", "cat1": "Crop 1", "weight": 1.0},
+            {"menu": "Ground 3", "cat1": "Crop 2", "weight": 1.0},
+            {"menu": "Ground 3", "cat1": "Crop 3", "weight": 1.0},
+            {"menu": "Ground 3", "cat1": "Crop 4", "weight": 1.0},
+            {"menu": "Ground 3", "cat1": "Crop 5", "weight": 1.0},
+            {"menu": "Ground 3", "cat1": "Crop 6", "weight": 1.0}
+        ],
+        "process": [
+            "type_random_area"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "orchard": {
+        "tags": [
+            ["landuse", "orchard"]
+        ],
+        "cm_types": [
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 4", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 4", "weight": 1}
+        ],
+        "process": [
+            "type_random_area"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "grassland": {
+        "tags": [
+            ["landuse", "grass"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 1", "cat1": "Grass T", "weight": 2.0},
+            {"menu": "Ground 1", "cat1": "Grass TY", "weight": 0.5},
+            {"menu": "Ground 1", "cat1": "Weeds", "weight": 2.0},
+            {"menu": "Ground 1", "cat1": "Grass XT", "weight": 5.0},
+            {"menu": "Ground 1", "cat1": "Grass XTY", "weight": 0.5}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "construction_site": {
+        "tags": [
+            ["landuse", "construction"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 1", "cat1": "Dirt", "weight": 1.0}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "pitch": {
+        "tags": [
+            ["leisure", "pitch"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 1", "cat1": "Dirt Red", "tags": [["leisure", "pitch"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "gravel_beach": {
+        "tags": [
+            ["natural", "beach"]
+        ],
+        "required_tags": [
+            ["surface", "gravel"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 2", "cat1": "Gravel", "tags": [["natural", "beach"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "playground": {
+        "tags": [
+            ["leisure", "playground"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 1", "cat1": "Sand", "tags": [["leisure", "playground"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    
+    "parking_lot": {
+        "tags": [
+            ["amenity", "parking"]
+        ],
+        "cm_types": [
+                {"menu": "Ground 2", "cat1": "Ground 2 Paved 2", "tags": [["amenity", "parking"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 2,
+        "active": false
+    },
+
+    "trees": {
+        "tags": [
+            ["natural", "tree"]
+        ],
+        "cm_types": [
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree B", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree C", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree E", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 1", "weight": 1}
+        ],
+        "process": [
+            "single_object_random"
+        ],
+        "priority": 10,
+        "active": false
+    },
+
+    "scattered_trees_area": {
+        "tags": [
+            ["landuse", "scattered_trees"]
+        ],
+        "cm_types": [
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree B", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree C", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree E", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 1", "weight": 1},
+            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 1", "weight": 1},
+            {"dummy": true, "weight": 64}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 1,
+        "active": false
+    },
+
+    "cemetery_gravestones": {
+        "tags": [
+            ["landuse", "cemetery"]
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 1", "cat1": "Gravestone", "cat2": "Object 1", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Gravestone", "cat2": "Object 2", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Gravestone", "cat2": "Object 3", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Gravestone", "cat2": "Object 4", "weight": 1}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 3,
+        "active": false
+    },
+
+
+    "industrial_yard_flavor_objects": {
+        "tags": [
+            ["landuse", "industrial"]
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 1", "cat1": "Junk", "cat2": "Object 1", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Junk", "cat2": "Object 2", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Junk", "cat2": "Object 8", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Junk", "cat2": "Object 9", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Pallet", "cat2": "Object 1", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Pallet", "cat2": "Object 3", "weight": 1},
+            {"menu": "Flavor Objects 2", "cat1": "Shed", "cat2": "Object 6", "weight": 1},
+            {"menu": "Flavor Objects 2", "cat1": "Shed", "cat2": "Object 7", "weight": 1},
+            {"menu": "Flavor Objects 2", "cat1": "Shed", "cat2": "Object 8", "weight": 1},
+            {"dummy": true, "weight": 150}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": 3,
+        "active": false
+    },
+
+    "industrial_yard_gravel": {
+        "tags": [
+            ["landuse", "industrial"]
+        ],
+        "required_tags": [
+            ["surface", "gravel"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 2", "cat1": "Gravel", "tags": [["surface", "gravel"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 4,
+        "active": false
+    },
+
+    "bus_stop": {
+        "tags": [
+            ["highway", "bus_stop"]
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 2", "cat1": "Shelter", "cat2": "Object 1", "weight": 1},
+            {"menu": "Flavor Objects 2", "cat1": "Shelter", "cat2": "Object 2", "weight": 1},
+            {"menu": "Flavor Objects 2", "cat1": "Shelter", "cat2": "Object 3", "weight": 1}
+        ],
+        "process": [
+            "single_object_random"
+        ],
+        "priority": 3,
+        "active": false
+    },
+
+    "picnic_site": {
+        "tags": [
+            ["tourism", "picnic_site"]
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 2", "cat1": "Shelter", "cat2": "Object 5", "weight": 1}
+        ],
+        "process": [
+            "single_object_random"
+        ],
+        "priority": 3,
+        "active": false
+    },
+
+    "houses": {
+        "tags": [
+            ["building", "house"],
+            ["building", "detached"],
+            ["building", "apartments"],
+            ["building", "residential"],
+            ["building", "yes"],
+            ["building", "retail"],
+            ["building", "industrial"],
+            ["building", "warehouse"],
+            ["building", "office"]
+        ],
+        "exclude_tags": [
+
+        ], 
+        "cm_types": [
+            {"menu": "Independent Buildings", "cat1": "House", "tags": [
+                ["building", "house"], ["building", "detached"], ["building", "apartments"], ["building", "residential"], 
+                ["building", "yes"], ["building", "retail"], ["building", "industrial"], ["building", "warehouse"], ["building", "office"]]}
+        ],
+        "process": [
+            "type_from_building_outline"
+        ],
+        "priority": 2,
+        "active": false
+    },
+
+    "fountain": {
+        "tags": [
+            ["amenity", "fountain"]
+        ],
+        "cm_types": [
+            {"menu": "Flavor Objects 1", "cat1": "Fountain", "cat2": "Object 7", "weight": 1},
+            {"menu": "Flavor Objects 1", "cat1": "Fountain", "cat2": "Object 8", "weight": 1}
+        ]
+    }
+
+
+
+}
