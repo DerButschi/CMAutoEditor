@@ -551,7 +551,7 @@
             "single_object_random"
         ],
         "priority": 3,
-        "active": true
+        "active": false
     },
 
     "water_well": {
@@ -566,7 +566,7 @@
             "single_object_random"
         ],
         "priority": 3,
-        "active": true
+        "active": false
     },
 
     "wayside_shrine_christian": {
@@ -574,7 +574,7 @@
             ["historic", "wayside_shrine"]
         ],
         "required_tags": [
-            "religion", "christian"
+            ["religion", "christian"]
         ],
         "cm_types": [
             {"menu": "Flavor Objects 1", "cat1": "Roadside", "cat2": "Object 5", "weight": 1}
@@ -583,7 +583,7 @@
             "single_object_random"
         ],
         "priority": 3,
-        "active": true
+        "active": false
     },
 
     "post_box": {
@@ -597,7 +597,7 @@
             "single_object_random"
         ],
         "priority": 3,
-        "active": true
+        "active": false
     },
 
     "bench": {
@@ -619,9 +619,21 @@
             "single_object_random"
         ],
         "priority": 3,
-        "active": true
-    }
+        "active": false
+    },
 
+    "hedge": {
+        "tags": [
+            ["barrier", "hedge"]
+        ],
+        "cm_types": [
+                {"menu": "Walls/Fences", "cat1": "Wire Fence", "tags": [["barrier", "hedge"]]}
+        ],
+        "process": [
+            "fence_tiles"
+        ],
+        "priority": 3
+    }
 
 
 
