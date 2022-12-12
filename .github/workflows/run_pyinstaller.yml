@@ -15,7 +15,7 @@ jobs:
         python-version: 3.10
 
     - run: pip install -r requirements.txt pyinstaller
-    - run: pyinstaller --noconfirm --log-level=WARN --onefile build.spec
+    - run: pyinstaller --noconfirm --log-level=WARN build.spec
     - uses: actions/upload-artifact@v2
       with:
         path: dist/*
