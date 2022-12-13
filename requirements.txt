@@ -2,5 +2,5 @@ numpy
 pandas
 pyautogui
 keyboard
-scitkit-image
+scikit-image
 matplotlib
