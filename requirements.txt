@@ -2,5 +2,9 @@ numpy
 pandas
 pyautogui
 keyboard
-scikit-image
+rasterio
+pyproj
 matplotlib
+tqdm
+scipy
+scikit-image
