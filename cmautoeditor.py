@@ -47,6 +47,7 @@ pyautogui.PAUSE = 0.2  # 0.12 almost!! works
 
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
+arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -134,7 +135,7 @@ if __name__ == '__main__':
     prev_n_x = START_N_SQUARES_X
     prev_n_y = START_N_SQUARES_Y
 
-    pyautogui.countdown(5)
+    pyautogui.countdown(args.countdown)
 
     for i_page_y in range(n_pages_y + 1):
         for i_page_x in range(n_pages_x + 1):
