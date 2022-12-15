@@ -114,6 +114,14 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y):
 if __name__ == '__main__':
     args = arg_parser.parse_args()
 
+    return_val = pyautogui.confirm(text='CMAutoEditor is about to run on {}.'
+        '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.'
+        '\n\nOnce you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'
+        '\n\nIn case something goes wrong, move the mouse cursor to one of the screen corners. This will stop CMAutoEditor.'.format(args.input, args.countdown), title='CMAutoEditor')
+
+    if return_val == 'Cancel':
+        exit()
+
     # load height map
     height_map_df = pandas.read_csv(args.input)
 
@@ -164,6 +172,8 @@ if __name__ == '__main__':
             sub_grid = grid[xmin:xmax, ymin:ymax]
 
             height = process_segment(sub_grid, height)
+
+    pyautogui.alert(text='CMAutoEditor has finished processing the input data.', title='CMAutoEditor')
 
 
 
