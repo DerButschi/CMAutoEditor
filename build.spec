@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import skimage
 
 block_cipher = None
 
