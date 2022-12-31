@@ -327,11 +327,19 @@ class OSMProcessor:
                 *self.transformer.transform(*self.bbox_lon_lat[2:4])
             ]
 
-
+        bbox_from_data = False
         if 'bbox' in osm_data:
             xmin, ymin = self.transformer.transform(osm_data['bbox'][0], osm_data['bbox'][1])
             xmax, ymax = self.transformer.transform(osm_data['bbox'][2], osm_data['bbox'][3])
+        elif self.bbox is not None:
+            x_dist = self.bbox[2] - self.bbox[0]
+            y_dist = self.bbox[3] - self.bbox[1]
+            xmin = self.bbox[0] - x_dist * 0.05
+            xmax = self.bbox[2] + x_dist * 0.05
+            ymin = self.bbox[1] - y_dist * 0.05
+            ymax = self.bbox[3] + y_dist * 0.05
         else:
+            bbox_from_data = True
             xmin = np.inf
             xmax = -np.inf
             ymin = np.inf
@@ -342,7 +350,7 @@ class OSMProcessor:
         for element in tqdm(osm_data.features, 'Preprocessing OSM Data'):
             geometry = self._get_projected_geometry(element.geometry)
 
-            if 'bbox' not in osm_data:
+            if bbox_from_data:
                 xmin = min(xmin, geometry.bounds[0])
                 xmax = max(xmax, geometry.bounds[2])
                 ymin = min(ymin, geometry.bounds[1])
@@ -599,23 +607,24 @@ class OSMProcessor:
 if __name__ == '__main__':
 
 
-    # with codecs.open('scenarios/loope/loope3.osm', 'r', encoding='utf-8') as data:
+    # with codecs.open('scenarios/rhine_crossing/rhine_crossing_area1.osm', 'r', encoding='utf-8') as data:
     #     xml = data.read()
 
     # osm_data2 = osm2geojson.xml2geojson(xml, filter_used_refs=False, log_level='ERROR')
-    # with open('scenarios/loope/loope3.geojson', 'w', encoding='utf8') as geojson_file:
+    # with open('scenarios/rhine_crossing/rhine_crossing_area1.geojson', 'w', encoding='utf8') as geojson_file:
     #     geojson_file.write(json.dumps(osm_data2))
 
-    osm_data = geojson.load(open('scenarios/loope/loope3.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('scenarios/rhine_crossing/rhine_crossing_area1.geojson', encoding='utf8'))
     # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
-    osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
+    # osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
+    osm_processor = OSMProcessor(config=config, bbox=[361607.305,5625049.525, 365540.291, 5627329.787])
 
     # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
     # osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('scenarios/loope/loope3.csv')
+    osm_processor.write_to_file('scenarios/rhine_crossing/rhine_crossing_area1_osm.csv')
 
 
 
