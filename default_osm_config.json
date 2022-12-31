@@ -37,7 +37,7 @@
             "road_tiles"
         ],
         "priority": 1,
-        "active": true
+        "active": false
     },
 
     "rail": {
@@ -68,6 +68,23 @@
         "active": false
     },
 
+    "river2": {
+        "tags": [
+            ["natural", "water"]
+        ],
+        "exclude_tags": [
+            ["water", "river"]
+        ],
+        "cm_types": [
+                {"menu": "Ground 2", "cat1": "Water", "tags": [["natural", "water"]]}
+        ],
+        "process": [
+            "type_from_tag"
+        ],
+        "priority": 1,
+        "active": true
+    },
+
     "stream": {
         "tags": [
             ["waterway", "stream"]
@@ -88,7 +105,6 @@
     "wetland": {
         "tags": [
             ["natural", "wetland"],
-            ["natural", "water"],
             ["water", "moat"]
         ],
         "exclude_tags": [
@@ -536,7 +552,7 @@
             "type_from_building_outline"
         ],
         "priority": 2,
-        "active": false
+        "active": true
     },
 
     "fountain": {
@@ -632,7 +648,8 @@
         "process": [
             "fence_tiles"
         ],
-        "priority": 3
+        "priority": 3,
+        "active": false
     }
 
 
