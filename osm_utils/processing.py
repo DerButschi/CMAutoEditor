@@ -434,7 +434,9 @@ def handle_square_graph_duplicate_edges(square_graph: nx.MultiGraph):
             for nb_node in list(square_graph.neighbors(node)):
                 # yay MultiGraphs!
                 to_remove = []
+                to_append = []
                 edge_data = square_graph.get_edge_data(node, nb_node)
+                # FIXME: This will crash if there are more than 2 edges!
                 for edge_key in edge_data:
                     squares_to_nb = edge_data[edge_key]['squares']
                     element_idx = edge_data[edge_key]['element_idx']
@@ -451,10 +453,12 @@ def handle_square_graph_duplicate_edges(square_graph: nx.MultiGraph):
                         to_remove.append(edge_key)
                         # square_graph.remove_edge(node, nb_node)
                         for sq_line in square_lines:
-                            square_graph.add_edge(sq_line[0], sq_line[-1], squares=sq_line, element_idx=element_idx, from_node_to_node=[sq_line[0], sq_line[-1]])
+                            to_append.append([sq_line[0], sq_line[-1], sq_line, element_idx, [sq_line[0], sq_line[-1]]])
 
                 for edge_key in to_remove:
                     square_graph.remove_edge(node, nb_node, key=edge_key)
+                for new_edge_data in to_append:
+                    square_graph.add_edge(new_edge_data[0], new_edge_data[1], squares=new_edge_data[2], element_idx=new_edge_data[3], from_node_to_node=new_edge_data[4])
 
 def remove_degree_two_nodes_from_graph(graph: nx.MultiGraph, edge_type: str = 'ls') -> None:
     degree_two_nodes = [node for node, degree in graph.degree if degree == 2]
@@ -661,6 +665,9 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
         valid_paths = []
         for start_tile in valid_start_tiles:
             for end_tile in valid_end_tiles:
+                if (start_tile, 0) not in graph.nodes or (end_tile, edge_end_idx) not in graph.nodes:
+                    logger.debug('Start or end tile are not in path. This should not happen!')
+                    continue
                 if nx.has_path(graph, (start_tile, 0), (end_tile, edge_end_idx)):
                     # only return one valid path!
                     valid_paths.append(nx.shortest_path(graph, (start_tile, 0), (end_tile, edge_end_idx), weight='cost'))
