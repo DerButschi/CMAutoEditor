@@ -1,6 +1,7 @@
 numpy
 pandas
 pyautogui
+pysimplegui
 keyboard
 rasterio
 pyproj
