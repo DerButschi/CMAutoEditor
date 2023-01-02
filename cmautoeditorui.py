@@ -32,6 +32,7 @@ if __name__ == '__main__':
             
     window.close()
     # Start autoclicker with UI inputs
-    cmae.start_autoclicker(values['filepath'], values['countdown'])
+    if values['filepath'] == '':
+        cmae.start_autoclicker(values['filepath'], values['countdown'])
             
 
