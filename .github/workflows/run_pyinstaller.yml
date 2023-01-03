@@ -21,6 +21,7 @@ jobs:
     - run: pyinstaller --noconfirm --log-level=INFO --clean build.spec
     - run: copy LICENSE dist/LICENSE
     - run: copy README.md dist/README.md
+    - run: copy example_height_map.csv dist/example_height_map.csv
     - uses: actions/upload-artifact@v3
       with:
         name: release
