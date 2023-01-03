@@ -19,6 +19,8 @@ import numpy as np
 import pandas
 import argparse
 import keyboard
+import PySimpleGUI as sg
+import sys
 
 # constants:
 UPPER_LEFT_SQUARE = pyautogui.Point(234,52)
@@ -44,10 +46,6 @@ POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 
 pyautogui.PAUSE = 0.2  # 0.12 almost!! works
-
-arg_parser = argparse.ArgumentParser()
-arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
-arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -111,19 +109,44 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y):
         else:
             pyautogui.click(POS_VERTICAL_PLUS, interval=0.2)
 
-if __name__ == '__main__':
-    args = arg_parser.parse_args()
+def display_gui():
+    sg.theme('Dark')
+    sg.theme_button_color('#002366')
+    
+    # Construct window layout
+    layout = [
+        [sg.Titlebar('CM Auto Editor')],
+        [sg.Text('Select file: ')], 
+        [sg.Input(), sg.FileBrowse(key='filepath', file_types=(('CSV files', '*.csv'),))],
+        [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
+        [sg.Text(text='', key='error_text')],
+        [sg.Push(), sg.Submit('Start Editor', key='submit'), sg.Exit(), sg.Push()]]
 
-    return_val = pyautogui.confirm(text='CMAutoEditor is about to run on {}.'
-        '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.'
-        '\n\nOnce you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'
-        '\n\nIn case something goes wrong, move the mouse cursor to one of the screen corners. This will stop CMAutoEditor.'.format(args.input, args.countdown), title='CMAutoEditor')
-
-    if return_val == 'Cancel':
-        exit()
-
+    # Create window with layout
+    window = sg.Window('CM Auto Editor', layout)
+    
+    # Loop until window needs closing
+    while True:
+        # Read UI inputs
+        event, values = window.read()
+        
+        if event == sg.WIN_CLOSED or event == 'Exit':
+            break
+        
+        if event == 'submit':
+            if values['filepath'] == '':
+                window['error_text'].update('Select a file before submitting')
+            else:
+                break
+            
+    window.close()
+    # Start editor with UI inputs
+    if values['filepath'] != '' and values['filepath'] != None:
+        start_editor(values['filepath'], values['countdown'])
+    
+def start_editor(filepath, countdown):
     # load height map
-    height_map_df = pandas.read_csv(args.input)
+    height_map_df = pandas.read_csv(filepath)
 
     x = np.array(height_map_df.x.values, dtype=int)
     y = np.array(height_map_df.y.values, dtype=int)
@@ -143,7 +166,7 @@ if __name__ == '__main__':
     prev_n_x = START_N_SQUARES_X
     prev_n_y = START_N_SQUARES_Y
 
-    pyautogui.countdown(args.countdown)
+    pyautogui.countdown(countdown)
 
     for i_page_y in range(n_pages_y + 1):
         for i_page_x in range(n_pages_x + 1):
@@ -174,6 +197,27 @@ if __name__ == '__main__':
             height = process_segment(sub_grid, height)
 
     pyautogui.alert(text='CMAutoEditor has finished processing the input data.', title='CMAutoEditor')
+        
+if __name__ == '__main__':
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('-i', '--input', required=False, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
+    arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
+    args = arg_parser.parse_args()
+
+    #Run the gui if no arguments are inputted
+    if len(sys.argv) == 1:
+        display_gui()
+    else:
+        return_val = pyautogui.confirm(text='CMAutoEditor is about to run on {}.'
+        '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.'
+        '\n\nOnce you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'
+        '\n\nIn case something goes wrong, move the mouse cursor to one of the screen corners. This will stop CMAutoEditor.'.format(args.input, args.countdown), title='CMAutoEditor')
+        
+        if return_val == 'Cancel':
+            exit()
+        
+        start_editor(args.input, args.countdown)
+    
 
 
 
