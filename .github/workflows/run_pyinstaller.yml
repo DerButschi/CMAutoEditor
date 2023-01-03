@@ -1,5 +1,5 @@
 name: Run PyInstaller
-on: [push]
+on: [workflow_dispatch]
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -9,13 +9,18 @@ jobs:
         os: ['windows-latest']
 
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-python@v2
+    - uses: actions/checkout@v3
+    - uses: conda-incubator/setup-miniconda@v2
       with:
-        python-version: 3.10
+          auto-update-conda: false
+          activate-environment: py38_cmautoeditor
+          environment-file: conda_requirements_py38.txt
 
-    - run: pip install -r requirements.txt pyinstaller
-    - run: pyinstaller --noconfirm --log-level=WARN build.spec
-    - uses: actions/upload-artifact@v2
+    - run: conda install -c conda-forge pyinstaller
+    - run: pyinstaller --noconfirm --log-level=INFO --clean build.spec
+    - run: copy LICENSE dist/LICENSE
+    - run: copy README.md dist/README.md
+    - uses: actions/upload-artifact@v3
       with:
+        name: release
         path: dist/*
