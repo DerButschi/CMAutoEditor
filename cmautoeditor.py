@@ -19,6 +19,8 @@ import numpy as np
 import pandas
 import argparse
 import keyboard
+import itertools
+import collections
 
 # constants:
 UPPER_LEFT_SQUARE = pyautogui.Point(234,52)
@@ -43,11 +45,23 @@ POS_HORIZONTAL_MINUS = pyautogui.Point(764, 26)
 POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 
-pyautogui.PAUSE = 0.2  # 0.12 almost!! works
+pyautogui.PAUSE = 0.01  # 0.12 almost!! works
 
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
 arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
+
+def _consume(iterator, n=None):
+    "Advance the iterator n-steps ahead. If n is None, consume entirely."
+    # from https://docs.python.org/3/library/itertools.html#recipes
+    # Use functions that consume iterators at C speed.
+    if n is None:
+        # feed the entire iterator into a zero-length deque
+        collections.deque(iterator, maxlen=0)
+    else:
+        # advance to the empty slice starting at position n
+        next(itertools.islice(iterator, n, n), None)
+
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -92,6 +106,7 @@ def process_segment(grid, start_height):
             height = val
 
             pyautogui.click(x=x_pos, y=y_pos)
+            pyautogui.sleep(0.05)
 
     return height
 
@@ -99,17 +114,44 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y):
     n_clicks_x = abs(int((start_n_x - n_x) / 2))
     n_clicks_y = abs(int((start_n_y - n_y) / 2))
 
-    for i in range(n_clicks_x):
+
+    x_click_iterator = range(n_clicks_x).__iter__()
+    for i in x_click_iterator:
+        shift_pressed = False
+        if n_clicks_x - i >= 5:
+            keyboard.press('shift')
+            shift_pressed = True
+            _consume(x_click_iterator, 4)
         if n_x <= start_n_x:
-            pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.2)
+            pyautogui.click(POS_HORIZONTAL_MINUS)
         else:
-            pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.2)
+            pyautogui.click(POS_HORIZONTAL_PLUS)
+        pyautogui.sleep(0.05)
+
+        if shift_pressed:
+            keyboard.release('shift')
+        pyautogui.sleep(0.05)
+
     
-    for i in range(n_clicks_y):
+    y_click_iterator = range(n_clicks_y).__iter__()
+    for i in y_click_iterator:
+        shift_pressed = False
+        if n_clicks_y - i >= 5:
+            keyboard.press('shift')
+            shift_pressed = True
+            _consume(y_click_iterator, 4)
         if n_y <= start_n_y:
-            pyautogui.click(POS_VERTICAL_MINUS, interval=0.2)
+            pyautogui.click(POS_VERTICAL_MINUS)
         else:
-            pyautogui.click(POS_VERTICAL_PLUS, interval=0.2)
+            pyautogui.click(POS_VERTICAL_PLUS)
+        pyautogui.sleep(0.05)
+
+        if shift_pressed:
+            keyboard.release('shift')
+        pyautogui.sleep(0.05)
+
+    sleep(0.5)
+
 
 if __name__ == '__main__':
     args = arg_parser.parse_args()
