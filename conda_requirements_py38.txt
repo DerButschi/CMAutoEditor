@@ -100,6 +100,7 @@ https://conda.anaconda.org/conda-forge/noarch/ply-3.11-py_1.tar.bz2
 https://conda.anaconda.org/conda-forge/win-64/pthread-stubs-0.4-hcd874cb_1001.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pymsgbox-1.0.9-pyhd8ed1ab_1.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pyparsing-3.0.9-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/pysimplegui-4.60.4-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pytweening-1.0.4-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pytz-2022.7-pyhd8ed1ab_0.conda
 https://conda.anaconda.org/conda-forge/win-64/pyyaml-6.0-py38h91455d4_5.tar.bz2
