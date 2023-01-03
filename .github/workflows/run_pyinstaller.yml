@@ -15,8 +15,9 @@ jobs:
           auto-update-conda: false
           activate-environment: py38_cmautoeditor
           environment-file: conda_requirements_py38.txt
-
     - run: conda install -c conda-forge pyinstaller
+    - run: copy data_conversion/dgm2cm.py dgm2cm.py
+    - run: copy data_conversion/geotiff2cm.py geotiff2cm.py
     - run: pyinstaller --noconfirm --log-level=INFO --clean build.spec
     - run: copy LICENSE dist/LICENSE
     - run: copy README.md dist/README.md
