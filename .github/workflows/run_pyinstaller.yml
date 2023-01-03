@@ -18,10 +18,9 @@ jobs:
 
     - run: conda install -c conda-forge pyinstaller
     - run: pyinstaller --noconfirm --log-level=INFO --clean build.spec
+    - run: copy LICENSE dist/LICENSE
+    - run: copy README.md dist/README.md
     - uses: actions/upload-artifact@v3
       with:
         name: release
-        path: dist/*.exe
-        path: example_height_map.csv
-        path: LICENSE
-        path: README.md
+        path: dist/*
