@@ -25,6 +25,7 @@ from rasterio.warp import Resampling, calculate_default_transform, reproject
 from scipy.interpolate import griddata
 from contextlib import nullcontext
 import argparse
+from tqdm import tqdm
 
 def process_geotiff(args):
     with rasterio.open(args.input_file) as src:
@@ -80,22 +81,39 @@ def process_geotiff(args):
                 n_bins_x = int(np.floor((bbox[2] - bbox[0]) / 8) + 1)
                 n_bins_y = int(np.floor((bbox[3] - bbox[1]) / 8) + 1)
 
-                pic_bottom, pic_left = dst.index(bbox[0], bbox[1])
-                pic_top, pic_right = dst.index(bbox[2], bbox[3])
+                data = dst.read(
+                    out_shape=(
+                        dst.count,
+                        int(dst.height * (dst.res[1] / 8.0)),
+                        int(dst.width * (dst.res[0] / 8.0))
+                    ),
+                    resampling=Resampling.bilinear
+                )
 
+                transform = dst.transform * dst.transform.scale(
+                    (dst.width / data.shape[-1]),
+                    (dst.height / data.shape[-2])
+                )
+                transformer = rasterio.transform.AffineTransformer(transform)
 
-                pic_data = dst.read(1)
+                pic_bottom, pic_left = transformer.rowcol(bbox[0], bbox[1])
+                pic_top, pic_right = transformer.rowcol(bbox[2], bbox[3])
+
+                pic_data = data[0]
                 pic_data[pic_data == dst.nodatavals] = -1
                 x_arr = []
                 y_arr = []
                 z_arr = []
+                pbar = tqdm(total=(pic_bottom - pic_top + 2) * (pic_right - pic_left + 2))
                 for row in range(pic_top-1, pic_bottom+2):
                     for col in range(pic_left-1, pic_right+2):
-                        x, y = dst.xy(row, col)
+                        x, y = transformer.xy(row, col)
                         z = pic_data[row, col]
                         x_arr.append(x)
                         y_arr.append(y)
                         z_arr.append(z)
+                        pbar.update(1)
+                pbar.close()
 
                 points = np.zeros((len(x_arr), 2))
                 points[:,0] = x_arr
