@@ -207,17 +207,17 @@ def start_editor(filepath, countdown):
     pyautogui.alert(text='CMAutoEditor has finished processing the input data.', title='CMAutoEditor')
         
 if __name__ == '__main__':
-    arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument('-i', '--input', required=False, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
-    arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
-    args = arg_parser.parse_args()
+
 
     #Run the gui if no arguments are inputted
     if len(sys.argv) == 1:
         display_gui()
-    elif args.input is None:
-        raise argparse.ArgumentError(args.input, 'A file must be provided.')
     else:
+        arg_parser = argparse.ArgumentParser()
+        arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
+        arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
+        args = arg_parser.parse_args()
+    
         return_val = pyautogui.confirm(text='CMAutoEditor is about to run on {}.'
         '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.'
         '\n\nOnce you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'
