@@ -215,6 +215,8 @@ if __name__ == '__main__':
     #Run the gui if no arguments are inputted
     if len(sys.argv) == 1:
         display_gui()
+    elif args.input is None:
+        raise argparse.ArgumentError(args.input, 'A file must be provided.')
     else:
         return_val = pyautogui.confirm(text='CMAutoEditor is about to run on {}.'
         '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.'
