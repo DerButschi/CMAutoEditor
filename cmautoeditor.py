@@ -116,17 +116,18 @@ def display_gui():
     # Construct window layout
     layout = [
         [sg.Titlebar('CMAutoEditor')],
-        [sg.Text('You are about to start CMAutoEditor.'
-        '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'.'
-        '\nMake sure the map size is 320m x 320m.'
-        '\nOnce you are ready to start click \'Start CMAutoEditor\'.' 
-        '\nDuring the countdown switch back to the CM Scenario Editor.'
-        '\nIn case something goes wrong, move the mouse cursor to one of the screen corners.\n\n')],
+        [sg.Text('You are about to start CMAutoEditor.')],
+        [sg.Text('If you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'.')],
+        [sg.Text('Make sure the map size is 320m x 320m.')],
+        [sg.Text('Once you are ready to start click \'Start CMAutoEditor\'.')], 
+        [sg.Text('During the countdown switch back to the CM Scenario Editor.')],
+        [sg.Text('In case something goes wrong, move the mouse cursor to one of the screen corners.')],
+        [sg.Text('')],
         [sg.Text('Select file: ')], 
         [sg.Input(), sg.FileBrowse(key='filepath', file_types=(('CSV files', '*.csv'),))],
         [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
         [sg.Text(text='', key='error_text')],
-        [sg.Push(), sg.Submit('Start CMAutoEditor', key='submit'), sg.Exit(), sg.Push()]]
+        [sg.Push(), sg.Submit('Start CMAutoEditor', key='start'), sg.Exit(), sg.Push()]]
 
     # Create window with layout
     window = sg.Window('CMAutoEditor', layout)
@@ -140,9 +141,9 @@ def display_gui():
         if event == sg.WIN_CLOSED or event == 'Exit':
             break
         
-        if event == 'submit':
-            if values['filepath'] == '':
-                window['error_text'].update('Select a file before submitting')
+        if event == 'start':
+            if values['filepath'] == '' or values['filepath'] is None:
+                window['error_text'].update('Select a file before starting')
             else:
                 start = True
                 break
