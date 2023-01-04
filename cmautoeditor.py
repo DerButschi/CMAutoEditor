@@ -132,6 +132,7 @@ def display_gui():
     window = sg.Window('CMAutoEditor', layout)
     
     # Loop until window needs closing
+    start = False
     while True:
         # Read UI inputs
         event, values = window.read()
@@ -143,11 +144,12 @@ def display_gui():
             if values['filepath'] == '':
                 window['error_text'].update('Select a file before submitting')
             else:
+                start = True
                 break
             
     window.close()
     # Start editor with UI inputs
-    if values['filepath'] != '' and values['filepath'] != None:
+    if start and values['filepath'] != '' and values['filepath'] != None:
         start_editor(values['filepath'], values['countdown'])
     
 def start_editor(filepath, countdown):
