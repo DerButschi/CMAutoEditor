@@ -124,7 +124,7 @@ def display_gui():
         [sg.Text('In case something goes wrong, move the mouse cursor to one of the screen corners.')],
         [sg.Text('')],
         [sg.Text('Select file: ')], 
-        [sg.Input(), sg.FileBrowse(key='filepath', file_types=(('CSV files', '*.csv'),))],
+        [sg.Input(key='filepath'), sg.FileBrowse(file_types=(('CSV files', '*.csv'),))],
         [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
         [sg.Text(text='', key='error_text')],
         [sg.Push(), sg.Submit('Start CMAutoEditor', key='start'), sg.Exit(), sg.Push()]]
