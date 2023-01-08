@@ -126,7 +126,7 @@ def display_gui():
         [sg.Text('Select file: ')], 
         [sg.Input(key='filepath'), sg.FileBrowse(file_types=(('CSV files', '*.csv'),))],
         [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
-        [sg.Text(text='', key='error_text')],
+        [sg.Text(key='error_text', text_color='red')],
         [sg.Push(), sg.Submit('Start CMAutoEditor', key='start'), sg.Exit(), sg.Push()]]
 
     # Create window with layout
