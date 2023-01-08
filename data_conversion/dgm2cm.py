@@ -22,6 +22,34 @@ import argparse
 import PySimpleGUI as sg
 import sys
 
+#Validates if the value is a float
+#Rejects latest character addition if it fails verification
+def validate_float(value):
+    try:
+        float(values[value])
+    except:
+        if(len(values[value]) == 1 and values[value][0] == '-'):
+            return
+        else:
+            window[value].update(values[value][:-1])
+
+#Validates if the value is a positive integer
+#Rejects latest character addition if it fails verification
+def validate_positive_integer(value):
+    try:
+        int(values[value])
+    except:
+        window[value].update(values[value][:-1])
+
+#Checks if value is not an empty string or none 
+#Optional error message to display on gui
+def validate_value_exists(value, message=''):
+    if values[value] == '' or values[value] is None:
+        if message != '':
+            window['error_text'].update(message)
+        return False
+    return True
+        
 def display_gui():
     sg.theme('Dark')
     sg.theme_button_color('#002366')
@@ -30,34 +58,91 @@ def display_gui():
     layout = [
         [sg.Titlebar('DGM Converter')],
         [sg.Text('Select directory containg dgm files:')], 
-        [sg.Input(), sg.FolderBrowse(key='folderpath')],
-        [sg.Text('Bounding Box:')]
-        [sg.Text(text='', key='error_text')],
+        [sg.Input(key='folderpath'), sg.FolderBrowse()],
+        
+        #Bounding box fields
+        [sg.Text('Bounding Box:')],
+        [sg.Text('Lower left and upper right corner of the box in which data is to be extracted.')],
+        [sg.Text('X min: '), sg.InputText(key='bb_xmin', enable_events=True)],
+        [sg.Text('Y min: '), sg.InputText(key='bb_ymin', enable_events=True)],
+        [sg.Text('X max: '), sg.InputText(key='bb_xmax', enable_events=True)],
+        [sg.Text('Y max: '), sg.InputText(key='bb_ymax', enable_events=True)],
+        
+        #Contour and output filename fields
+        [sg.Text('Contour(m), contour level distance:')],
+        [sg.Input(5.0, key='contour', enable_events=True)],
+        [sg.Text('File output name: '), sg.Input('output', key='output')],
+        
+        #Water level correction fields
+        [sg.Text('Water level correction(optional): ')],
+        [sg.Text('X coordinate of lowest point in river: '), sg.Input(key='wlc_xmin')],
+        [sg.Text('Y coordinate of lowest point in river: '), sg.Input(key='wlc_ymin')],
+        [sg.Text('X coordinate of highest point in river: '), sg.Input(key='wlc_xmax')],
+        [sg.Text('Y coordinate of highest point in river: '), sg.Input(key='wlc_ymax')],
+        
+        #Stride field
+        [sg.Text('Stride(optional): '), sg.Input(key='stride', enable_events=True)],
+        
+        [sg.Text(key='error_text', text_color='red')],
         [sg.Push(), sg.Submit('Start DGM Converter', key='start'), sg.Exit(), sg.Push()]]
 
     # Create window with layout
+    global window 
     window = sg.Window('DGM Converter', layout)
     
     # Loop until window needs closing
     start = False
     while True:
         # Read UI inputs
+        global values
         event, values = window.read()
         
         if event == sg.WIN_CLOSED or event == 'Exit':
             break
-        
-        if event == 'start':
-            if values['folderpath'] == '' or values['folderpath'] is None:
-                window['error_text'].update('Select a folder before starting')
-            else:
-                start = True
-                break
+        elif event == 'bb_xmin':
+            validate_float('bb_xmin')
+        elif event == 'bb_ymin':
+            validate_float('bb_ymin')
+        elif event == 'bb_xmax':
+            validate_float('bb_xmax')
+        elif event == 'bb_ymax':
+            validate_float('bb_ymax')
+        elif event == 'contour':
+            validate_float('contour')
+        elif event == 'wlc_xmin':
+            validate_float('wlc_xmin')
+        elif event == 'wlc_ymin':
+            validate_float('wlc_ymin')
+        elif event == 'wlc_xmax':
+            validate_float('wlc_xmax')
+        elif event == 'wlc_ymax':
+            validate_float('wlc_ymax')
+        elif event == 'stride':
+            validate_positive_integer('stride')
+        elif event == 'start':
+            #Validate required values exist
+            if not validate_value_exists('folderpath', 'A folder needs to be selected before converting'): continue
+            if not validate_value_exists('bb_xmin', 'The lower left x value of the bounding box is missing'): continue
+            if not validate_value_exists('bb_ymin', 'The lower left y value of the bounding box is missing'): continue
+            if not validate_value_exists('bb_xmax', 'The upper right x value of the bounding box is missing'): continue
+            if not validate_value_exists('bb_ymax', 'The upper right y value of the bounding box is missing'): continue
+            if not validate_value_exists('contour', 'A contour value is needed before converting'): continue
+            if not validate_value_exists('output', 'An output filename is needed before converting'): continue
+            start = True
+            break
             
     window.close()
     # Start editor with UI inputs
-    if start and values['filepath'] != '' and values['filepath'] != None:
-        start_converter()
+    if start:
+        bounding_box = [values['bb_xmin'], values['bb_ymin'], values['bb_xmax'], values['bb_ymax']]
+        
+        #Checks if all water level correction value exists before assigning it
+        if validate_value_exists('wlc_xmin') and validate_value_exists('wlc_ymin') and validate_value_exists('wlc_xmax') and validate_value_exists('wlc_ymax'):
+            water_level_correction = [values['wlc_xmin'], values['wlc_ymin'], values['wlc_xmax'], values['wlc_ymax']]
+        else:
+            water_level_correction = None
+            
+        start_converter(values['folderpath'], bounding_box, values['contour'], values['output'], water_level_correction, values['stride'])
     
 def z_on_plain(p1, p2, x, y):
     f1 = p2[0] - p1[0]
@@ -143,7 +228,7 @@ def start_converter(dgm_dir, bounding_box, contour, output_name, water_level_cor
             z_arr.append(height_map_reduced[xx, yy])
 
     height_map_reduced_df = pandas.DataFrame({'x': x_arr, 'y': y_arr, 'z': z_arr})
-    if stride is not None:
+    if stride is not None or stride != '':
         df_out = height_map_reduced_df.iloc[::stride]
         df_out = pandas.concat((df_out, pandas.DataFrame(
             {
@@ -182,7 +267,7 @@ def start_converter(dgm_dir, bounding_box, contour, output_name, water_level_cor
 
     if df_contour is not None:
         df_contour = df_contour.drop_duplicates()
-        if stride is not None:
+        if stride is not None or stride != '':
             df_contour = df_contour.iloc[::stride]
             df_contour = pandas.concat((df_contour, pandas.DataFrame(
                 {
@@ -208,7 +293,7 @@ if __name__ == '__main__':
         argparser.add_argument('--contour', '-c', required=False, type=float, help='contour level distance (default: 5 m)', default=5.0)
         argparser.add_argument('--output-name', '-o', required=False, type=str, help='output name (without file extension) (default: output)', default='output')
         argparser.add_argument('--water-level-correction', '-w', required=False, type=float, nargs=4, help='correct elevation for the fact that in CM water does not flow downhill expects x,y coordinates of lowest and highest water level of one river.')
-        argparser.add_argument('--stride', '-s', required=False, type=int, help='ouput will contain only every stride-th point')
+        argparser.add_argument('--stride', '-s', required=False, type=int, help='output will contain only every stride-th point')
         args = argparser.parse_args()
         
         start_converter(args.dgm_dir, args.bounding_box, args.contour, args.output_name, args.water_level_correction, args.stride)
