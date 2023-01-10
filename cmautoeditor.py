@@ -110,23 +110,21 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y):
             pyautogui.click(POS_VERTICAL_PLUS, interval=0.2)
 
 def display_gui():
-    sg.theme('Dark')
-    sg.theme_button_color('#002366')
-    
     # Construct window layout
     layout = [
         [sg.Titlebar('CMAutoEditor')],
-        [sg.Text('You are about to start CMAutoEditor.'
-        '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'.'
-        '\nMake sure the map size is 320m x 320m.'
-        '\nOnce you are ready to start click \'Start CMAutoEditor\'.' 
-        '\nDuring the countdown switch back to the CM Scenario Editor.'
-        '\nIn case something goes wrong, move the mouse cursor to one of the screen corners.\n\n')],
+        [sg.Text('You are about to start CMAutoEditor.')],
+        [sg.Text('If you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'.')],
+        [sg.Text('Make sure the map size is 320m x 320m.')],
+        [sg.Text('Once you are ready to start click \'Start CMAutoEditor\'.')], 
+        [sg.Text('During the countdown switch back to the CM Scenario Editor.')],
+        [sg.Text('In case something goes wrong, move the mouse cursor to one of the screen corners.')],
+        [sg.Text('')],
         [sg.Text('Select file: ')], 
         [sg.Input(), sg.FileBrowse(key='filepath', file_types=(('CSV files', '*.csv'),))],
         [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
         [sg.Text(text='', key='error_text')],
-        [sg.Push(), sg.Submit('Start CMAutoEditor', key='submit'), sg.Exit(), sg.Push()]]
+        [sg.Push(), sg.Button('Start CMAutoEditor', key='start'), sg.Exit(), sg.Push()]]
 
     # Create window with layout
     window = sg.Window('CMAutoEditor', layout)
@@ -140,9 +138,9 @@ def display_gui():
         if event == sg.WIN_CLOSED or event == 'Exit':
             break
         
-        if event == 'submit':
-            if values['filepath'] == '':
-                window['error_text'].update('Select a file before submitting')
+        if event == 'start':
+            if values['filepath'] == '' or values['filepath'] is None:
+                window['error_text'].update('Select a file before starting')
             else:
                 start = True
                 break
@@ -207,21 +205,25 @@ def start_editor(filepath, countdown):
     pyautogui.alert(text='CMAutoEditor has finished processing the input data.', title='CMAutoEditor')
         
 if __name__ == '__main__':
-    arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument('-i', '--input', required=False, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
-    arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
-    args = arg_parser.parse_args()
+    sg.theme('Dark')
+    sg.theme_button_color('#002366')
 
     #Run the gui if no arguments are inputted
     if len(sys.argv) == 1:
         display_gui()
     else:
-        return_val = pyautogui.confirm(text='CMAutoEditor is about to run on {}.'
-        '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.'
-        '\n\nOnce you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'
-        '\n\nIn case something goes wrong, move the mouse cursor to one of the screen corners. This will stop CMAutoEditor.'.format(args.input, args.countdown), title='CMAutoEditor')
+        arg_parser = argparse.ArgumentParser()
+        arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
+        arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
+        args = arg_parser.parse_args()
+    
+        return_val = sg.popup_ok_cancel('CMAutoEditor is about to run on {}.'.format(args.input),
+        'If you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.',
+        'Once you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'.format(args.countdown),
+        'In case something goes wrong, move the mouse cursor to one of the screen corners. This will stop CMAutoEditor.', 
+        title='CMAutoEditor')
         
-        if return_val == 'Cancel':
+        if return_val == 'Cancel' or return_val is None:
             exit()
         
         start_editor(args.input, args.countdown)
