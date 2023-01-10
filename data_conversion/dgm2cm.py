@@ -42,16 +42,6 @@ def get_projected_bbox(input_crs, bbox_crs, points):
     
     return projected_points
 
-
-# x = np.linspace(-4.0, 4.0, 240)
-# y = np.linspace(-3.0, 3.0, 180)
-# X, Y = np.meshgrid(x, y)
-# Z1 = np.exp(-2 * np.log(2) * ((X - 0.5) ** 2 + (Y - 0.5) ** 2) / 1 ** 2)
-# Z2 = np.exp(-3 * np.log(2) * ((X + 0.5) ** 2 + (Y + 0.5) ** 2) / 2.5 ** 2)
-# Z = 10.0 * (Z2 - Z1)
-
-# Z.shape: (180, 240) -> (y, x)
-
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dgm-dir', '-d', required=True, help='directory in which the dgm files are located')
 argparser.add_argument('--bounding-box', '-b', required=True, help='Coordinates of box in which to extract data. 2 or 4 points. If an additional number is provided, the first number is interpreted as epsg-code.'
