@@ -26,7 +26,7 @@ import sys
 UPPER_LEFT_SQUARE = pyautogui.Point(234,52)
 UPPER_RIGHT_SQUARE = pyautogui.Point(1882,52)
 LOWER_LEFT_SQUARE = pyautogui.Point(234,996)
-LOWER_RIGHT_SQUARE = pyautogui.Point(1882,996)
+LOWER_RIGHT_SQUARE = pyautogui.Point(634,452)
 
 SQUARE_SIZE_X = 16
 SQUARE_SIZE_Y = 16
@@ -34,18 +34,22 @@ SQUARE_SIZE_Y = 16
 START_N_SQUARES_X = 40
 START_N_SQUARES_Y = 40
 
-PAGE_N_SQUARES_X = 104
-PAGE_N_SQUARES_Y = 60
+PAGE_N_SQUARES_X = 26
+PAGE_N_SQUARES_Y = 26
 
 START_HEIGHT = 20
 
 POS_HORIZONTAL_PLUS = pyautogui.Point(764, 10)
 POS_HORIZONTAL_MINUS = pyautogui.Point(764, 26)
+POS_HORIZONTAL_PLUS2 = pyautogui.Point(874, 10)
+POS_HORIZONTAL_MINUS2 = pyautogui.Point(874, 27)
 
 POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
+POS_VERTICAL_PLUS2 = pyautogui.Point(1014, 27)
+POS_VERTICAL_MINUS2 = pyautogui.Point(903, 27)
 
-pyautogui.PAUSE = 0.2  # 0.12 almost!! works
+pyautogui.PAUSE = 0.05  # 0.12 almost!! works
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -93,21 +97,29 @@ def process_segment(grid, start_height):
 
     return height
 
-def set_n_squares(start_n_x, start_n_y, n_x, n_y):
+def set_n_squares(start_n_x, start_n_y, n_x, n_y, init):
     n_clicks_x = abs(int((start_n_x - n_x) / 2))
     n_clicks_y = abs(int((start_n_y - n_y) / 2))
 
     for i in range(n_clicks_x):
         if n_x <= start_n_x:
+            if not init:
+                pyautogui.click(POS_HORIZONTAL_PLUS2, interval=0.2)    
             pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.2)
         else:
             pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.2)
+            if not init:
+                pyautogui.click(POS_HORIZONTAL_MINUS2, interval=0.2)    
     
     for i in range(n_clicks_y):
         if n_y <= start_n_y:
+            if not init:
+                pyautogui.click(POS_VERTICAL_PLUS2, interval=0.2)    
             pyautogui.click(POS_VERTICAL_MINUS, interval=0.2)
         else:
             pyautogui.click(POS_VERTICAL_PLUS, interval=0.2)
+            if not init:
+                pyautogui.click(POS_VERTICAL_MINUS2, interval=0.2)    
 
 def display_gui():
     # Construct window layout
@@ -194,7 +206,11 @@ def start_editor(filepath, countdown):
                 n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
                 ymin = ymax - PAGE_N_SQUARES_Y
 
-            set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y)
+            if prev_n_x == START_N_SQUARES_X and prev_n_y == START_N_SQUARES_Y:
+                init = True
+            else:
+                init = False
+            set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y, init)
             prev_n_x = n_squares_x
             prev_n_y = n_squares_y
 
