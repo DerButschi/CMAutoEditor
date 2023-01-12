@@ -22,6 +22,7 @@ import argparse
 from shapely import Point, Polygon, MultiPoint
 from shapely.ops import nearest_points
 from pyproj.transformer import Transformer
+import geopandas
 
 
 
@@ -42,12 +43,17 @@ def get_projected_bbox(input_crs, bbox_crs, points):
     
     return projected_points
 
+def get_lon_lat_bounds(input_crs, polygon):
+    transformer = Transformer.from_crs('epsg:{}'.format(input_crs), 'epsg:{}'.format(4326), always_xy=True)
+    bounds = polygon.bounds
+    return [*transformer.transform(bounds[0], bounds[1]), *transformer.transform(bounds[2], bounds[3])]
+
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--dgm-dir', '-d', required=True, help='directory in which the dgm files are located')
 argparser.add_argument('--bounding-box', '-b', required=True, help='Coordinates of box in which to extract data. 2 or 4 points. If an additional number is provided, the first number is interpreted as epsg-code.'
     'Otherwise 4326 (longitude/latitude) is assumend.', type=float, nargs='+'
 )
-argparser.add_argument('--input-crs', required=False, type=int, help='epsg-code of input data. [default: 4326]')
+argparser.add_argument('--input-crs', required=False, type=int, help='epsg-code of input data. [default: 4326]', default=4326)
 argparser.add_argument('--contour', '-c', required=False, type=float, help='contour level distance (default: 5 m)', default=5.0)
 argparser.add_argument('--output-name', '-o', required=False, type=str, help='output name (without file extension) (default: output)', default='output')
 argparser.add_argument('--water-level-correction', '-w', required=False, type=float, nargs=4, help='correct elevation for the fact that in CM water does not flow downhill expects x,y coordinates of lowest and highest water level of one river.')
@@ -71,7 +77,9 @@ if len(bbox_points) == 2:
     bbox_polygon = MultiPoint(bbox_points).envelope
 else:
     bbox_polygon = MultiPoint(bbox_points).minimum_rotated_rectangle
+    print('Rotated Rectangle: {} {} {} {} {} {} {} {}'.format(*np.array([bbox_polygon.exterior.coords[i] for i in range(len(bbox_polygon.exterior.coords)-1)]).flatten()))
 
+print('Bounds: {}'.format(get_lon_lat_bounds(args.input_crs, bbox_polygon)))
 xmin_request, ymin_request, xmax_request, ymax_request = bbox_polygon.bounds
 
 df = None
@@ -117,15 +125,19 @@ if args.water_level_correction is not None:
 
         df.z = df.z - (zp - z1)
 
-df.x = df.x - df.x.min()
-df.y = df.y - df.y.min()
+df = df[df.x.between(xmin_request, xmax_request, inclusive='left') & df.y.between(ymin_request, ymax_request, inclusive='left')]
+
+x_offset = df.x.min()
+y_offset = df.y.min()
+df.x = df.x - x_offset
+df.y = df.y - y_offset
 
 if df.z.min() < 20:
     df.z = df.z - np.floor(df.z.min()) + 20
 
 df = df[df.x.between(0, grid_size_x_cm * 8, inclusive='left') & df.y.between(0, grid_size_y_cm * 8, inclusive='left')]
 
-height_map = np.zeros((int(grid_size_x_cm * 8), int(grid_size_y_cm * 8)))
+height_map = np.zeros((int(df.x.max()) + 1, int(df.y.max()) + 1))
 
 x = np.array(df.x.values, dtype=int)
 y = np.array(df.y.values, dtype=int)
@@ -152,19 +164,39 @@ if len(args.bounding_box) in [8,9]:
     else:
         p2 = polygon_points[min_idx + 2]
 
-
+    center = (np.round(df.x.max() / 2).astype(int), np.round(df.y.max() / 2).astype(int))
     rotation_angle = np.arctan2(p1.y - p0.y, p1.x - p0.x) * 180.0 / np.pi
     size_x = p0.distance(p1)
     size_y = p1.distance(p2)
 
-    height_map = skimage.transform.rotate(height_map, -rotation_angle, resize=True, cval=-1, preserve_range=True, clip=True)
+    height_map = skimage.transform.rotate(height_map, -rotation_angle, resize=True, cval=-1, preserve_range=True, clip=True, center=center)
 
     # centre according to skimage rotate default
-    centre = height_map.shape[0] / 2 - 0.5, height_map.shape[1] / 2 - 0.5
-    lower_left = (max(0, centre[0] - size_x / 2 / grid_cell_x), max(centre[1] - size_y / 2 / grid_cell_y, 0))
-    upper_right = (min(height_map.shape[0] - 1, centre[0] + size_x / 2 / grid_cell_x), min(height_map.shape[0] - 1, centre[1] + size_y / 2 / grid_cell_y))
+    lower_left = (max(0, center[0] - size_x / 2 / grid_cell_x), max(center[1] - size_y / 2 / grid_cell_y, 0))
+    lower_left = (np.round(lower_left[0]).astype(int), np.round(lower_left[1]).astype(int))
 
-    height_map = height_map[int(lower_left[0]):int(upper_right[0]), int(lower_left[1]):int(upper_right[1])]
+    upper_right = (
+        lower_left[0] + min(int((height_map.shape[0]-1 - lower_left[0]) / 8) * 8, int(size_x / 8) * 8),
+        lower_left[1] + min(int((height_map.shape[1]-1 - lower_left[1]) / 8) * 8, int(size_y / 8) * 8)
+    )
+
+
+    height_map = height_map[lower_left[0]:upper_right[0]+1, lower_left[1]:upper_right[1]+1]
+
+    trf_lower_left = (
+        center[0] - (np.cos(rotation_angle / 180.0 * np.pi) * (center[0] - lower_left[0]) - np.sin(rotation_angle / 180.0 * np.pi) * (center[1] - lower_left[1])) + x_offset,
+        center[1] - (np.sin(rotation_angle / 180.0 * np.pi) * (center[0] - lower_left[0]) + np.cos(rotation_angle / 180.0 * np.pi) * (center[1] - lower_left[1])) + y_offset
+    )
+
+    xarr, yarr = [], []
+    for x in np.linspace(trf_lower_left[0], trf_lower_left[0] + height_map.shape[0], int(height_map.shape[0] / 8) + 1):
+        for y in np.linspace(trf_lower_left[1], trf_lower_left[1] + height_map.shape[1], int(height_map.shape[1] / 8) + 1):
+            xarr.append(x)
+            yarr.append(y)
+
+    geometry = geopandas.points_from_xy(xarr, yarr)
+    grid_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr}, geometry=geometry)
+    grid_gdf.to_file(args.output_name + '_grid.json', driver='GeoJSON', crs=f'epsg:{args.input_crs}')
 
 height_map_reduced = skimage.transform.rescale(height_map, (grid_cell_x / 8, grid_cell_y / 8), cval=1, preserve_range=True, clip=True, anti_aliasing=True)
 
