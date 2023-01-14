@@ -110,9 +110,6 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y):
             pyautogui.click(POS_VERTICAL_PLUS, interval=0.2)
 
 def display_gui():
-    sg.theme('Dark')
-    sg.theme_button_color('#002366')
-    
     # Construct window layout
     layout = [
         [sg.Titlebar('CMAutoEditor')],
@@ -208,7 +205,8 @@ def start_editor(filepath, countdown):
     pyautogui.alert(text='CMAutoEditor has finished processing the input data.', title='CMAutoEditor')
         
 if __name__ == '__main__':
-
+    sg.theme('Dark')
+    sg.theme_button_color('#002366')
 
     #Run the gui if no arguments are inputted
     if len(sys.argv) == 1:
@@ -219,12 +217,13 @@ if __name__ == '__main__':
         arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
         args = arg_parser.parse_args()
     
-        return_val = pyautogui.confirm(text='CMAutoEditor is about to run on {}.'
-        '\nIf you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.'
-        '\n\nOnce you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'
-        '\n\nIn case something goes wrong, move the mouse cursor to one of the screen corners. This will stop CMAutoEditor.'.format(args.input, args.countdown), title='CMAutoEditor')
+        return_val = sg.popup_ok_cancel('CMAutoEditor is about to run on {}.'.format(args.input),
+        'If you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.',
+        'Once you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'.format(args.countdown),
+        'In case something goes wrong, move the mouse cursor to one of the screen corners. This will stop CMAutoEditor.', 
+        title='CMAutoEditor')
         
-        if return_val == 'Cancel':
+        if return_val == 'Cancel' or return_val is None:
             exit()
         
         start_editor(args.input, args.countdown)
