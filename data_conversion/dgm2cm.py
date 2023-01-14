@@ -21,6 +21,11 @@ import matplotlib.pyplot as plt
 import argparse
 import PySimpleGUI as sg
 import sys
+from shapely import Point, Polygon, MultiPoint
+from shapely.ops import nearest_points
+from pyproj.transformer import Transformer
+
+
 
 #Validates if the value is a float
 #Rejects latest character addition if it fails verification
@@ -153,9 +158,36 @@ def z_on_plain(p1, p2, x, y):
 
     return z
 
-def start_converter(dgm_dir, bounding_box, contour, output_name, water_level_correction, stride):
+def get_projected_bbox(input_crs, bbox_crs, points):
+    transformer = Transformer.from_crs('epsg:{}'.format(input_crs), 'epsg:{}'.format(bbox_crs), always_xy=True)
+    projected_points = []
+    for point in points:
+        projected_points.append(Point(transformer.transform(point.x, point.y)))
+    
+    return projected_points
+
+def start_converter(dgm_dir, bounding_box, input_crs, contour, output_name, water_level_correction, stride):
     xmin_request, ymin_request, xmax_request, ymax_request = bounding_box
 
+    bbox_epsg = 4326
+    bbox_points = []
+    if not len(bounding_box) in [4, 5, 8, 9]:
+        raise argparse.ArgumentError('--bounding-box requires either 2 or 4 points with an optional epsg-code prepended.')
+    elif len(bounding_box) in [5, 9]:
+        bbox_epsg = int(bounding_box[0])
+        bbox_points = get_projected_bbox(bbox_epsg, input_crs, 
+            [Point(bounding_box[i], bounding_box[i+1]) for i in range(1, len(bounding_box), 2)])
+    else:
+        bbox_points = get_projected_bbox(bbox_epsg, input_crs, 
+            [Point(bounding_box[i], bounding_box[i+1]) for i in range(0, len(bounding_box), 2)])
+
+    if len(bbox_points) == 2:
+        bbox_polygon = MultiPoint(bbox_points).envelope
+    else:
+        bbox_polygon = MultiPoint(bbox_points).minimum_rotated_rectangle
+
+    xmin_request, ymin_request, xmax_request, ymax_request = bbox_polygon.bounds
+    
     df = None
     print('Processing input files...')
     for filename in os.listdir(dgm_dir):
@@ -202,7 +234,6 @@ def start_converter(dgm_dir, bounding_box, contour, output_name, water_level_cor
     df.x = df.x - df.x.min()
     df.y = df.y - df.y.min()
 
-
     if df.z.min() < 20:
         df.z = df.z - np.floor(df.z.min()) + 20
 
@@ -216,7 +247,39 @@ def start_converter(dgm_dir, bounding_box, contour, output_name, water_level_cor
 
     height_map[x, y] = z
 
-    height_map_reduced = skimage.measure.block_reduce(height_map, (int(8 / grid_cell_x), int(8 / grid_cell_y)), np.mean)
+    if len(bounding_box) in [8,9]:
+        # make sure, bounding box polygon is counter-clockwise
+        if not bbox_polygon.exterior.is_ccw:
+            bbox_polygon = Polygon(bbox_polygon.exterior.coords[::-1])
+        # get closest point in minimum rotated rectangle to first point of bounding box
+        polygon_points = [Point(*coord) for coord in bbox_polygon.exterior.coords]
+        dist = [bbox_points[0].distance(pt) for pt in polygon_points]
+        min_idx = np.argmin(dist)
+
+        # get rotation angle of x-axis, assumed to be defined by (x0, y0) -> (x1, y1)
+        # since the last point in a polygon is always identical to the first point and np.argmin returns the first match,
+        # there should always be min_idx + 1 within the array
+        p0 = polygon_points[min_idx]
+        p1 = polygon_points[min_idx + 1]
+        if min_idx + 2 == len(polygon_points):
+            p2 = polygon_points[1]
+        else:
+            p2 = polygon_points[min_idx + 2]
+
+        rotation_angle = np.arctan2(p1.y - p0.y, p1.x - p0.x) * 180.0 / np.pi
+        size_x = p0.distance(p1)
+        size_y = p1.distance(p2)
+
+        height_map = skimage.transform.rotate(height_map, -rotation_angle, resize=True, cval=-1, preserve_range=True, clip=True)
+
+        # centre according to skimage rotate default
+        centre = height_map.shape[0] / 2 - 0.5, height_map.shape[1] / 2 - 0.5
+        lower_left = (max(0, centre[0] - size_x / 2 / grid_cell_x), max(centre[1] - size_y / 2 / grid_cell_y, 0))
+        upper_right = (min(height_map.shape[0] - 1, centre[0] + size_x / 2 / grid_cell_x), min(height_map.shape[0] - 1, centre[1] + size_y / 2 / grid_cell_y))
+
+        height_map = height_map[int(lower_left[0]):int(upper_right[0]), int(lower_left[1]):int(upper_right[1])]
+
+    height_map_reduced = skimage.transform.rescale(height_map, (grid_cell_x / 8, grid_cell_y / 8), cval=1, preserve_range=True, clip=True, anti_aliasing=True)
 
     x_arr = []
     y_arr = []
@@ -289,11 +352,14 @@ if __name__ == '__main__':
     else:
         argparser = argparse.ArgumentParser()
         argparser.add_argument('--dgm-dir', '-d', required=True, help='directory in which the dgm files are located')
-        argparser.add_argument('--bounding-box', '-b', required=True, help='lower left and upper right corner of the box in which data is to be extracted (min x, min y, max x, max y)', type=float, nargs=4)
+        argparser.add_argument('--bounding-box', '-b', required=True, help='Coordinates of box in which to extract data. 2 or 4 points. If an additional number is provided, the first number is interpreted as epsg-code.'
+            'Otherwise 4326 (longitude/latitude) is assumend.', type=float, nargs='+'
+        )
+        argparser.add_argument('--input-crs', required=False, type=int, help='epsg-code of input data. [default: 4326]')
         argparser.add_argument('--contour', '-c', required=False, type=float, help='contour level distance (default: 5 m)', default=5.0)
         argparser.add_argument('--output-name', '-o', required=False, type=str, help='output name (without file extension) (default: output)', default='output')
         argparser.add_argument('--water-level-correction', '-w', required=False, type=float, nargs=4, help='correct elevation for the fact that in CM water does not flow downhill expects x,y coordinates of lowest and highest water level of one river.')
-        argparser.add_argument('--stride', '-s', required=False, type=int, help='output will contain only every stride-th point')
+        argparser.add_argument('--stride', '-s', required=False, type=int, help='ouput will contain only every stride-th point')
         args = argparser.parse_args()
         
-        start_converter(args.dgm_dir, args.bounding_box, args.contour, args.output_name, args.water_level_correction, args.stride)
+        start_converter(args.dgm_dir, args.bounding_box, args.input_crs, args.contour, args.output_name, args.water_level_correction, args.stride)
