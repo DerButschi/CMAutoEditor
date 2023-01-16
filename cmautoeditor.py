@@ -68,7 +68,7 @@ def set_height(current_height, target_height):
             sleep(0.1)
 
 
-    sleep(1)
+    # sleep(1)
 
 def process_segment(grid, start_height):
     print(grid.shape)
