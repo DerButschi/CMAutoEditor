@@ -13,37 +13,37 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# from sre_constants import GROUPREF_EXISTS
 from time import sleep
-# from tokenize import group
 import pyautogui
 import numpy as np
 import pandas
 import argparse
 import keyboard
 import os
+import PySimpleGUI as sg
+import sys
 
 # constants:
-UPPER_LEFT_SQUARE = pyautogui.Point(233,51) # center (233,51) 
+UPPER_LEFT_SQUARE = pyautogui.Point(233,52)
 # UPPER_RIGHT_SQUARE = pyautogui.Point(1882,52)
 # LOWER_LEFT_SQUARE = pyautogui.Point(234,996)
-LOWER_RIGHT_SQUARE = pyautogui.Point(1881,994) # center (233, 51)
+LOWER_RIGHT_SQUARE = pyautogui.Point(633,452)
 
 SQUARE_SIZE_X = 16
 SQUARE_SIZE_Y = 16
 
 START_N_SQUARES_X = 40
 START_N_SQUARES_Y = 40
-# START_N_SQUARES_X = 104
-# START_N_SQUARES_Y = 80
 
-PAGE_N_SQUARES_X = 104
-PAGE_N_SQUARES_Y = 60
+PAGE_N_SQUARES_X = 26
+PAGE_N_SQUARES_Y = 26
 
 START_HEIGHT = 20
 
 POS_HORIZONTAL_PLUS = pyautogui.Point(764, 10)
 POS_HORIZONTAL_MINUS = pyautogui.Point(764, 26)
+POS_HORIZONTAL_PLUS2 = pyautogui.Point(874, 10)
+POS_HORIZONTAL_MINUS2 = pyautogui.Point(874, 27)
 
 POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
@@ -239,18 +239,10 @@ TILE_COL_DICT = {
     1: 108,
     2: 182,
 }
+POS_VERTICAL_PLUS2 = pyautogui.Point(1014, 27)
+POS_VERTICAL_MINUS2 = pyautogui.Point(903, 27)
 
-pyautogui.PAUSE = 0.2  # 0.12 almost!! works
-
-
-arg_parser = argparse.ArgumentParser()
-arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
-
-# def rolling_test(input, y=None):
-#     if y is not None:
-#         y.rolling(3).apply(rolling_test)
-#     a = 1
-
+pyautogui.PAUSE = 0.05  # 0.12 almost!! works
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -269,9 +261,15 @@ def set_height(current_height, target_height):
             sleep(0.1)
 
 
-    sleep(1)
+    # sleep(1)
 
 def process_segment(grid, start_height):
+    print(grid.shape)
+    if len(grid[grid >= 0]) == 0:
+        return start_height
+        
+    values = np.unique(grid[grid >= 0])
+    min_height = np.min(grid[grid >= 0])
     # values = np.unique(grid[grid >= 0])
     # min_height = np.min(grid[grid >= 0])
     values = grid.z.sort_values().unique()
@@ -281,40 +279,87 @@ def process_segment(grid, start_height):
     height = min_height
 
     for val in values:
-        grid_extract = grid[grid.z == val]
-        # indices0, indices1 = np.where(grid == val)
+        indices0, indices1 = np.where(grid == val)
 
         set_height(height, val)
 
-        for ridx, row in grid_extract.iterrows():
-            # idx0 = indices0[i]
-            # idx1 = indices1[i]
-            idx0 = row.x
-            idx1 = row.y
+        for i in range(len(indices1)):
+            idx0 = indices0[i]
+            idx1 = indices1[i]
             x_pos = int(idx0 * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
-            y_pos = int(LOWER_RIGHT_SQUARE.y - idx1 * SQUARE_SIZE_Y)
+            y_pos = int(LOWER_RIGHT_SQUARE.y - (PAGE_N_SQUARES_Y - grid.shape[1] + idx1) * SQUARE_SIZE_Y)
             height = val
 
             pyautogui.click(x=x_pos, y=y_pos)
 
     return height
 
-def set_n_squares(start_n_x, start_n_y, n_x, n_y):
+def set_n_squares(start_n_x, start_n_y, n_x, n_y, init):
     n_clicks_x = abs(int((start_n_x - n_x) / 2))
     n_clicks_y = abs(int((start_n_y - n_y) / 2))
 
     for i in range(n_clicks_x):
         if n_x <= start_n_x:
+            if not init:
+                pyautogui.click(POS_HORIZONTAL_PLUS2, interval=0.2)    
             pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.2)
         else:
             pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.2)
+            if not init:
+                pyautogui.click(POS_HORIZONTAL_MINUS2, interval=0.2)    
     
     for i in range(n_clicks_y):
         if n_y <= start_n_y:
+            if not init:
+                pyautogui.click(POS_VERTICAL_PLUS2, interval=0.2)    
             pyautogui.click(POS_VERTICAL_MINUS, interval=0.2)
         else:
             pyautogui.click(POS_VERTICAL_PLUS, interval=0.2)
+            if not init:
+                pyautogui.click(POS_VERTICAL_MINUS2, interval=0.2)    
 
+def display_gui():
+    # Construct window layout
+    layout = [
+        [sg.Titlebar('CMAutoEditor')],
+        [sg.Text('You are about to start CMAutoEditor.')],
+        [sg.Text('If you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'.')],
+        [sg.Text('Make sure the map size is 320m x 320m.')],
+        [sg.Text('Once you are ready to start click \'Start CMAutoEditor\'.')], 
+        [sg.Text('During the countdown switch back to the CM Scenario Editor.')],
+        [sg.Text('In case something goes wrong, move the mouse cursor to one of the screen corners.')],
+        [sg.Text('')],
+        [sg.Text('Select file: ')], 
+        [sg.Input(), sg.FileBrowse(key='filepath', file_types=(('CSV files', '*.csv'),))],
+        [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
+        [sg.Text(text='', key='error_text')],
+        [sg.Push(), sg.Button('Start CMAutoEditor', key='start'), sg.Exit(), sg.Push()]]
+
+    # Create window with layout
+    window = sg.Window('CMAutoEditor', layout)
+    
+    # Loop until window needs closing
+    start = False
+    while True:
+        # Read UI inputs
+        event, values = window.read()
+        
+        if event == sg.WIN_CLOSED or event == 'Exit':
+            break
+        
+        if event == 'start':
+            if values['filepath'] == '' or values['filepath'] is None:
+                window['error_text'].update('Select a file before starting')
+            else:
+                start = True
+                break
+
+    window.close()
+    # Start editor with UI inputs
+    if start and values['filepath'] != '' and values['filepath'] != None:
+        start_editor(values['filepath'], values['countdown'])
+
+            
 def set_roads(df):
     # for name, group in df.groupby(by='id'):
     #     prev_x = None
@@ -379,9 +424,8 @@ def set_ground(df, map_df):
             map_df.loc[row_idx, 'done'] = 1
 
 
-if __name__ == '__main__':
-    args = arg_parser.parse_args()
-
+    
+def start_editor(filepath, countdown):
     # load height map
     if os.path.exists(args.input + '.checkpoint') and os.path.exists(args.input + '.meta.checkpoint'):
         map_df = pandas.read_csv(args.input + '.checkpoint')
@@ -392,7 +436,7 @@ if __name__ == '__main__':
         prev_n_y = meta_df['prev_n_y'][0]
 
     else:
-        map_df = pandas.read_csv(args.input)
+        map_df = pandas.read_csv(filepath)
         map_df.z = map_df.z.round().astype(int)
 
         if 'done' not in map_df:
@@ -407,99 +451,84 @@ if __name__ == '__main__':
         map_df = map_df[map_df['done'] == 0]
         # map_df.rolling(3, on='x').apply(rolling_test, kwargs={'y': map_df.y})
 
-        # x = np.array(map_df.x.values, dtype=int)
-        # y = np.array(map_df.y.values, dtype=int)
-        # z = map_df.z.values
+        x = np.array(height_map_df.x.values, dtype=int)
+        y = np.array(height_map_df.y.values, dtype=int)
+        z = height_map_df.z.values
 
-        # grid = np.full((x.max() + 1, y.max() + 1), -1)
-        # grid[x, y] = z
-        total_n_squares_x = int(map_df.x.max()) + 1
-        total_n_squares_y = int(map_df.y.max()) + 1
+        grid = np.full((x.max() + 1, y.max() + 1), -1)
+        grid[x, y] = z
 
-        n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X, dtype=int)
-        n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y, dtype=int)
+        n_pages_x, n_x_remain = np.divmod(grid.shape[0], PAGE_N_SQUARES_X)
+        n_pages_y, n_y_remain = np.divmod(grid.shape[1], PAGE_N_SQUARES_Y)
         n_x_remain = (np.floor(n_x_remain / 2) * 2).astype(int)
         n_y_remain = (np.floor(n_y_remain / 2) * 2).astype(int)
 
-        # grid = grid[0:(n_pages_x * PAGE_N_SQUARES_X + n_x_remain), 0:(n_pages_y * PAGE_N_SQUARES_Y + n_y_remain)]
-
-        map_df = map_df[(map_df.x >= 0) & (map_df.y >= 0) & (map_df.x < (n_pages_x * PAGE_N_SQUARES_X + n_x_remain)) & (map_df.y < (n_pages_y * PAGE_N_SQUARES_Y + n_y_remain))]
-
-        # map_df = map_df[map_df.x.between(0, (n_pages_x * PAGE_N_SQUARES_X + n_x_remain), inclusive='left')]
-        # map_df = map_df[map_df.y.between(0, (n_pages_y * PAGE_N_SQUARES_Y + n_y_remain), inclusive='left')]
-                        
-        total_n_squares_x = n_pages_x * PAGE_N_SQUARES_X + n_x_remain
-        total_n_squares_y = n_pages_y * PAGE_N_SQUARES_Y + n_y_remain
+        grid = grid[0:(n_pages_x * PAGE_N_SQUARES_X + n_x_remain), 0:(n_pages_y * PAGE_N_SQUARES_Y + n_y_remain)]
 
         height = START_HEIGHT
+        prev_n_x = START_N_SQUARES_X
+        prev_n_y = START_N_SQUARES_Y
 
-        pyautogui.countdown(5)
+        pyautogui.countdown(countdown)
 
         for i_page_y in range(n_pages_y + 1):
             for i_page_x in range(n_pages_x + 1):
                 # if i_page_x > 3 or i_page_y > 3:
                 #     continue
 
-                # xmax = total_n_squares_x - i_page_x * PAGE_N_SQUARES_X
-                # ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
-                # if i_page_x < n_pages_x:
-                #     n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
-                #     xmin = xmax - PAGE_N_SQUARES_X
-                # else:
-                #     n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain 
-                #     xmin = xmax - n_x_remain
-                # if i_page_y < n_pages_y:
-                #     n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y
-                #     ymin = ymax - PAGE_N_SQUARES_Y
-                # else:
-                #     n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
-                #     ymin = ymax - PAGE_N_SQUARES_Y
-
-
+                xmax = grid.shape[0] - i_page_x * PAGE_N_SQUARES_X
+                ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
                 if i_page_x < n_pages_x:
                     n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
-                    xmax = total_n_squares_x - i_page_x * PAGE_N_SQUARES_X
                     xmin = xmax - PAGE_N_SQUARES_X
-                    origin_x = total_n_squares_x - (i_page_x + 1) * PAGE_N_SQUARES_X
                 else:
                     n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain 
-                    xmax = n_x_remain
-                    xmin = 0
-                    origin_x = 0
+                    xmin = xmax - n_x_remain
                 if i_page_y < n_pages_y:
                     n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y
-                    ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
                     ymin = ymax - PAGE_N_SQUARES_Y
-                    origin_y = i_page_y * PAGE_N_SQUARES_Y
                 else:
                     n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
-                    ymax = total_n_squares_y
-                    ymin = total_n_squares_y - n_y_remain
-                    origin_y = total_n_squares_y - PAGE_N_SQUARES_Y
+                    ymin = ymax - PAGE_N_SQUARES_Y
 
-                if xmax == xmin or ymax == ymin:
-                    continue
-                # if i_page_x == 0 and i_page_y == 0:
-                #     continue
-
-                set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y)
+                if prev_n_x == START_N_SQUARES_X and prev_n_y == START_N_SQUARES_Y:
+                    init = True
+                else:
+                    init = False
+                set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y, init)
                 prev_n_x = n_squares_x
                 prev_n_y = n_squares_y
 
-                # sub_grid = grid[xmin:xmax, ymin:ymax]
+                sub_grid = grid[xmin:xmax, ymin:ymax]
 
-                # height = process_segment(sub_grid, height)
-                sub_df = map_df[map_df.x.between(xmin, xmax, inclusive='left') & map_df.y.between(ymin, ymax, inclusive='left')].copy(deep=True)
-                sub_df.x = sub_df.x - origin_x
-                sub_df.y = sub_df.y - origin_y
-                # height = process_segment(sub_df, height)
-                # set_roads(sub_df)
-                set_ground(sub_df, map_df)
+                height = process_segment(sub_grid, height)
 
-    except pyautogui.FailSafeException:
-        map_df.to_csv(args.input + '.checkpoint')
-        meta_df = pandas.DataFrame({'prev_n_x': [prev_n_x], 'prev_n_y': [prev_n_y], 'start_i_page_x': [i_page_x], 'start_i_page_y': [i_page_y]})
-        meta_df.to_csv(args.input + '.meta.checkpoint')
+        pyautogui.alert(text='CMAutoEditor has finished processing the input data.', title='CMAutoEditor')
+        
+if __name__ == '__main__':
+    sg.theme('Dark')
+    sg.theme_button_color('#002366')
+
+    #Run the gui if no arguments are inputted
+    if len(sys.argv) == 1:
+        display_gui()
+    else:
+        arg_parser = argparse.ArgumentParser()
+        arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
+        arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
+        args = arg_parser.parse_args()
+    
+        return_val = sg.popup_ok_cancel('CMAutoEditor is about to run on {}.'.format(args.input),
+        'If you haven\'t done so yet, open up the CM Scenario Editor, go to map->Elevation and click \'Direct\'. Make sure the size is 320m x 320m.',
+        'Once you are ready to start click \'Ok\'. You will then have {}s to switch back to the CM Scenario Editor.'.format(args.countdown),
+        'In case something goes wrong, move the mouse cursor to one of the screen corners. This will stop CMAutoEditor.', 
+        title='CMAutoEditor')
+        
+        if return_val == 'Cancel' or return_val is None:
+            exit()
+        
+        start_editor(args.input, args.countdown)
+    
 
 
 

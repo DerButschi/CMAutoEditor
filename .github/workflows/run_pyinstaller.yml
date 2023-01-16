@@ -1,0 +1,28 @@
+name: Run PyInstaller
+on: [workflow_dispatch]
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['windows-latest']
+
+    steps:
+    - uses: actions/checkout@v3
+    - uses: conda-incubator/setup-miniconda@v2
+      with:
+          auto-update-conda: false
+          activate-environment: py38_cmautoeditor
+          environment-file: conda_requirements_py38.txt
+    - run: conda install -c conda-forge pyinstaller
+    - run: copy data_conversion/dgm2cm.py dgm2cm.py
+    - run: copy data_conversion/geotiff2cm.py geotiff2cm.py
+    - run: pyinstaller --noconfirm --log-level=INFO --clean build.spec
+    - run: copy LICENSE dist/LICENSE
+    - run: copy README.md dist/README.md
+    - run: copy example_height_map.csv dist/example_height_map.csv
+    - uses: actions/upload-artifact@v3
+      with:
+        name: release
+        path: dist/*

@@ -6,9 +6,38 @@ to do this manually.
 
 This script automates setting elevation values in the editor. It reads data from a .csv-File and "does the clicking" for the scenario designer.
 
-## Setup
-You need a working python3 (tested with python 3.9) environment. After cloning this repository do `pip install -r requirements.txt` or install 
-the packages listed in the file manually.
+## Installing CMAutoEditor
+There basically two options.
+### Install binaries
+Download the latest Windows .exe-files here:
+[CMAutoEditor-latest](https://github.com/DerButschi/CMAutoEditor/releases/latest/download/release.zip)
+The files are compiled on the latest Windows version and tested on Windows 10. 
+
+### Building from source
+If the binary files don't work on your machine or you want to build from source go to the [latest release](https://github.com/DerButschi/CMAutoEditor/releases/latest) 
+and under Assets click "Source code" (.zip or .tar.gz)
+
+CMAutoEditor depends on some libraries that are only available at Conda-Forge, so you need a python environment with conda, either 
+[Miniconda](https://docs.conda.io/en/latest/miniconda.html) or [Anaconda](https://docs.conda.io/projects/conda/en/stable/glossary.html#anaconda-glossary).
+Currently CMAutoEditor requires python version >= 3.8.
+
+Once you have a conda version installed, you can either directly "clone" the enviroment from the file included with the source code:
+```
+conda create -n py38_cmautoeditor -c conda-forge --override-channels python==3.8.15 --file conda_requirements.txt
+```
+or - if that doesn't work - let conda figure out what fits:
+
+```
+conda create -n py38_cmautoeditor -c conda-forge --override-channels python==3.8.15
+conda activate py38_cmautoeditor
+conda install -c conda-forge --file .\requirements.txt
+```
+
+In both cases, do
+```
+conda activate py38_cmautoeditor
+```
+before executing the actual code.
 
 ## A Note of Caution
 The script uses [PyAutoGUI](https://pyautogui.readthedocs.io/en/latest/) to do all the clicking for you. It does not which application is currently running. 
@@ -17,13 +46,11 @@ unintended things there. PyAutoGUI has a fail safe: Just slam the mouse cursor i
 
 ## How to run the script
 
-- Set your keyboard layout to English (see Known Issues).
 - Open the scenario editor and go to map->elevation. Click 'Direct' to enable direct-set mode.
 - Run the script: `python cmautoeditor.py -i /path/to/data-file.csv
 - You will see a countdown start to tick down.
 - During that time go back to the scenario editor.
 - Watch the script clicking...
-- Rather unceremoniouslz the script is done when no more clicking or height changing happens.
 
 ## Input Data
 The script takes data in csv-format with a header x,y,z. x and y denote the position of a value on the map *in units of map squares*. x=2, y=1 denotes the 3rd 
@@ -60,7 +87,6 @@ POS_VERTICAL_MINUS = pyautogui.Point(903, 10) # position of the upper minus butt
 
 ## Comments & Known Issues
 - So far, the script is setup to work with a screen resolution of 1920x1080. 
-- During testing, the script refused to work properly with a German keyboard layout but worked fine with an English one. I did not test any other layout.
 - The script is not terribly fast. That is mainly due to the fact the apparently the editor can't handle to fast clicking or key pressing. You can experiment with the interval values in the script or with the `pyautogui.PAUSE` parameter. Use the latter with caution. Setting the value to low means you won't be able to activate PyAutoGUI's fail safe!
 - The resizing of the map is necessary! Mouse scrolling is unreliable, meaning the outcome is not very predictable. However, when resizing the map, the information being cut away 
 doesn't get lost. In this way, resizing can be used for exact scrolling.
