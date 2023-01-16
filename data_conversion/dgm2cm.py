@@ -88,7 +88,7 @@ for filename in os.listdir(args.dgm_dir):
     # if filename.endswith('.xyz.gz'):
     if os.path.isfile(os.path.join(args.dgm_dir, filename)):
         df_file = pandas.read_csv(os.path.join(args.dgm_dir, filename), delimiter=r"\s+", names=['x','y','z'])
-        df_file = df_file[df_file.x.between(xmin_request, xmax_request) & df_file.y.between(ymin_request, ymax_request)]
+        # df_file = df_file[df_file.x.between(xmin_request, xmax_request) & df_file.y.between(ymin_request, ymax_request)]
         if df is not None:
             df = pandas.concat((df, df_file))
         else:
@@ -125,17 +125,38 @@ if args.water_level_correction is not None:
 
         df.z = df.z - (zp - z1)
 
+# df = df[df.x.between(xmin_request, xmax_request, inclusive='left') & df.y.between(ymin_request, ymax_request, inclusive='left')]
+
+x_offset = df.x.min()
+y_offset = df.y.min()
+df_orig = df.copy()
+df_orig.x = df_orig.x - x_offset
+df_orig.y = df_orig.y - y_offset
+
+if df.z.min() < 20:
+    df.z = df.z - np.floor(df.z.min()) + 20
+
+# df = df[df.x.between(0, grid_size_x_cm * 8, inclusive='left') & df.y.between(0, grid_size_y_cm * 8, inclusive='left')]
+
+height_map_orig = np.zeros((int(df_orig.x.max()) + 1, int(df_orig.y.max()) + 1))
+
+x = np.array(df_orig.x.values, dtype=int)
+y = np.array(df_orig.y.values, dtype=int)
+z = df_orig.z.values
+
+height_map_orig[x, y] = z
+plt.figure()
+plt.imshow(height_map_orig.transpose(1,0), origin='lower')
+plt.plot(bbox_polygon.exterior.xy[0] - x_offset, bbox_polygon.exterior.xy[1] - y_offset, '-r')
+plt.tight_layout(pad=1.00)
+plt.savefig("{}_orig.png".format(args.output_name), bbox_inches='tight', dpi=1200, pad_inches=0)
+
 df = df[df.x.between(xmin_request, xmax_request, inclusive='left') & df.y.between(ymin_request, ymax_request, inclusive='left')]
 
 x_offset = df.x.min()
 y_offset = df.y.min()
 df.x = df.x - x_offset
 df.y = df.y - y_offset
-
-if df.z.min() < 20:
-    df.z = df.z - np.floor(df.z.min()) + 20
-
-df = df[df.x.between(0, grid_size_x_cm * 8, inclusive='left') & df.y.between(0, grid_size_y_cm * 8, inclusive='left')]
 
 height_map = np.zeros((int(df.x.max()) + 1, int(df.y.max()) + 1))
 
@@ -164,12 +185,15 @@ if len(args.bounding_box) in [8,9]:
     else:
         p2 = polygon_points[min_idx + 2]
 
-    center = (np.round(df.x.max() / 2).astype(int), np.round(df.y.max() / 2).astype(int))
+    center = (np.round((df.x.max()) / 2).astype(int), np.round(df.y.max() / 2).astype(int))
     rotation_angle = np.arctan2(p1.y - p0.y, p1.x - p0.x) * 180.0 / np.pi
     size_x = p0.distance(p1)
     size_y = p1.distance(p2)
 
     height_map = skimage.transform.rotate(height_map, -rotation_angle, resize=True, cval=-1, preserve_range=True, clip=True, center=center)
+    # center must be recalculated because img is resized!
+    center = (height_map.shape[0] / 2 - 0.5, height_map.shape[1] / 2 - 0.5)
+
 
     # centre according to skimage rotate default
     lower_left = (max(0, center[0] - size_x / 2 / grid_cell_x), max(center[1] - size_y / 2 / grid_cell_y, 0))
