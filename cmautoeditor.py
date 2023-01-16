@@ -255,6 +255,7 @@ def set_height(current_height, target_height):
             sleep(0.1)
     else:
         n_diff = current_height - target_height
+        print(n_diff)
         # pyautogui.press('-', presses=n_diff, interval=0.5)
         for i in range(n_diff):
             keyboard.send('-')
@@ -266,6 +267,9 @@ def set_height(current_height, target_height):
 def process_segment(grid, start_height):
     values = grid.z.sort_values().unique()
     min_height = grid[grid.z >= 0].z.min()
+    
+    if np.isnan(min_height):
+        return start_height
     
     set_height(start_height, min_height)
     height = min_height
@@ -525,6 +529,8 @@ def start_editor(filepath, countdown):
                 else:
                     init = False
                 set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y, init)
+                prev_n_x = n_squares_x
+                prev_n_y = n_squares_y
 
                 # sub_grid = grid[xmin:xmax, ymin:ymax]
 
