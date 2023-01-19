@@ -112,10 +112,11 @@ config = json.load(open('default_osm_config.json', 'r'))
 
 
 class OSMProcessor:
-    def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None):
+    def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None, grid_file: Optional[str] = None):
         self.config = config
         self.bbox = bbox
         self.bbox_lon_lat = bbox_lon_lat
+        self.grid_file = grid_file
         self.idx_bbox = None
         self.effective_bbox_polygon = None
         self.transformer = None
@@ -303,7 +304,21 @@ class OSMProcessor:
             'priority': [-1] * len(xarr),
             }, geometry=geometry)
 
+    def _load_grid(self):
+        file_name_base = self.grid_file.split('_')[0]
+        self.gdf = geopandas.GeoDataFrame.from_file(self.grid_file)
+        self.sub_square_grid_diagonal_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_diagonal_grid.json')
+        self.sub_square_grid_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_sub_square_grid.json')
 
+        total_bounds = self.gdf.geometry.total_bounds
+        self.effective_bbox_polygon = Polygon([
+            (total_bounds[0], total_bounds[1]),
+            (total_bounds[2], total_bounds[1]),
+            (total_bounds[2], total_bounds[3]),
+            (total_bounds[0], total_bounds[3])
+        ])
+
+        self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
 
     def _get_projected_geometry(self, geojson_geometry):
             # geometry = geopandas.GeoSeries(shape(geojson_geometry))
@@ -401,7 +416,10 @@ class OSMProcessor:
                     self.matched_elements.append({'element': element, 'geometry': geometry, 'name': name, 'idx': element_idx})
                     element_idx += 1
 
-        self._init_grid([xmin, ymin, xmax, ymax])
+        if self.grid_file is None:
+            self._init_grid([xmin, ymin, xmax, ymax])
+        else:
+            self._load_grid()
 
     def _collect_stages(self):
         stages = {}
@@ -614,17 +632,18 @@ if __name__ == '__main__':
     # with open('scenarios/rhine_crossing/rhine_crossing_area1.geojson', 'w', encoding='utf8') as geojson_file:
     #     geojson_file.write(json.dumps(osm_data2))
 
-    osm_data = geojson.load(open('scenarios/rhine_crossing/rhine_crossing_area1.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('scenarios/agger_valley/schlingenbach/osm/schlingenbach.geojson', encoding='utf8'))
     # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
     # osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
-    osm_processor = OSMProcessor(config=config, bbox=[361607.305,5625049.525, 365540.291, 5627329.787])
+    # osm_processor = OSMProcessor(config=config, bbox=[361607.305,5625049.525, 365540.291, 5627329.787])
+    osm_processor = OSMProcessor(config=config, grid_file='schlingenbach_grid.json')
 
     # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
     # osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('scenarios/rhine_crossing/rhine_crossing_area1_osm.csv')
+    osm_processor.write_to_file('scenarios/agger_valley/schlingenbach/schlingenbach_osm_civil.csv')
 
 
 

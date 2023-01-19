@@ -23,8 +23,7 @@ from shapely import Point, Polygon, MultiPoint
 from shapely.ops import nearest_points
 from pyproj.transformer import Transformer
 import geopandas
-
-
+from osm_utils.grid import get_all_grids
 
 def z_on_plain(p1, p2, x, y):
     f1 = p2[0] - p1[0]
@@ -75,8 +74,10 @@ else:
 
 if len(bbox_points) == 2:
     bbox_polygon = MultiPoint(bbox_points).envelope
+    bbox_polygon_orig = bbox_polygon
 else:
     bbox_polygon = MultiPoint(bbox_points).minimum_rotated_rectangle
+    bbox_polygon_orig = Polygon([(p.x, p.y) for p in bbox_points])
     print('Rotated Rectangle: {} {} {} {} {} {} {} {}'.format(*np.array([bbox_polygon.exterior.coords[i] for i in range(len(bbox_polygon.exterior.coords)-1)]).flatten()))
 
 print('Bounds: {}'.format(get_lon_lat_bounds(args.input_crs, bbox_polygon)))
@@ -147,6 +148,7 @@ z = df_orig.z.values
 height_map_orig[x, y] = z
 plt.figure()
 plt.imshow(height_map_orig.transpose(1,0), origin='lower')
+plt.plot(bbox_polygon_orig.exterior.xy[0] - x_offset, bbox_polygon_orig.exterior.xy[1] - y_offset, ':y')
 plt.plot(bbox_polygon.exterior.xy[0] - x_offset, bbox_polygon.exterior.xy[1] - y_offset, '-r')
 plt.tight_layout(pad=1.00)
 plt.savefig("{}_orig.png".format(args.output_name), bbox_inches='tight', dpi=1200, pad_inches=0)
@@ -186,17 +188,24 @@ if len(args.bounding_box) in [8,9]:
         p2 = polygon_points[min_idx + 2]
 
     center = (np.round((df.x.max()) / 2).astype(int), np.round(df.y.max() / 2).astype(int))
+
+    plt.figure()
+    plt.imshow(height_map.transpose(1,0), origin='lower')
+    plt.plot(center[0], center[1], 'ro')
+    plt.plot([p0.x - x_offset, p1.x - x_offset, p2.x - x_offset], [p0.y - y_offset, p1.y - y_offset, p2.y - y_offset], ':rD')
+    plt.tight_layout(pad=1.00)
+    plt.savefig("{}_bounds.png".format(args.output_name), bbox_inches='tight', dpi=1200, pad_inches=0)
+
     rotation_angle = np.arctan2(p1.y - p0.y, p1.x - p0.x) * 180.0 / np.pi
     size_x = p0.distance(p1)
     size_y = p1.distance(p2)
 
     height_map = skimage.transform.rotate(height_map, -rotation_angle, resize=True, cval=-1, preserve_range=True, clip=True, center=center)
     # center must be recalculated because img is resized!
-    center = (height_map.shape[0] / 2 - 0.5, height_map.shape[1] / 2 - 0.5)
-
+    center_rotated = (height_map.shape[0] / 2 - 0.5, height_map.shape[1] / 2 - 0.5)
 
     # centre according to skimage rotate default
-    lower_left = (max(0, center[0] - size_x / 2 / grid_cell_x), max(center[1] - size_y / 2 / grid_cell_y, 0))
+    lower_left = (max(0, center_rotated[0] - size_x / 2 / grid_cell_x), max(center_rotated[1] - size_y / 2 / grid_cell_y, 0))
     lower_left = (np.round(lower_left[0]).astype(int), np.round(lower_left[1]).astype(int))
 
     upper_right = (
@@ -204,23 +213,35 @@ if len(args.bounding_box) in [8,9]:
         lower_left[1] + min(int((height_map.shape[1]-1 - lower_left[1]) / 8) * 8, int(size_y / 8) * 8)
     )
 
+    plt.figure()
+    plt.imshow(height_map.transpose(1,0), origin='lower')
+    plt.plot(center_rotated[0], center_rotated[1], 'ro')
+    plt.plot([lower_left[0], upper_right[0], upper_right[0], lower_left[0], lower_left[0]], [lower_left[1], lower_left[1], upper_right[1], upper_right[1], lower_left[1]], ':rD')
+    plt.tight_layout(pad=1.00)
+    plt.savefig("{}_rotated.png".format(args.output_name), bbox_inches='tight', dpi=1200, pad_inches=0)
 
-    height_map = height_map[lower_left[0]:upper_right[0]+1, lower_left[1]:upper_right[1]+1]
+
+    height_map = height_map[lower_left[0]:upper_right[0], lower_left[1]:upper_right[1]]
 
     trf_lower_left = (
-        center[0] - (np.cos(rotation_angle / 180.0 * np.pi) * (center[0] - lower_left[0]) - np.sin(rotation_angle / 180.0 * np.pi) * (center[1] - lower_left[1])) + x_offset,
-        center[1] - (np.sin(rotation_angle / 180.0 * np.pi) * (center[0] - lower_left[0]) + np.cos(rotation_angle / 180.0 * np.pi) * (center[1] - lower_left[1])) + y_offset
+        center[0] - (np.cos(rotation_angle / 180.0 * np.pi) * (center_rotated[0] - lower_left[0] - grid_cell_x / 2) - np.sin(rotation_angle / 180.0 * np.pi) * (center_rotated[1] - lower_left[1] - grid_cell_y / 2)) + x_offset,
+        center[1] - (np.sin(rotation_angle / 180.0 * np.pi) * (center_rotated[0] - lower_left[0] - grid_cell_x / 2) + np.cos(rotation_angle / 180.0 * np.pi) * (center_rotated[1] - lower_left[1] - grid_cell_y / 2)) + y_offset
     )
 
-    xarr, yarr = [], []
-    for x in np.linspace(trf_lower_left[0], trf_lower_left[0] + height_map.shape[0], int(height_map.shape[0] / 8) + 1):
-        for y in np.linspace(trf_lower_left[1], trf_lower_left[1] + height_map.shape[1], int(height_map.shape[1] / 8) + 1):
-            xarr.append(x)
-            yarr.append(y)
+    grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf = get_all_grids(
+        trf_lower_left[0], 
+        trf_lower_left[1], 
+        trf_lower_left[0] + height_map.shape[0] + grid_cell_x, 
+        trf_lower_left[1] + height_map.shape[1] + grid_cell_y,
+        int(height_map.shape[0] / 8),
+        int(height_map.shape[1] / 8),
+        rotation_angle=rotation_angle,
+        rotation_center=trf_lower_left
+    )
 
-    geometry = geopandas.points_from_xy(xarr, yarr)
-    grid_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr}, geometry=geometry)
     grid_gdf.to_file(args.output_name + '_grid.json', driver='GeoJSON', crs=f'epsg:{args.input_crs}')
+    diagonal_grid_gdf.to_file(args.output_name + '_diagonal_grid.json', driver='GeoJSON', crs=f'epsg:{args.input_crs}')
+    sub_square_grid_gdf.to_file(args.output_name + '_sub_square_grid.json', driver='GeoJSON', crs=f'epsg:{args.input_crs}')
 
 height_map_reduced = skimage.transform.rescale(height_map, (grid_cell_x / 8, grid_cell_y / 8), cval=1, preserve_range=True, clip=True, anti_aliasing=True)
 
