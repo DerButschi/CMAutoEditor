@@ -311,12 +311,14 @@ class OSMProcessor:
         self.sub_square_grid_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_sub_square_grid.json')
 
         total_bounds = self.gdf.geometry.total_bounds
-        self.effective_bbox_polygon = Polygon([
-            (total_bounds[0], total_bounds[1]),
-            (total_bounds[2], total_bounds[1]),
-            (total_bounds[2], total_bounds[3]),
-            (total_bounds[0], total_bounds[3])
-        ])
+        # self.effective_bbox_polygon = Polygon([
+        #     (total_bounds[0], total_bounds[1]),
+        #     (total_bounds[2], total_bounds[1]),
+        #     (total_bounds[2], total_bounds[3]),
+        #     (total_bounds[0], total_bounds[3])
+        # ])
+        grid_polygons = MultiPolygon(self.gdf.geometry.values)
+        self.effective_bbox_polygon = grid_polygons.minimum_rotated_rectangle
 
         self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
 
