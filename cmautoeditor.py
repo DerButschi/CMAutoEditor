@@ -300,22 +300,22 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y, init):
     for i in range(n_clicks_x):
         if n_x <= start_n_x:
             if not init:
-                pyautogui.click(POS_HORIZONTAL_PLUS2, interval=0.2)    
-            pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.2)
+                pyautogui.click(POS_HORIZONTAL_PLUS2, interval=0.05)    
+            pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.05)
         else:
-            pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.2)
+            pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.05)
             if not init:
-                pyautogui.click(POS_HORIZONTAL_MINUS2, interval=0.2)    
+                pyautogui.click(POS_HORIZONTAL_MINUS2, interval=0.05)    
     
     for i in range(n_clicks_y):
         if n_y <= start_n_y:
             if not init:
-                pyautogui.click(POS_VERTICAL_PLUS2, interval=0.2)    
-            pyautogui.click(POS_VERTICAL_MINUS, interval=0.2)
+                pyautogui.click(POS_VERTICAL_PLUS2, interval=0.05)    
+            pyautogui.click(POS_VERTICAL_MINUS, interval=0.05)
         else:
-            pyautogui.click(POS_VERTICAL_PLUS, interval=0.2)
+            pyautogui.click(POS_VERTICAL_PLUS, interval=0.05)
             if not init:
-                pyautogui.click(POS_VERTICAL_MINUS2, interval=0.2)    
+                pyautogui.click(POS_VERTICAL_MINUS2, interval=0.05)    
 
 def display_gui():
     # Construct window layout
