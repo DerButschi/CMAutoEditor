@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from shapely.geometry import Point, LineString, MultiPoint
 from shapely.affinity import translate, scale
+from shapely.ops import substring
 from profiles.general import fence_tiles, road_tiles, rail_tiles, stream_tiles
 import pandas
 import logging
@@ -41,7 +42,7 @@ road_direction_dict = {
 
 direction_dict = dict((v,k) for k,v in road_direction_dict.items())
 
-def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, source, target):
+def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, source, target, current_path):
     # calculates the cost to go from current node (node1) to neighbor node (node2)
     # Caculate diff in squares between node1 and node2, obtain "direction" for that
     diff_node1_node2 = (node2[0] - node1[0], node2[1] - node1[1])
@@ -88,12 +89,19 @@ def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, sou
     point_node1 = graph.nodes[node1]['point']
     point_node2 = graph.nodes[node2]['point']
 
-    # if all the checks above worked (i.e. there is a valid connection between both nodes),
-    # calculate the cost of this connection as the sum of distances of the nodes to the actual LineString
-    # This should minimize the distance of the path chosen to the LineString
-    cost1 = ref_line.interpolate(ref_line.project(point_node1)).distance(point_node1)
-    cost2 = ref_line.interpolate(ref_line.project(point_node2)).distance(point_node2)
-    return cost1 + cost2
+    # # if all the checks above worked (i.e. there is a valid connection between both nodes),
+    # # calculate the cost of this connection as the sum of distances of the nodes to the actual LineString
+    # # This should minimize the distance of the path chosen to the LineString
+    # cost1 = ref_line.interpolate(ref_line.project(point_node1)).distance(point_node1)
+    # cost2 = ref_line.interpolate(ref_line.project(point_node2)).distance(point_node2)
+    # return cost1 + cost2
+    ref_line_cut1 = substring(ref_line, 0, ref_line.project(point_node1))
+    ref_line_cut2 = substring(ref_line, 0, ref_line.project(point_node2))
+    
+    geom1 = point_node1 if len(current_path) == 1 else LineString(current_path)
+    geom2 = LineString(current_path + [node2])
+
+    return np.abs(geom2.hausdorff_distance(ref_line_cut2) - geom1.hausdorff_distance(ref_line_cut1))
 
 def _find_astar_path(start_node, end_node, grid_graph, ls, tiles, allow_vary_first_node=False):
     path_found = False
@@ -186,8 +194,8 @@ def search_path(osm_processor, config, name):
     path_dict = {}
     plt.figure()
     plt.axis('equal')
-    for g in grid_gdf.geometry.values:
-        plt.plot(g.exterior.xy[0], g.exterior.xy[1], '-k', linewidth=0.1)
+    # for g in grid_gdf.geometry.values:
+    #     plt.plot(g.exterior.xy[0], g.exterior.xy[1], '-k', linewidth=0.1)
 
     while len(edges_to_process) > 0:
         edge_idx = edges_to_process.pop()
@@ -212,24 +220,26 @@ def search_path(osm_processor, config, name):
             continue
         ls_valid = LineString(ls_points)
 
-        path = []
-        for i in range(1, len(ls_points)):
-            if len(path) == 0:
-                node1 = ls_points[i-1]
-            else:
-                node1 = path[-1]
-            node2 = ls_points[i]
-            allow_vary_first_node = False if i > 1 else True
-            path_segment = _find_astar_path(node1, node2, grid_graph, LineString([node1, node2]), tiles, allow_vary_first_node)
-            if path_segment is not None:
-                if len(path) == 0:
-                    path.extend(path_segment)
-                elif len(path_segment) > 1:
-                    path.extend(path_segment[1:])
-            else:
-                break
+        # path = []
+        # for i in range(1, len(ls_points)):
+        #     if len(path) == 0:
+        #         node1 = ls_points[i-1]
+        #     else:
+        #         node1 = path[-1]
+        #     node2 = ls_points[i]
+        #     allow_vary_first_node = False if i > 1 else True
+        #     path_segment = _find_astar_path(node1, node2, grid_graph, LineString([node1, node2]), tiles, allow_vary_first_node)
+        #     if path_segment is not None:
+        #         if len(path) == 0:
+        #             path.extend(path_segment)
+        #         elif len(path_segment) > 1:
+        #             path.extend(path_segment[1:])
+        #     else:
+        #         break
 
-        if len(path) == 0:
+        path = _find_astar_path(ls_points[0], ls_points[-1], grid_graph, LineString(ls_points), tiles, allow_vary_first_node=True)
+
+        if path is None or len(path) == 0:
             logger.debug('No path found from {} to {}.'.format(edge[0], edge[1]))
             plt.plot(ls.xy[0], ls.xy[1], '-ro')
             continue
@@ -289,12 +299,13 @@ def search_path(osm_processor, config, name):
             plt.plot(xy[0][0], xy[0][1], 'go')
             continue
         plt.plot(ls.xy[0], ls.xy[1], ':ko')
+        plt.text(ls.interpolate(0.5, normalized=True).x, ls.interpolate(0.5, normalized=True).y, str(edge_idx))
         # square_geom = [grid_gdf[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1])].geometry.values[0] for p in path]
         ls_xy = LineString(xy)
         plt.plot([xy[i][0] for i in range(len(xy))], [xy[i][1] for i in range(len(xy))], '-b')
         plt.plot(xy[0][0], xy[0][1], 'bo')
         plt.plot(xy[-1][0], xy[-1][1], 'bD')
-        plt.text(ls_xy.interpolate(0.5, normalized=True).x, ls_xy.interpolate(0.5, normalized=True).y, str(edge_idx))
+        plt.text(ls_xy.interpolate(0.5, normalized=True).x, ls_xy.interpolate(0.5, normalized=True).y, str(edge_idx), color='b')
 
         path_dict[edge_idx] = [path, edge_data['element_idx']]
 
@@ -632,7 +643,7 @@ def custom_weight_astar_path(G, source, target, heuristic=None, weight="weight",
         explored[curnode] = parent
 
         for neighbor, w in G[curnode].items():
-            cost = weight(G, curnode, neighbor, w, ref, tiles, source, target)
+            cost = weight(G, curnode, neighbor, w, ref, tiles, source, target, _get_current_path(curnode, parent, explored))
             if cost is None:
                 continue
             ncost = dist + cost
@@ -650,6 +661,16 @@ def custom_weight_astar_path(G, source, target, heuristic=None, weight="weight",
             push(queue, (ncost + h, next(c), neighbor, ncost, curnode))
 
     raise nx.NetworkXNoPath(f"Node {target} not reachable from {source}")
+
+def _get_current_path(curnode, parent, explored):
+    path = [curnode]
+    node = parent
+    while node is not None:
+        path.append(node)
+        node = explored[node]
+    path.reverse()
+    return path
+
 
 def get_matched_cm_type(config, element_entry):
     cm_types = config[element_entry['name']]['cm_types']
