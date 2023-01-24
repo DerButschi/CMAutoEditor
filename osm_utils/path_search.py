@@ -25,6 +25,7 @@ import logging
 from heapq import heappop, heappush
 from itertools import count
 from networkx.algorithms.shortest_paths.weighted import _weight_function
+import itertools
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -94,6 +95,46 @@ def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, sou
     cost2 = ref_line.interpolate(ref_line.project(point_node2)).distance(point_node2)
     return cost1 + cost2
 
+def _find_astar_path(start_node, end_node, grid_graph, ls, tiles, allow_vary_first_node=False):
+    path_found = False
+    connected_start_edges = []
+    connected_end_edges = []
+    if start_node in grid_graph.nodes and 'edges' in grid_graph.nodes[start_node]:
+        connected_start_edges = grid_graph.nodes[start_node]['edges']    
+    if end_node in grid_graph.nodes and 'edges' in grid_graph.nodes[end_node]:
+        connected_end_edges = grid_graph.nodes[end_node]['edges']    
+
+    idx_mods = list(itertools.product([0,1,-1], [0,1,-1], [0,1,-1], [0,1,-1]))
+    idx_mods = sorted(idx_mods, key=lambda x: sum(np.abs(x)))
+    for idx_mod in idx_mods:
+        mod_start_node = (start_node[0] + idx_mod[0], start_node[1] + idx_mod[1])
+        if not mod_start_node in grid_graph.nodes:
+            continue
+        mod_end_node = (end_node[0] + idx_mod[2], end_node[1] + idx_mod[3])
+        if not mod_end_node in grid_graph.nodes:
+            continue
+        if mod_start_node == mod_end_node:
+            continue
+        mod_start_edges = grid_graph.nodes[mod_start_node]['edges'] if 'edges' in grid_graph.nodes[mod_start_node] else []
+        mod_end_edges = grid_graph.nodes[mod_end_node]['edges'] if 'edges' in grid_graph.nodes[mod_end_node] else []
+        
+        if (idx_mod[0] != 0 or idx_mod[1] != 0) and ((len(connected_start_edges) > 0 and len(set(mod_start_edges).intersection(connected_start_edges)) == 0) or not allow_vary_first_node):
+            continue
+        if (idx_mod[2] != 0 or idx_mod[3] != 0) and len(connected_end_edges) > 0 and len(set(mod_end_edges).intersection(connected_end_edges)) == 0:
+            continue
+        try:
+            path = custom_weight_astar_path(grid_graph, mod_start_node, mod_end_node, weight=custom_weight, ref=ls, tiles=tiles)
+            if len(path) - 1 <= ls.length * 2:
+                path_found = True
+                break
+        except nx.NetworkXNoPath:
+            continue
+
+    if path_found:
+        return path
+    else:
+        return None
+
 def search_path(osm_processor, config, name):
     logger = logging.getLogger('osm2cm')
 
@@ -117,19 +158,37 @@ def search_path(osm_processor, config, name):
     xmax = grid_gdf.xidx.max()
     ymax = grid_gdf.yidx.max()
 
-    grid_graph = nx.grid_2d_graph(xmax+1, ymax+1)
-    if 'ul' in tiles.columns or 'ur' in tiles.columns or 'dl' in tiles.columns or 'dr' in tiles.columns:
+    if osm_processor.grid_graph is None:
+        grid_graph = nx.grid_2d_graph(xmax+1, ymax+1)
         diagonal_edges1 = [((x, y), (x+1, y+1)) for x in range(xmax) for y in range(ymax)]
         diagonal_edges2 = [((x+1, y), (x, y+1)) for x in range(xmax) for y in range(ymax)]
 
         grid_graph.add_edges_from(diagonal_edges1, weight=np.sqrt(2))
         grid_graph.add_edges_from(diagonal_edges2, weight=np.sqrt(2))
+        osm_processor.grid_graph = grid_graph
+    else:
+        grid_graph = osm_processor.grid_graph
 
     edge_list = list(line_graph.edges)
+    # sort edge list by position in tags
+    enhanced_edge_list = []
+    for edge in edge_list:
+        element_idx = line_graph.get_edge_data(*edge)['element_idx']
+        element_entry = osm_processor.matched_elements[element_idx]
+        matched_cm_type = get_matched_cm_type(config, element_entry)
+        cm_type_idx = config[name]['cm_types'].index(matched_cm_type)
+        enhanced_edge_list.append((edge, cm_type_idx))
+    
+    enhanced_edge_list = sorted(enhanced_edge_list, key=lambda x: -x[1])
+    edge_list = [entry[0] for entry in enhanced_edge_list]
+
     edges_to_process = list(range(len(edge_list)))
     path_dict = {}
     plt.figure()
     plt.axis('equal')
+    for g in grid_gdf.geometry.values:
+        plt.plot(g.exterior.xy[0], g.exterior.xy[1], '-k', linewidth=0.1)
+
     while len(edges_to_process) > 0:
         edge_idx = edges_to_process.pop()
         edge = edge_list[edge_idx]
@@ -141,23 +200,40 @@ def search_path(osm_processor, config, name):
 
         edge_data = line_graph.get_edge_data(*edge)
         ls = edge_data['ls']
-        ls_valid = []
+        ls_points = []
         for coord in ls.coords:
             p_grid_closest = _get_closest_node_in_gdf(grid_gdf, coord)
             # if p_grid_closest not in ls_valid:
             #     ls_valid.append(p_grid_closest)
-            if len(ls_valid) == 0 or (len(ls_valid) > 0 and p_grid_closest != ls_valid[-1]):
-                ls_valid.append(p_grid_closest)
+            if len(ls_points) == 0 or (len(ls_points) > 0 and p_grid_closest != ls_points[-1]):
+                ls_points.append(p_grid_closest)
         
-        if len(ls_valid) < 2:
+        if len(ls_points) < 2:
             continue
-        ls_valid = LineString(ls_valid)
+        ls_valid = LineString(ls_points)
 
-        try:
-            path = custom_weight_astar_path(grid_graph, closest_node_to_start, closest_node_to_end, weight=custom_weight, ref=ls_valid, tiles=tiles)
-        except nx.NetworkXNoPath:
+        path = []
+        for i in range(1, len(ls_points)):
+            if len(path) == 0:
+                node1 = ls_points[i-1]
+            else:
+                node1 = path[-1]
+            node2 = ls_points[i]
+            allow_vary_first_node = False if i > 1 else True
+            path_segment = _find_astar_path(node1, node2, grid_graph, LineString([node1, node2]), tiles, allow_vary_first_node)
+            if path_segment is not None:
+                if len(path) == 0:
+                    path.extend(path_segment)
+                elif len(path_segment) > 1:
+                    path.extend(path_segment[1:])
+            else:
+                break
+
+        if len(path) == 0:
             logger.debug('No path found from {} to {}.'.format(edge[0], edge[1]))
+            plt.plot(ls.xy[0], ls.xy[1], '-ro')
             continue
+
 
         # check if path crosses the path of another edge at node that is not the start or end node
         crosses = False
@@ -207,20 +283,30 @@ def search_path(osm_processor, config, name):
                 grid_graph.nodes[path[nidx]]['connections'].append(direction)
                 grid_graph.nodes[path[nidx]]['edges'].append(edge_idx)
 
-        plt.plot(ls.xy[0], ls.xy[1], '-ko')
-        square_geom = [grid_gdf[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1])].geometry.values[0] for p in path]
-        for g in square_geom:
-            plt.plot(g.exterior.xy[0], g.exterior.xy[1], '-b')
+        xy = [grid_gdf.loc[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1]), ['x', 'y']].values[0] for p in path]
+        if len(path) == 1:
+            plt.plot(ls.xy[0], ls.xy[1], ':go')
+            plt.plot(xy[0][0], xy[0][1], 'go')
+            continue
+        plt.plot(ls.xy[0], ls.xy[1], ':ko')
+        # square_geom = [grid_gdf[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1])].geometry.values[0] for p in path]
+        ls_xy = LineString(xy)
+        plt.plot([xy[i][0] for i in range(len(xy))], [xy[i][1] for i in range(len(xy))], '-b')
+        plt.plot(xy[0][0], xy[0][1], 'bo')
+        plt.plot(xy[-1][0], xy[-1][1], 'bD')
+        plt.text(ls_xy.interpolate(0.5, normalized=True).x, ls_xy.interpolate(0.5, normalized=True).y, str(edge_idx))
 
         path_dict[edge_idx] = [path, edge_data['element_idx']]
 
     plt.show()
-    
+
     for edge_idx in path_dict.keys():
         path = path_dict[edge_idx][0]
         edge_data = path_dict[edge_idx][1]
 
         square_graph.add_edge(path[0], path[-1], squares=path, element_idx=edge_data, from_node_to_node=[path[0], path[-1]])
+
+        grid_graph.remove_nodes_from(path)
 
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
@@ -564,3 +650,24 @@ def custom_weight_astar_path(G, source, target, heuristic=None, weight="weight",
             push(queue, (ncost + h, next(c), neighbor, ncost, curnode))
 
     raise nx.NetworkXNoPath(f"Node {target} not reachable from {source}")
+
+def get_matched_cm_type(config, element_entry):
+    cm_types = config[element_entry['name']]['cm_types']
+
+    if 'tags' in element_entry['element'].properties:
+        tags = element_entry['element'].properties['tags']
+    else: 
+        tags = element_entry['element'].properties
+
+    matched_cm_type = None
+    for cm_type in cm_types:
+        matched = False
+        for key, value in cm_type['tags']:
+            if key in tags and tags[key] == value:
+                matched = True
+        
+        if matched:
+            matched_cm_type = cm_type
+            break
+
+    return matched_cm_type
