@@ -231,8 +231,8 @@ if len(args.bounding_box) in [8,9]:
     grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf = get_all_grids(
         trf_lower_left[0], 
         trf_lower_left[1], 
-        trf_lower_left[0] + height_map.shape[0] + grid_cell_x, 
-        trf_lower_left[1] + height_map.shape[1] + grid_cell_y,
+        trf_lower_left[0] + height_map.shape[0], 
+        trf_lower_left[1] + height_map.shape[1],
         int(height_map.shape[0] / 8),
         int(height_map.shape[1] / 8),
         rotation_angle=rotation_angle,

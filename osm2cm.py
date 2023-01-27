@@ -22,7 +22,7 @@ import pyproj
 import pandas
 import numpy as np
 from shapely.geometry import LineString, Polygon, MultiPolygon, MultiLineString, Point, MultiPoint, shape
-from shapely.ops import split, snap, transform
+from shapely.ops import split, snap, transform, nearest_points
 import matplotlib.pyplot as plt
 # from skimage.draw import line, line_aa, line_nd, polygon
 import geopandas
@@ -319,7 +319,22 @@ class OSMProcessor:
         #     (total_bounds[0], total_bounds[3])
         # ])
         grid_polygons = MultiPolygon(self.gdf.geometry.values)
-        self.effective_bbox_polygon = grid_polygons.minimum_rotated_rectangle
+        self.effective_bbox_polygon = grid_polygons.buffer(0)
+
+        p_origin = self.gdf.loc[(self.gdf.xidx == self.gdf.xidx.min()) & (self.gdf.yidx == self.gdf.yidx.min()), ['x', 'y']].values[0]
+        p_xaxis_max = self.gdf.loc[(self.gdf.xidx == self.gdf.xidx.max()) & (self.gdf.yidx == self.gdf.yidx.min()), ['x', 'y']].values[0]
+        p_yaxis_max = self.gdf.loc[(self.gdf.xidx == self.gdf.xidx.min()) & (self.gdf.yidx == self.gdf.yidx.max()), ['x', 'y']].values[0]
+
+        idx_origin_point = Point(p_origin[0] - 4, p_origin[1] - 4)
+        idx_point_x_axis_max = Point(p_xaxis_max[0] + 4, p_xaxis_max[1] - 4)
+        idx_point_y_axis_max = Point(p_yaxis_max[0] - 4, p_yaxis_max[1] + 4)
+
+        eff_bbox_points = [Point(*coords) for coords in self.effective_bbox_polygon.exterior.coords]
+
+        origin_point = nearest_points(idx_origin_point, eff_bbox_points)
+        point_x_axis_max = nearest_points(idx_point_x_axis_max, eff_bbox_points)
+        point_y_axis_max = nearest_points(idx_point_y_axis_max, eff_bbox_points)
+
 
         self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
 

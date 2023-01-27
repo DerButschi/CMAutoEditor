@@ -29,7 +29,7 @@ from osm_utils.geometry import find_concave_vertices, find_chords, find_subdivid
 import itertools
 
 
-DRAW_DEBUG_PLOTS = False
+DRAW_DEBUG_PLOTS = True
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -786,6 +786,9 @@ def collect_building_outlines(osm_processor, config, element_entry):
 
     grid_gdf = osm_processor.sub_square_grid_gdf
     geometry = element_entry['geometry']
+    if not geometry.intersects(osm_processor.effective_bbox_polygon):
+        return
+
     min_rot_rectangle = geometry.minimum_rotated_rectangle
     if min_rot_rectangle.area == 0:
         logger.debug('Minimum rotated building outline (element idx {}) has 0 area.'.format(element_entry['idx']))
@@ -796,6 +799,13 @@ def collect_building_outlines(osm_processor, config, element_entry):
     llc_rectangle = _get_rectangle_coords_starting_at_lower_left_corner(scaled_min_rot_rectangle)
     llc_rectangle_coords = list(llc_rectangle.exterior.coords)
     base_angle = np.arctan2(llc_rectangle_coords[1][1] - llc_rectangle_coords[0][1], llc_rectangle_coords[1][0] - llc_rectangle_coords[0][0])
+
+    # The coordinate system may be rotated so calculate the angle of the x-axis and correct base angle accoringly
+    origin = grid_gdf.loc[(grid_gdf.xidx == grid_gdf.xidx.min()) & (grid_gdf.yidx == grid_gdf.yidx.min()), ['x', 'y']].values[0]
+    p_xaxis_max = grid_gdf.loc[(grid_gdf.xidx == grid_gdf.xidx.max()) & (grid_gdf.yidx == grid_gdf.yidx.min()), ['x', 'y']].values[0]
+    axis_angle = np.arctan2(p_xaxis_max[1] - origin[1], p_xaxis_max[0] - origin[0])
+
+    base_angle = (base_angle - axis_angle) % (2 * np.pi) - np.pi
 
     if np.abs(base_angle) < np.pi / 8:
         is_diagonal = False
@@ -817,8 +827,8 @@ def collect_building_outlines(osm_processor, config, element_entry):
         # idx = intersecting_diamonds[is_majority_square].index
         idx = intersecting_diamonds.index
         perimeter = diamonds.iloc[idx].geometry.unary_union
-        if perimeter is not None:
-            perimeter = perimeter.buffer(-2 * np.sqrt(2), cap_style=2, join_style=2, single_sided=True)
+        # if perimeter is not None:
+        #     perimeter = perimeter.buffer(-2 * np.sqrt(2), cap_style=2, join_style=2, single_sided=True)
     else:
         # squares = grid_gdf.geometry.buffer(2, cap_style=3)
         squares = grid_gdf.geometry
@@ -832,8 +842,8 @@ def collect_building_outlines(osm_processor, config, element_entry):
         idx = intersecting_squares.index
         perimeter = squares.iloc[idx].geometry.unary_union
 
-        if perimeter is not None:
-            perimeter = perimeter.buffer(-2, cap_style=2, join_style=2, single_sided=True)
+        # if perimeter is not None:
+        #     perimeter = perimeter.buffer(-2, cap_style=2, join_style=2, single_sided=True)
 
     if perimeter is None or perimeter.is_empty:
         # such a small building is probably just a shed or garage.
@@ -860,7 +870,7 @@ def collect_building_outlines(osm_processor, config, element_entry):
 
     
 
-    building_rectangles = rectangulate_polygon(perimeter, is_diagonal, geometry)
+    building_rectangles = rectangulate_polygon(perimeter, is_diagonal, geometry, axis_angle)
     if len(building_rectangles) == 0:
         logger.debug('Polygon rectangulation for building {} is yielded no results.'.format(element_entry['idx']))
 
@@ -1111,4 +1121,103 @@ def single_object_random(osm_processor, config, element_entry):
 
     osm_processor._append_to_df(sub_df)
 
-            
+
+from typing import List, Tuple
+
+# def branch_and_bound(polygon: List[List[int]], tiles: List[Tuple[int, int]]) -> Tuple[List[List[int]], int]:
+    #     In this example, the function branch_and_bound takes two arguments as input:
+
+    #     polygon: a 2D list representing the rectilinear polygon, where 1 represents a square that needs to be filled and 0 represents an empty square.
+    #     tiles: a list of tuples representing the set of distinct rectangular tiles, where each tuple contains the height and width of the tile.
+
+    # The function returns a tuple containing the filled polygon and the total number of tiles used to fill it.
+
+    # The dfs function is used to implement the recursive search of the algorithm. It takes three arguments as input:
+
+    #     polygon: the current state of the polygon, with some squares already filled with tiles.
+    #     tiles: the remaining distinct tiles that can be used to fill the remaining squares of the polygon.
+    #     total_cost: the total number of tiles used so far.
+
+    # The function recursively explores all possible ways of filling the remaining squares of the polygon with the remaining distinct tiles, and updates the best solution (stored in the best_solution variable) if it finds a better one.
+
+    # You can add a condition to check if the remaining number of tiles is
+
+
+# In this example, the function dfs takes two arguments as input:
+
+#     polygon: the current state of the polygon, with some squares already filled with tiles.
+#     total_cost: the total number of tiles used so far.
+
+# The function recursively explores all possible ways of filling the remaining squares of the polygon with tiles of all possible sizes (1x1, 1x2, 1x3, ..., max_size x max_size) and updates the best solution (stored in the best_solution variable) if it finds a better one.
+
+# Like before, it's worth noting that this problem is still NP-hard, meaning that there is no polynomial time algorithm that can solve it optimally for all inputs. So this solution too will be exponential in the worst case.
+def branch_and_bound(polygon: List[List[int]], max_size: int) -> Tuple[List[List[int]], int]:
+    best_solution = (polygon, float('inf'))
+    def dfs(polygon, total_cost):
+        nonlocal best_solution
+        if not polygon:
+            return
+        if total_cost >= best_solution[1]:
+            return
+        best_solution = (polygon, total_cost)
+        for i in range(len(polygon)):
+            for j in range(len(polygon[i])):
+                if polygon[i][j] == 1:
+                    for h in range(1, max_size+1):
+                        for w in range(1, max_size+1):
+                            if i+h-1 < len(polygon) and j+w-1 < len(polygon[i]):
+                                fit = True
+                                for k in range(i, i+h):
+                                    for l in range(j, j+w):
+                                        if polygon[k][l] == 0:
+                                            fit = False
+                                            break
+                                    if not fit:
+                                        break
+                                if fit:
+                                    new_polygon = [[polygon[k][l] if (k < i or k >= i+h or l < j or l >= j+w) else 0 for l in range(len(polygon[k]))] for k in range(len(polygon))]
+                                    dfs(new_polygon, total_cost + 1)
+    dfs(polygon, 0)
+    return best_solution
+
+
+### genetic algorithm
+def fitness(polygon: List[List[int]]) -> int:
+    """Evaluates the quality of a solution, i.e. the number of squares that are not covered by tiles."""
+    return sum(row.count(1) for row in polygon)
+
+def crossover(parent1: List[List[int]], parent2: List[List[int]]) -> Tuple[List[List[int]], List[List[int]]]:
+    """Combines the genetic information of two parents to produce two children."""
+    n, m = len(parent1), len(parent1[0])
+    c = random.randint(0, n)
+    d = random.randint(0, m)
+    child1 = [[parent1[i][j] if i < c or j < d else parent2[i][j] for j in range(m)] for i in range(n)]
+    child2 = [[parent2[i][j] if i < c or j < d else parent1[i][j] for j in range(m)] for i in range(n)]
+    return child1, child2
+
+def mutation(polygon: List[List[int]]) -> List[List[int]]:
+    """Introduces random changes in a solution to explore new regions of the search space."""
+    n, m = len(polygon), len(polygon[0])
+    i = random.randint(0, n-1)
+    j = random.randint(0, m-1)
+    polygon[i][j] = 0 if polygon[i][j] else 1
+    return polygon
+
+def genetic_algorithm(polygon: List[List[int]], max_size: int, population_size: int, n_generations: int) -> Tuple[List[List[int]], int]:
+    """Finds a near-optimal solution to the tile-filling problem using a genetic algorithm."""
+    # Initialize the population with random solutions
+    population = [[[random.randint(0,1) for _ in range(len(polygon[0]))] for _ in range(len(polygon))] for _ in range(population_size)]
+    best_solution = (polygon, float('inf'))
+    for _ in range(n_generations):
+        # Evaluate the fitness of each solution
+        fitnesses = [fitness(p) for p in population]
+        # Select the best solutions for crossover
+        parents = [population[i] for i in range(population_size) if fitnesses[i] < min(fitnesses)]
+        # Crossover
+        children = [crossover(parents[i], parents[i+1]) for i in range(0, len(parents), 2)]
+        children = [c for pair in children for c in pair]
+        # Mutate
+        children = [mutation(c) for c in children]
+        # Replace the worst solutions in
+
+       

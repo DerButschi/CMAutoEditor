@@ -6,7 +6,10 @@
             ["highway", "residential"],
             ["highway", "living_street"],
             ["highway", "unclassified"],
-            ["highway", "service"]
+            ["highway", "service"],
+            ["highway", "footway"],
+            ["highway", "path"],
+            ["highway", "track"]
         ],
         "exclude_tags": [
             ["service", "parking_aisle"],
@@ -14,13 +17,17 @@
         ],
         "cm_types": [
                 {"menu": "Roads", "cat1": "Paved 1", "tags": [["highway", "primary"], ["highway", "secondary"]]},
-                {"menu": "Roads", "cat1": "Paved 2", "tags": [["highway", "residential"], ["highway", "living_street"], ["highway", "unclassified"]]}
+                {"menu": "Roads", "cat1": "Paved 2", "tags": [["highway", "residential"], ["highway", "living_street"], ["highway", "unclassified"], ["highway", "service"]]},
+                {"menu": "Roads", "cat1": "Paved 2", "tags": [["tracktype", "grade1"]]},
+                {"menu": "Roads", "cat1": "Gravel Road", "tags": [["tracktype", "grade2"], ["tracktype", "grade3"]]},
+                {"menu": "Roads", "cat1": "Gravel Road", "tags": [["highway", "footway"], ["highway", "path"]]},
+                {"menu": "Roads", "cat1": "Dirt Road", "tags": [["highway", "track"], ["tracktype", "grade4"], ["tracktype", "grade5"]]}
         ],
         "process": [
             "road_tiles"
         ],
         "priority": 1,
-        "active": true
+        "active": false
     },
 
     "foot_path": {
@@ -82,7 +89,7 @@
             "type_from_tag"
         ],
         "priority": 1,
-        "active": true
+        "active": false
     },
 
     "stream": {
@@ -98,7 +105,7 @@
         "process": [
             "stream_tiles"
         ],
-        "priority": 1,
+        "priority": 2,
         "active": false
     },
 
@@ -643,7 +650,7 @@
             ["barrier", "hedge"]
         ],
         "cm_types": [
-                {"menu": "Walls/Fences", "cat1": "Wire Fence", "tags": [["barrier", "hedge"]]}
+                {"menu": "Walls/Fences", "cat1": "Hedge", "tags": [["barrier", "hedge"]]}
         ],
         "process": [
             "fence_tiles"
@@ -651,7 +658,6 @@
         "priority": 3,
         "active": false
     }
-
 
 
 }

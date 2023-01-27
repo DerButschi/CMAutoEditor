@@ -176,6 +176,8 @@ MENU_DICT = {
     'Object 7': pyautogui.Point(36, 701),
     'Object 8': pyautogui.Point(110, 701),
     'Object 9': pyautogui.Point(185, 701),
+    'Dirt Road': pyautogui.Point(110, 382),
+
 }
 
 GROUND_2_DICT = {
