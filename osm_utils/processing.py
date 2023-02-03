@@ -18,6 +18,7 @@ import networkx as nx
 from shapely.geometry import LineString, Point, MultiPoint, MultiLineString, Polygon, MultiPolygon
 from shapely.ops import split, substring, snap
 from shapely.affinity import scale, rotate, translate
+from shapely import unary_union
 import geopandas
 import pandas
 import logging
@@ -27,6 +28,7 @@ from .path_search import search_path, _get_closest_node_in_gdf, _remove_nodes_fr
 import matplotlib.pyplot as plt
 from osm_utils.geometry import find_concave_vertices, find_chords, find_subdividing_chords, rectangulate_polygon
 import itertools
+from copy import deepcopy
 
 
 DRAW_DEBUG_PLOTS = True
@@ -789,6 +791,9 @@ def collect_building_outlines(osm_processor, config, element_entry):
     if not geometry.intersects(osm_processor.effective_bbox_polygon):
         return
 
+    if 'raw_outlines' not in osm_processor.building_outlines:
+        osm_processor.building_outlines['raw_outlines'] = {}
+
     min_rot_rectangle = geometry.minimum_rotated_rectangle
     if min_rot_rectangle.area == 0:
         logger.debug('Minimum rotated building outline (element idx {}) has 0 area.'.format(element_entry['idx']))
@@ -807,103 +812,111 @@ def collect_building_outlines(osm_processor, config, element_entry):
 
     base_angle = (base_angle - axis_angle) % (2 * np.pi) - np.pi
 
-    if np.abs(base_angle) < np.pi / 8:
-        is_diagonal = False
-    else:
-        is_diagonal = True
+    osm_processor.building_outlines['raw_outlines'][element_entry['idx']] = (geometry, base_angle)
 
-    if is_diagonal:
-        diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
-        # diamonds = diag_grid_gdf.geometry.buffer(np.sqrt(8), cap_style=3).rotate(45)
-        # diamonds = diag_grid_gdf.geometry.buffer(4, resolution=1)
-        diamonds = diag_grid_gdf.geometry
-        idx = diamonds.sindex.query(geometry, predicate='intersects')
-        # idx = diag_grid_gdf.loc[idx].index
-        intersecting_diamonds = diamonds.iloc[idx].geometry
-        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < config[element_entry['name']]['priority']].sindex.query_bulk(intersecting_diamonds.geometry, predicate='overlaps')
-        intersecting_diamonds = intersecting_diamonds.drop(intersecting_diamonds.iloc[oidx[0]].index)
-
-        # is_majority_square = intersecting_diamonds.intersection(geometry).area > 12.8
-        # idx = intersecting_diamonds[is_majority_square].index
-        idx = intersecting_diamonds.index
-        perimeter = diamonds.iloc[idx].geometry.unary_union
-        # if perimeter is not None:
-        #     perimeter = perimeter.buffer(-2 * np.sqrt(2), cap_style=2, join_style=2, single_sided=True)
-    else:
-        # squares = grid_gdf.geometry.buffer(2, cap_style=3)
-        squares = grid_gdf.geometry
-        idx = squares.sindex.query(geometry, predicate='intersects')
-        intersecting_squares = intersecting_squares = squares.iloc[idx]
-        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < config[element_entry['name']]['priority']].sindex.query_bulk(intersecting_squares.geometry, predicate='overlaps')
-        intersecting_squares = intersecting_squares.drop(intersecting_squares.iloc[oidx[0]].index)
-        # 40 % of 16 m²
-        # is_majority_square = intersecting_squares.intersection(geometry).area > 6.4
-        # idx = intersecting_squares[is_majority_square].index
-        idx = intersecting_squares.index
-        perimeter = squares.iloc[idx].geometry.unary_union
-
-        # if perimeter is not None:
-        #     perimeter = perimeter.buffer(-2, cap_style=2, join_style=2, single_sided=True)
-
-    if perimeter is None or perimeter.is_empty:
-        # such a small building is probably just a shed or garage.
-        logger.debug('Perimeter of building {} is None or empty.'.format(element_entry['idx']))
-        return
-
-    if type(perimeter) == MultiPolygon:
-        # TODO: Handle MultiPolygons!
-        logger.debug('Perimeter of building {} is a multipolygon.'.format(element_entry['idx']))
-        return
-
-    # plt.figure()
-    # plt.axis('equal')
-    # for p in osm_processor.occupancy_gdf.geometry:
-    #     plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-ko') 
-    # if is_diagonal:   
-    #     for p in intersecting_diamonds.geometry:
-    #         plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-bo')
+    # if np.abs(base_angle) < np.pi / 8:
+    #     is_diagonal = False
     # else:
-    #     for p in intersecting_squares.geometry:
-    #         plt.plot(p.exterior.xy[0], p.exterior.xy[1], '-bo')
-    # plt.plot(perimeter.exterior.xy[0], perimeter.exterior.xy[1],'-o')
-    # plt.show()
+    #     is_diagonal = True
 
-    
+def process_building_outlines(osm_processor, config, name):
+    logger = logging.getLogger('osm2cm')
+    raw_outlines = osm_processor.building_outlines['raw_outlines']
 
-    building_rectangles = rectangulate_polygon(perimeter, is_diagonal, geometry, axis_angle)
-    if len(building_rectangles) == 0:
-        logger.debug('Polygon rectangulation for building {} is yielded no results.'.format(element_entry['idx']))
+    diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
+    grid_gdf = osm_processor.sub_square_grid_gdf
 
-    if is_diagonal:
-        matching_gdf = osm_processor.sub_square_grid_diagonal_gdf
-    else:
-        matching_gdf = grid_gdf
-    
-    stories = None
-    # if "building:levels" in element_entry["element"]["properties"]:
-    #     stories = element_entry["element"]["properties"]["building:levels"] + 1  # OSM bulding level does not contain attic floor
+    diagonal_bounds = [diag_grid_gdf.xidx.min(), diag_grid_gdf.yidx.min(), diag_grid_gdf.xidx.max(), diag_grid_gdf.yidx.max()]
+    square_bounds = [grid_gdf.xidx.min(), grid_gdf.yidx.min(), grid_gdf.xidx.max(), grid_gdf.yidx.max()]
 
-    # plt.figure()
-    for rectangle in building_rectangles:
-        llc_rectangle = _get_rectangle_coords_starting_at_lower_left_corner(rectangle)
+    plt.figure()
+    plt.axis('equal')
+    for element_idx, outline_entry in raw_outlines.items():
+        plt.plot(*outline_entry[0].exterior.xy, '-m')
+        matched_tiles_candidates = []
+        for is_diagonal in [True, False]:
+            squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal)
 
-        # index_llc, llc_idx, llc_xy, building = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
-        matched_buildings = _match_building(llc_rectangle, matching_gdf, is_diagonal, stories)
+            if is_diagonal:
+                matching_gdf = diag_grid_gdf
+                bounds = diagonal_bounds
+            else:
+                matching_gdf = grid_gdf
+                bounds = square_bounds
+
+            matched_square_rowcols = np.array([_idx2rowcol(d[0], d[1], bounds, is_diagonal) for d in squares.loc[:,['xidx', 'yidx']].values])
+            match_polygon = np.zeros(
+                (
+                    int(matched_square_rowcols[:,0].max() - matched_square_rowcols[:,0].min() + 1), 
+                    int(matched_square_rowcols[:,1].max() - matched_square_rowcols[:,1].min() + 1), 
+                )
+            )
+            for rowcol in matched_square_rowcols:
+                match_polygon[int(rowcol[0] - matched_square_rowcols[:,0].min()), int(rowcol[1] - matched_square_rowcols[:,1].min())] = 1
+
+            tiles = list(set([(t[0], t[1]) for t in buildings[buildings.is_diagonal].loc[:,['width', 'height']].values]))
+            solution = branch_and_bound(match_polygon, tiles)
+
+            if len(solution[2]) == 0:
+                continue
+
+            if is_diagonal:
+                area = sum([sol[0][0] * sol[0][1] * 2 * 0.25 * 64 for sol in solution[2]])
+            else:
+                area = sum([sol[0][0] * sol[0][1] * 0.25 * 64 for sol in solution[2]])
+
+            matched_tiles_solution = []
+            occupied_squares = []
+            for sol in solution[2]:
+                matched_tiles_solution.append((sol[0], _rowcol2idx(sol[1] + matched_square_rowcols[:,0].min(), sol[2] + matched_square_rowcols[:,1].min(), bounds, is_diagonal)))
+                for s in sol[3]:
+                    occupied_idx_square = (_rowcol2idx(s[0] + matched_square_rowcols[:,0].min(), s[1] + matched_square_rowcols[:,1].min(), bounds, is_diagonal))
+                    condition = (matching_gdf.xidx == occupied_idx_square[0]) & (matching_gdf.yidx == occupied_idx_square[1])
+                    if not condition.any():
+                        continue
+                    occupied_square = matching_gdf[condition].geometry.values[0]
+                    occupied_squares.append(occupied_square)
+
+            intersection_over_union = unary_union(occupied_squares).intersection(outline_entry[0]).area / unary_union(occupied_squares + [outline_entry[0]]).area
+
+            matched_tiles_candidates.append((is_diagonal, matched_tiles_solution, intersection_over_union, squares, occupied_squares))
+
+        matched_tiles_candidates = sorted(matched_tiles_candidates, key=lambda x: -x[2])
+
+        matched_tiles = matched_tiles_candidates[0]
+        
+        for g in matched_tiles[3].geometry:
+            plt.plot(*g.exterior.xy, '-k')
+        
+        is_diagonal = matched_tiles[0]
+
+        if len(matched_tiles) > 1:
+            condition = (buildings.menu == 'Modular Buildings') & (buildings.is_diagonal)
+        else:
+            condition = buildings.is_diagonal
+
+        matched_buildings = []
+        for mt in matched_tiles[1]:
+            building_candidates = buildings[condition & (buildings.width == mt[0][0]) & (buildings.height == mt[0][1])]
+            building = building_candidates.sample(n=1, weights=building_candidates.weight)
+            matched_buildings.append(building)
+
+        ############
+        if is_diagonal:
+            matching_gdf = osm_processor.sub_square_grid_diagonal_gdf
+        else:
+            matching_gdf = grid_gdf
+
+        for square in matched_tiles[4]:
+            occupancy_entry = geopandas.GeoDataFrame({'geometry': [square], 'priority': [config[name]['priority']], 'name': name})
+            osm_processor.occupancy_gdf = pandas.concat((osm_processor.occupancy_gdf, occupancy_entry), ignore_index=True)
+            plt.plot(*square.exterior.xy, '-r')
 
         if len(matched_buildings) == 0:
             logger.debug('No matching CM building was found for building {}. Area: {}'.format(element_entry['idx'], geometry.area))
 
-        for llc_idx, building in matched_buildings:
-            building_polygon = Polygon([
-                (llc_idx[0], llc_idx[1]),
-                (llc_idx[0] + building.x1.values[0], llc_idx[1] + building.y1.values[0]),
-                (llc_idx[0] + building.x2.values[0], llc_idx[1] + building.y2.values[0]),
-                (llc_idx[0] + building.x2.values[0] - building.x1.values[0], llc_idx[1] + building.y2.values[0] - building.y1.values[0]),
-                (llc_idx[0], llc_idx[1])
-            ])
-
-
-            # plt.plot(building_polygon.exterior.xy[0], building_polygon.exterior.xy[1], '-o')
+        for bidx, building in enumerate(matched_buildings):
+            llc_idx = matched_tiles[1][bidx][1]
 
             condition = (matching_gdf.xidx == llc_idx[0]) & (matching_gdf.yidx == llc_idx[1])
 
@@ -915,26 +928,31 @@ def collect_building_outlines(osm_processor, config, element_entry):
             sub_df['cat1'] = cat1
             sub_df['direction'] = 'Direction {}'.format(direction + 1)
             sub_df['cat2'] = 'Building {}'.format(row * 4 + col + 1)
-            sub_df['priority'] = config[element_entry['name']]['priority']
+            sub_df['priority'] = config[name]['priority']
             
             osm_processor._append_to_df(sub_df)
+    
+    plt.show()
 
-            building_polygon = scale(building_polygon, 8, 8, origin=(llc_idx[0], llc_idx[1]))
-            building_polygon = translate(building_polygon, llc_idx[0] * 7 + osm_processor.gdf.x.min(), llc_idx[1] * 7 + osm_processor.gdf.y.min())
-
-            # origin = translate(Point((llc_idx[0] * 8, llc_idx[1] * 8)), osm_processor.gdf.x.min(), osm_processor.gdf.y.min())
-            # building_polygon = translate(scale(building_polygon, 8, 8, origin=(llc_idx[0], llc_idx[1])), origin.x, origin.y)
-
-
-            occupancy_entry = geopandas.GeoDataFrame({'geometry': [building_polygon], 'priority': [config[element_entry['name']]['priority']], 'name': element_entry['name']})
-
-
-            osm_processor.occupancy_gdf = pandas.concat((osm_processor.occupancy_gdf, occupancy_entry), ignore_index=True)
-            # osm_processor.occupancy_gdf.plot()
-            plt.plot(building_polygon.exterior.xy[0], building_polygon.exterior.xy[1], '-ko')
-    # plt.show()
-    a = 1
-
+def _get_matched_squares(osm_processor, priority, geometry, diagonal):
+    if diagonal:
+        diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
+        diamonds = diag_grid_gdf.geometry
+        idx = diamonds.sindex.query(geometry, predicate='intersects')
+        intersecting_diamonds = diamonds.iloc[idx].geometry
+        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < priority].sindex.query_bulk(intersecting_diamonds.geometry, predicate='overlaps')
+        intersecting_diamonds = intersecting_diamonds.drop(intersecting_diamonds.iloc[oidx[0]].index)
+        idx = intersecting_diamonds.index
+        return diag_grid_gdf.iloc[idx]
+    else:
+        square_grid_gdf = osm_processor.sub_square_grid_gdf
+        squares = square_grid_gdf.geometry
+        idx = squares.sindex.query(geometry, predicate='intersects')
+        intersecting_squares = intersecting_squares = squares.iloc[idx]
+        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < priority].sindex.query_bulk(intersecting_squares.geometry, predicate='overlaps')
+        intersecting_squares = intersecting_squares.drop(intersecting_squares.iloc[oidx[0]].index)
+        idx = intersecting_squares.index
+        return square_grid_gdf.iloc[idx]
 
 def _get_rectangle_coords_starting_at_lower_left_corner(rectangle):
     # make counter-clock wise (though should alread be)
@@ -1124,100 +1142,47 @@ def single_object_random(osm_processor, config, element_entry):
 
 from typing import List, Tuple
 
-# def branch_and_bound(polygon: List[List[int]], tiles: List[Tuple[int, int]]) -> Tuple[List[List[int]], int]:
-    #     In this example, the function branch_and_bound takes two arguments as input:
-
-    #     polygon: a 2D list representing the rectilinear polygon, where 1 represents a square that needs to be filled and 0 represents an empty square.
-    #     tiles: a list of tuples representing the set of distinct rectangular tiles, where each tuple contains the height and width of the tile.
-
-    # The function returns a tuple containing the filled polygon and the total number of tiles used to fill it.
-
-    # The dfs function is used to implement the recursive search of the algorithm. It takes three arguments as input:
-
-    #     polygon: the current state of the polygon, with some squares already filled with tiles.
-    #     tiles: the remaining distinct tiles that can be used to fill the remaining squares of the polygon.
-    #     total_cost: the total number of tiles used so far.
-
-    # The function recursively explores all possible ways of filling the remaining squares of the polygon with the remaining distinct tiles, and updates the best solution (stored in the best_solution variable) if it finds a better one.
-
-    # You can add a condition to check if the remaining number of tiles is
-
-
-# In this example, the function dfs takes two arguments as input:
-
-#     polygon: the current state of the polygon, with some squares already filled with tiles.
-#     total_cost: the total number of tiles used so far.
-
-# The function recursively explores all possible ways of filling the remaining squares of the polygon with tiles of all possible sizes (1x1, 1x2, 1x3, ..., max_size x max_size) and updates the best solution (stored in the best_solution variable) if it finds a better one.
-
-# Like before, it's worth noting that this problem is still NP-hard, meaning that there is no polynomial time algorithm that can solve it optimally for all inputs. So this solution too will be exponential in the worst case.
-def branch_and_bound(polygon: List[List[int]], max_size: int) -> Tuple[List[List[int]], int]:
+def branch_and_bound(polygon: np.array, tiles: List) -> Tuple[List[List[int]], int]:
     best_solution = (polygon, float('inf'))
-    def dfs(polygon, total_cost):
+    def dfs(polygon, total_cost, used_tiles):
         nonlocal best_solution
-        if not polygon:
-            return
         if total_cost >= best_solution[1]:
             return
-        best_solution = (polygon, total_cost)
-        for i in range(len(polygon)):
-            for j in range(len(polygon[i])):
-                if polygon[i][j] == 1:
-                    for h in range(1, max_size+1):
-                        for w in range(1, max_size+1):
-                            if i+h-1 < len(polygon) and j+w-1 < len(polygon[i]):
-                                fit = True
-                                for k in range(i, i+h):
-                                    for l in range(j, j+w):
-                                        if polygon[k][l] == 0:
-                                            fit = False
-                                            break
-                                    if not fit:
-                                        break
-                                if fit:
-                                    new_polygon = [[polygon[k][l] if (k < i or k >= i+h or l < j or l >= j+w) else 0 for l in range(len(polygon[k]))] for k in range(len(polygon))]
-                                    dfs(new_polygon, total_cost + 1)
-    dfs(polygon, 0)
+        best_solution = (polygon, total_cost, used_tiles)
+        for i in range(polygon.shape[0]):
+            for j in range(polygon.shape[1]):
+                if polygon[i, j] == 1:
+                    for tile in tiles:
+                        if i + tile[0]-1 < polygon.shape[0] and j + tile[1]-1 < polygon.shape[1] and not (polygon[i:i + tile[0], j:j + tile[1]] == 0).any():
+                            polygon = np.copy(polygon)
+                            polygon[i:i + tile[0], j:j + tile[1]] = 0
+                            used_tiles = deepcopy(used_tiles)
+                            used_tiles.append((tile, i, j, [(ii, jj) for ii in range(i, i + tile[0]) for jj in range(j, j + tile[1])]))
+                            dfs(polygon, len(used_tiles) + 1 + len(np.where(polygon == 1)[0]), used_tiles)
+
+    dfs(polygon, len(np.where(polygon == 1)[0]), [])
     return best_solution
 
+def _idx2rowcol(xidx, yidx, bounds, is_diagonal):
+    xmin, ymin, xmax, ymax = bounds
+    if is_diagonal:
+        origin = (np.ceil(ymax - ymin) / 2 + ymin, -np.ceil(ymax - ymin) / 2 + ymin)
+        row = yidx - origin[0] + xidx - origin[1]
+        col = -(yidx - origin[0] - xidx + origin[1])
+    else:
+        row = (yidx - ymin) * 2
+        col = (xidx - xmin) * 2
+    
+    return row, col
 
-### genetic algorithm
-def fitness(polygon: List[List[int]]) -> int:
-    """Evaluates the quality of a solution, i.e. the number of squares that are not covered by tiles."""
-    return sum(row.count(1) for row in polygon)
+def _rowcol2idx(row, col, bounds, is_diagonal):
+    xmin, ymin, xmax, ymax = bounds
+    if is_diagonal:
+        origin = (np.ceil(ymax - ymin) / 2 + ymin, -np.ceil(ymax - ymin) / 2 + ymin)
+        xidx = (row + col) / 2 + origin[1]
+        yidx = (row - col) / 2 + origin[0]
+    else:
+        yidx = row / 2 + ymin
+        xidx = col / 2 + xmin
 
-def crossover(parent1: List[List[int]], parent2: List[List[int]]) -> Tuple[List[List[int]], List[List[int]]]:
-    """Combines the genetic information of two parents to produce two children."""
-    n, m = len(parent1), len(parent1[0])
-    c = random.randint(0, n)
-    d = random.randint(0, m)
-    child1 = [[parent1[i][j] if i < c or j < d else parent2[i][j] for j in range(m)] for i in range(n)]
-    child2 = [[parent2[i][j] if i < c or j < d else parent1[i][j] for j in range(m)] for i in range(n)]
-    return child1, child2
-
-def mutation(polygon: List[List[int]]) -> List[List[int]]:
-    """Introduces random changes in a solution to explore new regions of the search space."""
-    n, m = len(polygon), len(polygon[0])
-    i = random.randint(0, n-1)
-    j = random.randint(0, m-1)
-    polygon[i][j] = 0 if polygon[i][j] else 1
-    return polygon
-
-def genetic_algorithm(polygon: List[List[int]], max_size: int, population_size: int, n_generations: int) -> Tuple[List[List[int]], int]:
-    """Finds a near-optimal solution to the tile-filling problem using a genetic algorithm."""
-    # Initialize the population with random solutions
-    population = [[[random.randint(0,1) for _ in range(len(polygon[0]))] for _ in range(len(polygon))] for _ in range(population_size)]
-    best_solution = (polygon, float('inf'))
-    for _ in range(n_generations):
-        # Evaluate the fitness of each solution
-        fitnesses = [fitness(p) for p in population]
-        # Select the best solutions for crossover
-        parents = [population[i] for i in range(population_size) if fitnesses[i] < min(fitnesses)]
-        # Crossover
-        children = [crossover(parents[i], parents[i+1]) for i in range(0, len(parents), 2)]
-        children = [c for pair in children for c in pair]
-        # Mutate
-        children = [mutation(c) for c in children]
-        # Replace the worst solutions in
-
-       
+    return xidx, yidx

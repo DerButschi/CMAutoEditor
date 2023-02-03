@@ -124,7 +124,7 @@ class OSMProcessor:
         self.df = None
         self.network_graphs = {}
         self.grids = {}
-        self.building_outlines = None
+        self.building_outlines = {}
         self.grid_graph = None
         self.occupancy_gdf = geopandas.GeoDataFrame(columns=['geometry', 'priority', 'name'])
 
@@ -161,6 +161,7 @@ class OSMProcessor:
             ],
             "type_from_building_outline": [
                 (0, "collect_building_outlines", "by_element"),
+                (1, "process_building_outlines", "by_config_name")
                 # (1, "assing_buildings_to_outlines", "by_config_name")
             ]
         }
@@ -307,9 +308,12 @@ class OSMProcessor:
 
     def _load_grid(self):
         file_name_base = self.grid_file.split('_')[0]
+        import datetime
+        dt = datetime.datetime.now()
         self.gdf = geopandas.GeoDataFrame.from_file(self.grid_file)
-        self.sub_square_grid_diagonal_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_diagonal_grid.json')
-        self.sub_square_grid_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_sub_square_grid.json')
+        self.sub_square_grid_diagonal_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_diagonal_grid.shp')
+        self.sub_square_grid_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_sub_square_grid.shp')
+        print((datetime.datetime.now() - dt).total_seconds())
 
         total_bounds = self.gdf.geometry.total_bounds
         # self.effective_bbox_polygon = Polygon([
@@ -655,7 +659,7 @@ if __name__ == '__main__':
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
     # osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
     # osm_processor = OSMProcessor(config=config, bbox=[361607.305,5625049.525, 365540.291, 5627329.787])
-    osm_processor = OSMProcessor(config=config, grid_file='schlingenbach_grid.json')
+    osm_processor = OSMProcessor(config=config, grid_file='schlingenbach_grid.shp')
 
     # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
     # osm_processor = OSMProcessor(config=config)
