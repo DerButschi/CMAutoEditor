@@ -79,30 +79,25 @@ def get_diagonal_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation
     cell_size_y = (ymax - ymin) / n_squares_y
     for xidx, x in enumerate(np.linspace(xmin + cell_size_x / 2, xmax - cell_size_x / 2, n_squares_x)):
         for yidx, y in enumerate(np.linspace(ymin + cell_size_y / 2, ymax - cell_size_y / 2, n_squares_y)):
-            xarr.append(x)
+            xarr.append(x - cell_size_x / 2)
             yarr.append(y)
-            xiarr.append(xidx)
+            xiarr.append(xidx - 0.5)
             yiarr.append(yidx)
-        
-    grid_geometry1 = geopandas.points_from_xy(xarr, yarr)
-    grid_geometry1_gdf = _create_geodataframe(xarr, yarr, xiarr, yiarr, grid_geometry1)
-
-    xarr = []
-    yarr = []
-    xiarr = []
-    yiarr = []
-    for xidx, x in enumerate(np.linspace(xmin, xmax, n_squares_x + 1)):
-        for yidx, y in enumerate(np.linspace(ymin, ymax, n_squares_y + 1)):
-            xarr.append(x)
+            xarr.append(x + cell_size_x / 2)
             yarr.append(y)
-            xiarr.append(xidx-0.5)
-            yiarr.append(yidx-0.5)
-
-    grid_geometry2 = geopandas.points_from_xy(xarr, yarr)
-    grid_geometry2_gdf = _create_geodataframe(xarr, yarr, xiarr, yiarr, grid_geometry2)
-
-    diagonal_gdf = pandas.concat((grid_geometry1_gdf, grid_geometry2_gdf), ignore_index=True)
-    diagonal_gdf.geometry = diagonal_gdf.geometry.buffer(4, resolution=1)
+            xiarr.append(xidx + 0.5)
+            yiarr.append(yidx)
+            xarr.append(x)
+            yarr.append(y - cell_size_y / 2)
+            xiarr.append(xidx)
+            yiarr.append(yidx - 0.5)
+            xarr.append(x)
+            yarr.append(y + cell_size_y / 2)
+            xiarr.append(xidx)
+            yiarr.append(yidx + 0.5)
+        
+    grid_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, resolution=1)
+    diagonal_gdf = _create_geodataframe(xarr, yarr, xiarr, yiarr, grid_geometry)
 
     if rotation_angle is not None:
         diagonal_gdf = _rotate_grid(diagonal_gdf, rotation_angle, rotation_center)
@@ -114,12 +109,26 @@ def get_sub_square_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotati
     yarr = []
     xiarr = []
     yiarr = []
-    for xidx, x in enumerate(np.linspace(xmin, xmax, n_squares_x * 2 + 1)):
-        for yidx, y in enumerate(np.linspace(ymin, ymax, n_squares_y * 2 + 1)):
-            xarr.append(x)
-            yarr.append(y)
-            xiarr.append(xidx / 2 - 0.5)
-            yiarr.append(yidx / 2 - 0.5)
+    cell_size_x = (xmax - xmin) / n_squares_x
+    cell_size_y = (ymax - ymin) / n_squares_y
+    for xidx, x in enumerate(np.linspace(xmin + cell_size_x / 2, xmax - cell_size_x / 2, n_squares_x)):
+        for yidx, y in enumerate(np.linspace(ymin + cell_size_y / 2, ymax - cell_size_y / 2, n_squares_y)):
+            xarr.append(x - 2)
+            yarr.append(y - 2)
+            xiarr.append(xidx - 0.25)
+            yiarr.append(yidx - 0.25)
+            xarr.append(x - 2)
+            yarr.append(y + 2)
+            xiarr.append(xidx - 0.25)
+            yiarr.append(yidx + 0.25)
+            xarr.append(x + 2)
+            yarr.append(y - 2)
+            xiarr.append(xidx + 0.25)
+            yiarr.append(yidx - 0.25)
+            xarr.append(x + 2)
+            yarr.append(y + 2)
+            xiarr.append(xidx + 0.25)
+            yiarr.append(yidx + 0.25)
 
     geometry = geopandas.points_from_xy(xarr, yarr).buffer(2, cap_style=3)
 
