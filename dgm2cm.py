@@ -239,9 +239,9 @@ if len(args.bounding_box) in [8,9]:
         rotation_center=trf_lower_left
     )
 
-    grid_gdf.to_file(args.output_name + '_grid.json', driver='GeoJSON', crs=f'epsg:{args.input_crs}')
-    diagonal_grid_gdf.to_file(args.output_name + '_diagonal_grid.json', driver='GeoJSON', crs=f'epsg:{args.input_crs}')
-    sub_square_grid_gdf.to_file(args.output_name + '_sub_square_grid.json', driver='GeoJSON', crs=f'epsg:{args.input_crs}')
+    grid_gdf.to_file(args.output_name + '_grid.shp', driver='ESRI Shapefile', crs=f'epsg:{args.input_crs}')
+    diagonal_grid_gdf.to_file(args.output_name + '_diagonal_grid.shp', driver='ESRI Shapefile', crs=f'epsg:{args.input_crs}')
+    sub_square_grid_gdf.to_file(args.output_name + '_sub_square_grid.shp', driver='ESRI Shapefile', crs=f'epsg:{args.input_crs}')
 
 height_map_reduced = skimage.transform.rescale(height_map, (grid_cell_x / 8, grid_cell_y / 8), cval=1, preserve_range=True, clip=True, anti_aliasing=True)
 
