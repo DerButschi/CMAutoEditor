@@ -24,10 +24,10 @@ import PySimpleGUI as sg
 import sys
 
 # constants:
-UPPER_LEFT_SQUARE = pyautogui.Point(233,52)
+UPPER_LEFT_SQUARE = pyautogui.Point(233,50)
 # UPPER_RIGHT_SQUARE = pyautogui.Point(1882,52)
 # LOWER_LEFT_SQUARE = pyautogui.Point(234,996)
-LOWER_RIGHT_SQUARE = pyautogui.Point(633,452)
+LOWER_RIGHT_SQUARE = pyautogui.Point(633,451)
 
 SQUARE_SIZE_X = 16
 SQUARE_SIZE_Y = 16
