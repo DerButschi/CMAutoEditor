@@ -950,6 +950,8 @@ def process_building_outlines(osm_processor, config, name):
             condition = (matching_gdf.xidx == llc_idx[0]) & (matching_gdf.yidx == llc_idx[1])
 
             sub_df = osm_processor._get_sub_df(condition, matching_gdf)
+            sub_df['xidx'] -= 0.25
+            sub_df['yidx'] += 0.25
 
             direction, row, col, menu, cat1 = building[['direction', 'row', 'col', 'menu', 'cat1']].values[0]
 
