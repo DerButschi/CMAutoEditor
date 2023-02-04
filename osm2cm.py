@@ -13,103 +13,27 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-from typing import Dict, List, Optional
-# from unicodedata import category
-# from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
-# from OSMPythonTools.api import Api
-from matplotlib.font_manager import json_load
-import pyproj
-import pandas
-import numpy as np
-from shapely.geometry import LineString, Polygon, MultiPolygon, MultiLineString, Point, MultiPoint, shape
-from shapely.ops import split, snap, transform, nearest_points
-import matplotlib.pyplot as plt
-# from skimage.draw import line, line_aa, line_nd, polygon
-import geopandas
-import re
-import networkx as nx
-from sklearn import neighbors
-# from profile.general import road_tiles
 import json
-import geojson
-from tqdm import tqdm
-import osm_utils.processing
 import logging
-import codecs
-import osm2geojson
+from typing import Dict, List, Optional
 
+import geojson
+import geopandas
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+import pandas
+import pyproj
+from matplotlib.font_manager import json_load
+from shapely.geometry import (LineString, MultiLineString, MultiPoint,
+                              MultiPolygon, Point, Polygon, shape)
+from shapely.ops import nearest_points, snap, split, transform
+from tqdm import tqdm
+
+import osm_utils.processing
+from osm_utils.grid import get_all_grids
 
 config = json.load(open('default_osm_config.json', 'r'))
-
-
-
-
-
-
-
-                
-
-
-# overpass = Overpass()
-# api = Api()
-# # query = overpassQueryBuilder(bbox=[7.30153, 50.93133, 7.30745, 50.93588], elementType='way')
-
-# # bbox = [50.93133, 7.30153, 50.93588, 7.30745] # lat_min, lon_min, lat_max, lon_max
-# projection = Proj(proj='utm', zone=32, ellps='WGS84')
-
-# # bbox_utm = [379964.0, 5643796.0, 380804.0-8, 5644444.0-8] # overath
-# bbox_utm = [379877.0, 5643109.0, 381461.0, 5645022.0] # overath extended
-# # bbox_utm = [550894, 5586630, 553442, 5589362] # doellbach
-# lon_min, lat_min = projection(bbox_utm[0], bbox_utm[1], inverse=True)
-# lon_max, lat_max = projection(bbox_utm[2], bbox_utm[3], inverse=True)
-
-# bbox = [lat_min, lon_min, lat_max, lon_max]
-
-
-# query = overpassQueryBuilder(bbox=bbox, elementType=['way', 'relation'], includeGeometry=True, out='body')
-
-# result = overpass.query(query)
-
-
-# n_bins_x = np.floor((bbox_utm[2] - bbox_utm[0]) / 8).astype(int)
-# n_bins_y = np.floor((bbox_utm[3] - bbox_utm[1]) / 8).astype(int)
-
-# bins_x = np.linspace(bbox_utm[0], bbox_utm[0] + n_bins_x * 8, n_bins_x + 1)
-# bins_y = np.linspace(bbox_utm[1], bbox_utm[1] + n_bins_y * 8, n_bins_y + 1)
-
-# xarr = []
-# yarr = []
-# xiarr = []
-# yiarr = []
-# for xidx, x in enumerate(np.linspace(bbox_utm[0] + 4, bbox_utm[0] + 4 + (n_bins_x - 1) * 8, n_bins_x)):
-#     for yidx, y in enumerate(np.linspace(bbox_utm[1] + 4, bbox_utm[1] + 4 + (n_bins_y - 1) * 8, n_bins_y)):
-#         xarr.append(x)
-#         yarr.append(y)
-#         xiarr.append(xidx)
-#         yiarr.append(yidx)
-
-# geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, cap_style=3)
-# # gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr, 'filled': [False] * len(xarr),
-# #                               'pattern': [-1] * len(xarr), 'tile_page': [-1] * len(xarr), 'tile_row': [-1] * len(xarr), 'tile_col': [-1] * len(xarr), 
-# #                               'z': [-1] * len(xarr), 'category': [-1] * len(xarr), 'type': [-1] * len(xarr), 'sub_type': [-1] * len(xarr)
-# #                              }, geometry=geometry)
-
-# gdf = geopandas.GeoDataFrame({
-#     'x': xarr, 
-#     'y': yarr, 
-#     'xidx': xiarr, 
-#     'yidx': yiarr, 
-#     'z': [-1] * len(xarr),
-#     'menu': [-1] * len(xarr),
-#     'cat1': [-1] * len(xarr),
-#     'cat2': [-1] * len(xarr),
-#     'direction': [-1] * len(xarr),
-#     'id': [-1] * len(xarr),
-#     'name': [-1] * len(xarr),
-#     'dist_along_way': [-1] * len(xarr),
-#     }, geometry=geometry)
-
-
 
 class OSMProcessor:
     def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None, grid_file: Optional[str] = None):
@@ -180,131 +104,22 @@ class OSMProcessor:
     def _init_grid(self, bounding_box_data):
         if self.bbox is None:
             self.bbox = bounding_box_data
-        n_bins_x = np.floor((self.bbox[2] - self.bbox[0]) / 8).astype(int)
-        n_bins_y = np.floor((self.bbox[3] - self.bbox[1]) / 8).astype(int)
-        self.logger.info('Requested bounding box has {} x {} squares.'.format(n_bins_x, n_bins_y))
 
-        n_bins_pad_x_min = np.ceil(max(0, self.bbox[0] - bounding_box_data[0]) / 8).astype(int)
-        n_bins_pad_y_min = np.ceil(max(0, self.bbox[1] - bounding_box_data[1]) / 8).astype(int)
-        n_bins_pad_x_max = np.ceil(max(0, bounding_box_data[2] - (self.bbox[0] + n_bins_x * 8)) / 8).astype(int)
-        n_bins_pad_y_max = np.ceil(max(0, bounding_box_data[3] - (self.bbox[1] + n_bins_y * 8)) / 8).astype(int)
-
-        self.logger.debug('Input data adds squares: {} W, {} E, {} S, {} N'.format(n_bins_pad_x_min, n_bins_pad_x_max, n_bins_pad_y_min, n_bins_pad_y_max))
-
-        n_bins_x_data = n_bins_x + n_bins_pad_x_min + n_bins_pad_x_max
-        n_bins_y_data = n_bins_y + n_bins_pad_y_min + n_bins_pad_y_max
-
-        self.idx_bbox = [n_bins_pad_x_min, n_bins_pad_y_min, n_bins_pad_x_min + n_bins_x - 1, n_bins_pad_y_min + n_bins_y - 1]
-        self.effective_bbox_polygon = Polygon([
-            (self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[1] - n_bins_pad_y_min * 8),
-            (self.bbox[0] - n_bins_pad_x_min * 8 + n_bins_x_data * 8, self.bbox[1] - n_bins_pad_y_min * 8),
-            (self.bbox[0] - n_bins_pad_x_min * 8 + n_bins_x_data * 8, self.bbox[1] - n_bins_pad_y_min * 8 + n_bins_y_data * 8),
-            (self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[1] - n_bins_pad_y_min * 8 + n_bins_y_data * 8),
-        ])
-
-        xarr = []
-        yarr = []
-        xiarr = []
-        yiarr = []
-        for xidx, x in enumerate(np.linspace(self.bbox[0] - n_bins_pad_x_min * 8 + 4, self.bbox[0] - n_bins_pad_x_min * 8 + 4 + (n_bins_x_data - 1) * 8, n_bins_x_data)):
-            for yidx, y in enumerate(np.linspace(self.bbox[1] - n_bins_pad_y_min * 8 + 4, self.bbox[1] - n_bins_pad_y_min * 8 + 4 + (n_bins_y_data - 1) * 8, n_bins_y_data)):
-                xarr.append(x)
-                yarr.append(y)
-                xiarr.append(xidx)
-                yiarr.append(yidx)
-
-        geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, cap_style=3)
-
-
-        self.gdf = geopandas.GeoDataFrame({
-            'x': xarr, 
-            'y': yarr, 
-            'xidx': xiarr, 
-            'yidx': yiarr, 
-            'z': [-1] * len(xarr),
-            'menu': [-1] * len(xarr),
-            'cat1': [-1] * len(xarr),
-            'cat2': [-1] * len(xarr),
-            'direction': [-1] * len(xarr),
-            'id': [-1] * len(xarr),
-            'name': [-1] * len(xarr),
-            'priority': [-1] * len(xarr),
-            }, geometry=geometry)
-
-        sub_square_grid_geometry1 = geopandas.points_from_xy(xarr, yarr)
-
-        sub_square_grid_geometry1_gdf = geopandas.GeoDataFrame({
-            'x': xarr, 
-            'y': yarr, 
-            'xidx': xiarr, 
-            'yidx': yiarr, 
-            'z': [-1] * len(xarr),
-            'menu': [-1] * len(xarr),
-            'cat1': [-1] * len(xarr),
-            'cat2': [-1] * len(xarr),
-            'direction': [-1] * len(xarr),
-            'id': [-1] * len(xarr),
-            'name': [-1] * len(xarr),
-            'priority': [-1] * len(xarr),
-            }, geometry=sub_square_grid_geometry1)
-
-
-        xarr = []
-        yarr = []
-        xiarr = []
-        yiarr = []
-        for xidx, x in enumerate(np.linspace(self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[0] - n_bins_pad_x_min * 8 + (n_bins_x_data) * 8, n_bins_x_data + 1)):
-            for yidx, y in enumerate(np.linspace(self.bbox[1] - n_bins_pad_y_min * 8, self.bbox[1] - n_bins_pad_y_min * 8 + (n_bins_y_data) * 8, n_bins_y_data + 1)):
-                xarr.append(x)
-                yarr.append(y)
-                xiarr.append(xidx-0.5)
-                yiarr.append(yidx-0.5)
-
-        sub_square_grid_geometry2 = geopandas.points_from_xy(xarr, yarr)
-        sub_square_grid_geometry2_gdf = geopandas.GeoDataFrame({'x': xarr, 'y': yarr, 'xidx': xiarr, 'yidx': yiarr}, geometry=sub_square_grid_geometry2)
-
-        sub_square_grid_geometry2_gdf = geopandas.GeoDataFrame({
-            'x': xarr, 
-            'y': yarr, 
-            'xidx': xiarr, 
-            'yidx': yiarr, 
-            'z': [-1] * len(xarr),
-            'menu': [-1] * len(xarr),
-            'cat1': [-1] * len(xarr),
-            'cat2': [-1] * len(xarr),
-            'direction': [-1] * len(xarr),
-            'id': [-1] * len(xarr),
-            'name': [-1] * len(xarr),
-            'priority': [-1] * len(xarr),
-            }, geometry=sub_square_grid_geometry2)
-
-        # self.octagon_gdf = pandas.concat((self.octagon_gdf, filler_square_gdf), ignore_index=True)
-        self.sub_square_grid_diagonal_gdf = pandas.concat((sub_square_grid_geometry1_gdf, sub_square_grid_geometry2_gdf), ignore_index=True)
-        self.sub_square_grid_diagonal_gdf.geometry = self.sub_square_grid_diagonal_gdf.geometry.buffer(4, resolution=1)
+        xmin, ymin, xmax, ymax = self.bbox
+        n_bins_x = np.ceil((xmax - xmin) / 8).astype(int)
+        n_bins_y = np.ceil((ymax - ymin) / 8).astype(int)
+        xmax = xmin + n_bins_x * 8
+        ymax = ymin + n_bins_y * 8
         
-        for xidx, x in enumerate(np.linspace(self.bbox[0] - n_bins_pad_x_min * 8, self.bbox[0] - n_bins_pad_x_min * 8 + (n_bins_x_data) * 8, n_bins_x_data * 2 + 1)):
-            for yidx, y in enumerate(np.linspace(self.bbox[1] - n_bins_pad_y_min * 8, self.bbox[1] - n_bins_pad_y_min * 8 + (n_bins_y_data) * 8, n_bins_y_data * 2 + 1)):
-                xarr.append(x)
-                yarr.append(y)
-                xiarr.append(xidx / 2 - 0.5)
-                yiarr.append(yidx / 2 - 0.5)
+        grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf = get_all_grids(xmin, ymin, xmax, ymax, n_bins_x, n_bins_y)
+        self.gdf = grid_gdf
+        self.sub_square_grid_diagonal_gdf = diagonal_grid_gdf
+        self.sub_square_grid_gdf = sub_square_grid_gdf
 
-        geometry = geopandas.points_from_xy(xarr, yarr).buffer(2, cap_style=3)
+        grid_polygons = MultiPolygon(self.gdf.geometry.values)
+        self.effective_bbox_polygon = grid_polygons.buffer(0)
 
-        self.sub_square_grid_gdf = geopandas.GeoDataFrame({
-            'x': xarr, 
-            'y': yarr, 
-            'xidx': xiarr, 
-            'yidx': yiarr, 
-            'z': [-1] * len(xarr),
-            'menu': [-1] * len(xarr),
-            'cat1': [-1] * len(xarr),
-            'cat2': [-1] * len(xarr),
-            'direction': [-1] * len(xarr),
-            'id': [-1] * len(xarr),
-            'name': [-1] * len(xarr),
-            'priority': [-1] * len(xarr),
-            }, geometry=geometry)
+        self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
 
     def _load_grid(self):
         file_name_base = self.grid_file.split('_')[0]
@@ -510,140 +325,6 @@ class OSMProcessor:
         self.df.to_csv(output_file_name)
 
 
-
-# df = pandas.DataFrame(columns=['x', 'y', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name'])
-# df = None
-# generic_node_cnt = 0
-# road_graphs = {}
-
-# for element in result.elements():
-#     if element.type() not in ('relation', 'way'):
-#         continue
-#     element_tags = element.tags()
-#     if element.tags() is None:
-#         print(element.tags(), element.id())
-#         continue
-
-#     matched = False
-#     for name in config:
-#         # if config['name']['pass'] != i_pass:
-#         #     continue
-#         excluded = False
-#         if 'exclude_tags' in config[name]:
-#             for element_tag_key in element_tags:
-#                 if element_tag_key in config[name]['exclude_tags'] and config[name]['exclude_tags'][element_tag_key] == element_tags[element_tag_key]:
-#                     excluded = True
-
-#         if 'required_tags' in config[name]:
-#             for required_tag_key in config[name]['required_tags']:
-#                 if not (required_tag_key in element_tags and config[name]['required_tags'][required_tag_key] == element_tags[required_tag_key]):
-#                     excluded = True
-
-#         if excluded:
-#             continue
-
-#         for tag_key, tag_value in config[name]['tags']:
-#             if tag_key in element_tags and element_tags[tag_key] == tag_value:
-#                 to_fill = None
-#                 matched = True
-#                 element_geometry = element.geometry()
-#                 if element_geometry['type'] == 'Polygon':
-#                     exterior_coords = [(projection(coord[0], coord[1])) for coord in element_geometry['coordinates'][0]]
-#                     interiors = []
-#                     for interior_idx in range(1, len(element_geometry['coordinates'])):
-#                         interior_coords = [(projection(coord[0], coord[1])) for coord in element_geometry['coordinates'][interior_idx]]
-#                         interiors.append(interior_coords)
-
-#                     polygon = Polygon(exterior_coords, holes=interiors)
-#                     within = gdf.geometry.within(polygon)
-#                     intersecting = gdf.geometry.intersects(polygon)
-#                     is_border = np.bitwise_and(intersecting, ~within)
-#                     is_largest_square_area = gdf.loc[is_border].geometry.intersection(polygon).area > 32
-
-#                     to_fill = np.bitwise_or(within, is_largest_square_area)
-#                 elif element_geometry['type'] == 'LineString':
-#                     coords = [(projection(coord[0], coord[1])) for coord in element.geometry()['coordinates']]
-#                     ls = LineString(coords)
-#                     to_fill = np.bitwise_or(gdf.geometry.crosses(ls), gdf.geometry.contains(ls))
-#                 elif element_geometry['type'] == 'MultiPolygon':
-#                     polygons = []
-#                     for polygon_idx in range(len(element_geometry['coordinates'])):
-#                         polygon_coordinates = element_geometry['coordinates'][polygon_idx]
-#                         exterior_coords = [(projection(coord[0], coord[1])) for coord in polygon_coordinates[0]]
-#                         interiors = []
-#                         for interior_idx in range(1, len(polygon_coordinates)):
-#                             interior_coords = [(projection(coord[0], coord[1])) for coord in polygon_coordinates[interior_idx]]
-#                             interiors.append(interior_coords)
-                        
-#                         polygons.append(Polygon(exterior_coords, holes=interiors))
-
-#                     multipolygon = MultiPolygon(polygons)
-#                     within = gdf.geometry.within(polygon)
-#                     intersecting = gdf.geometry.intersects(polygon)
-#                     is_border = np.bitwise_and(intersecting, ~within)
-#                     is_largest_square_area = gdf.loc[is_border].geometry.intersection(polygon).area > 32
-
-#                     to_fill = np.bitwise_or(within, is_largest_square_area)
-#                 else:
-#                     raise Exception('geometry {} of element {}/{} not yet covered'.format(element_geometry['type'], element.type(), element.id()))
-
-#                 if to_fill is not None:
-#                     element_df = gdf.loc[to_fill, ['xidx', 'yidx', 'z', 'menu', 'cat1', 'cat2', 'direction', 'id', 'name']].copy(deep=True)
-#                     element_df['id'] = element.id()
-#                     element_df['name'] = name
-
-#                     cm_types = config[name]['cm_types']
-#                     if 'process' in cm_types:
-#                         for func_name in cm_types['process']:
-#                             element_df = globals()[func_name](element_df, gdf, element, cm_types)
-
-#                     if df is None:
-#                         df = element_df
-#                     else:
-#                         df = pandas.concat([df, element_df], ignore_index=True)
-
-#     if not matched:
-#         print(element.tags(), element.id())
-
-# # node_pos = {}
-# # for node in road_graphs['road'].nodes:
-# #     node_pos[node] = road_graphs['road'].nodes[node]['square']
-
-# # plt.figure()
-# # plt.axis('equal')
-# # nx.draw_networkx(road_graphs['road'], pos=node_pos)
-# # plt.show()
-
-# for name in config:
-#     cm_types = config[name]['cm_types']
-#     if 'post_process' in cm_types:
-#         for func_name in cm_types['post_process']:
-#             globals()[func_name](df, gdf, name, cm_types)
-
-
-
-
-
-# # plt.show()
-# df = pandas.concat((
-#     df, 
-#     pandas.DataFrame({
-#         'xidx': [gdf.xidx.max()], 
-#         'yidx': [gdf.yidx.max()], 
-#         'z': [-1], 
-#         'menu': [-1], 
-#         'cat1': [-1], 
-#         'cat2': [-1], 
-#         'direction': [-1], 
-#         'id': [-1], 
-#         'name': [-1]
-#     })
-# ))
-
-# df_out = df.rename(columns={"xidx": "x", "yidx": "y"})
-# df_out.to_csv('overath_extended_osm_roads.csv')
-
-
 if __name__ == '__main__':
 
 
@@ -654,18 +335,19 @@ if __name__ == '__main__':
     # with open('scenarios/rhine_crossing/rhine_crossing_area1.geojson', 'w', encoding='utf8') as geojson_file:
     #     geojson_file.write(json.dumps(osm_data2))
 
-    osm_data = geojson.load(open('scenarios/agger_valley/schlingenbach/osm/schlingenbach.geojson', encoding='utf8'))
-    # osm_data = geojson.load(open('test/fields.geojson', encoding='utf8'))
+    # osm_data = geojson.load(open('scenarios/agger_valley/schlingenbach/osm/schlingenbach.geojson', encoding='utf8'))
+    osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
     # osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
     # osm_processor = OSMProcessor(config=config, bbox=[361607.305,5625049.525, 365540.291, 5627329.787])
-    osm_processor = OSMProcessor(config=config, grid_file='schlingenbach_grid.shp')
+    # osm_processor = OSMProcessor(config=config, grid_file='schlingenbach_grid.shp')
 
     # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
-    # osm_processor = OSMProcessor(config=config)
+    osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    osm_processor.write_to_file('scenarios/agger_valley/schlingenbach/schlingenbach_osm_civil.csv')
+    # osm_processor.write_to_file('scenarios/agger_valley/schlingenbach/schlingenbach_osm_civil.csv')
+    osm_processor.write_to_file('test/industrial_fences.csv')
 
 
 
