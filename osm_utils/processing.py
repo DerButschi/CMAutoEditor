@@ -26,12 +26,13 @@ from profiles.general import road_tiles, rail_tiles, stream_tiles, fence_tiles
 from profiles.cold_war import buildings
 from .path_search import search_path, _get_closest_node_in_gdf, _remove_nodes_from_gdf
 import matplotlib.pyplot as plt
+from matplotlib.collections import PolyCollection
 from osm_utils.geometry import find_concave_vertices, find_chords, find_subdividing_chords, rectangulate_polygon
 import itertools
 from copy import deepcopy
 
 
-DRAW_DEBUG_PLOTS = True
+DRAW_DEBUG_PLOTS = False
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -829,13 +830,27 @@ def process_building_outlines(osm_processor, config, name):
     diagonal_bounds = [diag_grid_gdf.xidx.min(), diag_grid_gdf.yidx.min(), diag_grid_gdf.xidx.max(), diag_grid_gdf.yidx.max()]
     square_bounds = [grid_gdf.xidx.min(), grid_gdf.yidx.min(), grid_gdf.xidx.max(), grid_gdf.yidx.max()]
 
+    grid_vertices = []
+    for g in osm_processor.gdf.geometry.values:
+        grid_vertices.append([coord for coord in g.exterior.coords])
+    occupancy_vertices = []
+    for g in osm_processor.occupancy_gdf.geometry.values:
+        occupancy_vertices.append([coord for coord in g.exterior.coords])
+
     plt.figure()
     plt.axis('equal')
+    ax = plt.gca()
+    grid_collection = PolyCollection(grid_vertices, closed=False, edgecolor='k')
+    occupancy_collection = PolyCollection(occupancy_vertices, closed=False, edgecolor='g', facecolor='g')
+    ax.add_collection(grid_collection)
+    ax.add_collection(occupancy_collection)
     for element_idx, outline_entry in raw_outlines.items():
         plt.plot(*outline_entry[0].exterior.xy, '-m')
         matched_tiles_candidates = []
         for is_diagonal in [True, False]:
             squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal)
+            if len(squares) == 0:
+                continue
 
             if is_diagonal:
                 matching_gdf = diag_grid_gdf
@@ -866,9 +881,10 @@ def process_building_outlines(osm_processor, config, name):
                 area = sum([sol[0][0] * sol[0][1] * 0.25 * 64 for sol in solution[2]])
 
             matched_tiles_solution = []
-            occupied_squares = []
+            occupied_polygons = []
             for sol in solution[2]:
                 matched_tiles_solution.append((sol[0], _rowcol2idx(sol[1] + matched_square_rowcols[:,0].min(), sol[2] + matched_square_rowcols[:,1].min(), bounds, is_diagonal)))
+                occupied_squares = []
                 for s in sol[3]:
                     occupied_idx_square = (_rowcol2idx(s[0] + matched_square_rowcols[:,0].min(), s[1] + matched_square_rowcols[:,1].min(), bounds, is_diagonal))
                     condition = (matching_gdf.xidx == occupied_idx_square[0]) & (matching_gdf.yidx == occupied_idx_square[1])
@@ -876,10 +892,14 @@ def process_building_outlines(osm_processor, config, name):
                         continue
                     occupied_square = matching_gdf[condition].geometry.values[0]
                     occupied_squares.append(occupied_square)
+                occupied_polygons.append(MultiPolygon(occupied_squares).buffer(0))
 
-            intersection_over_union = unary_union(occupied_squares).intersection(outline_entry[0]).area / unary_union(occupied_squares + [outline_entry[0]]).area
+            intersection_over_union = unary_union(occupied_polygons).intersection(outline_entry[0]).area / unary_union(occupied_polygons + [outline_entry[0]]).area
 
-            matched_tiles_candidates.append((is_diagonal, matched_tiles_solution, intersection_over_union, squares, occupied_squares))
+            matched_tiles_candidates.append((is_diagonal, matched_tiles_solution, intersection_over_union, squares, occupied_polygons))
+
+        if len(matched_tiles_candidates) == 0:
+            continue
 
         matched_tiles_candidates = sorted(matched_tiles_candidates, key=lambda x: -x[2])
 
@@ -891,13 +911,13 @@ def process_building_outlines(osm_processor, config, name):
         is_diagonal = matched_tiles[0]
 
         if len(matched_tiles) > 1:
-            condition = (buildings.menu == 'Modular Buildings') & (buildings.is_diagonal)
+            condition = (buildings.menu == 'Modular Buildings') & (buildings.is_diagonal == is_diagonal)
         else:
-            condition = buildings.is_diagonal
+            condition = buildings.is_diagonal == is_diagonal
 
         matched_buildings = []
         for mt in matched_tiles[1]:
-            building_candidates = buildings[condition & (buildings.width == mt[0][0]) & (buildings.height == mt[0][1])]
+            building_candidates = buildings[condition & (buildings.width == mt[0][1]) & (buildings.height == mt[0][0])]
             building = building_candidates.sample(n=1, weights=building_candidates.weight)
             matched_buildings.append(building)
 
@@ -940,8 +960,13 @@ def _get_matched_squares(osm_processor, priority, geometry, diagonal):
         diamonds = diag_grid_gdf.geometry
         idx = diamonds.sindex.query(geometry, predicate='intersects')
         intersecting_diamonds = diamonds.iloc[idx].geometry
-        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < priority].sindex.query_bulk(intersecting_diamonds.geometry, predicate='overlaps')
-        intersecting_diamonds = intersecting_diamonds.drop(intersecting_diamonds.iloc[oidx[0]].index)
+        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority <= priority].sindex.query_bulk(intersecting_diamonds.geometry, predicate='intersects')
+        area_oidx = []
+        for oi in range(len(oidx[0])):
+            if intersecting_diamonds.iloc[oidx[0][oi]].intersection(osm_processor.occupancy_gdf.iloc[oidx[1][oi]].geometry).area > 0.0:
+                area_oidx.append(oidx[0][oi])
+
+        intersecting_diamonds = intersecting_diamonds.drop(intersecting_diamonds.iloc[area_oidx].index)
         idx = intersecting_diamonds.index
         return diag_grid_gdf.iloc[idx]
     else:
@@ -949,8 +974,13 @@ def _get_matched_squares(osm_processor, priority, geometry, diagonal):
         squares = square_grid_gdf.geometry
         idx = squares.sindex.query(geometry, predicate='intersects')
         intersecting_squares = intersecting_squares = squares.iloc[idx]
-        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority < priority].sindex.query_bulk(intersecting_squares.geometry, predicate='overlaps')
-        intersecting_squares = intersecting_squares.drop(intersecting_squares.iloc[oidx[0]].index)
+        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority <= priority].sindex.query_bulk(intersecting_squares.geometry, predicate='intersects')
+        area_oidx = []
+        for oi in range(len(oidx[0])):
+            if intersecting_squares.iloc[oidx[0][oi]].intersection(osm_processor.occupancy_gdf.iloc[oidx[1][oi]].geometry).area > 0.0:
+                area_oidx.append(oidx[0][oi])
+
+        intersecting_squares = intersecting_squares.drop(intersecting_squares.iloc[area_oidx].index)
         idx = intersecting_squares.index
         return square_grid_gdf.iloc[idx]
 
