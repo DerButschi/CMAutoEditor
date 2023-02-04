@@ -418,8 +418,10 @@ def set_ground(df, map_df):
             pyautogui.click(MENU_DICT[group_info[3]])
 
         for row_idx, row in group.iterrows():
-            x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x + SQUARE_SIZE_X / 4)
-            y_pos = int(LOWER_RIGHT_SQUARE.y - SQUARE_SIZE_Y / 4 - row.y * SQUARE_SIZE_Y)
+            # x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x + SQUARE_SIZE_X / 4)
+            # y_pos = int(LOWER_RIGHT_SQUARE.y - SQUARE_SIZE_Y / 4 - row.y * SQUARE_SIZE_Y)
+            x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
+            y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
             pyautogui.click(x=x_pos, y=y_pos)
 
             map_df.loc[row_idx, 'done'] = 1
