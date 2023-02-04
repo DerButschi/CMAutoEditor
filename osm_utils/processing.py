@@ -846,6 +846,7 @@ def process_building_outlines(osm_processor, config, name):
     ax.add_collection(occupancy_collection)
     for element_idx, outline_entry in raw_outlines.items():
         plt.plot(*outline_entry[0].exterior.xy, '-m')
+        plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
         matched_tiles_candidates = []
         for is_diagonal in [True, False]:
             squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal)
@@ -869,7 +870,7 @@ def process_building_outlines(osm_processor, config, name):
             for rowcol in matched_square_rowcols:
                 match_polygon[int(rowcol[0] - matched_square_rowcols[:,0].min()), int(rowcol[1] - matched_square_rowcols[:,1].min())] = 1
 
-            tiles = list(set([(t[0], t[1]) for t in buildings[buildings.is_diagonal].loc[:,['width', 'height']].values]))
+            tiles = list(set([(t[0], t[1]) for t in buildings[buildings.is_diagonal == is_diagonal].loc[:,['width', 'height']].values]))
             solution = branch_and_bound(match_polygon, tiles)
 
             if len(solution[2]) == 0:
@@ -1182,9 +1183,21 @@ from typing import List, Tuple
 
 def branch_and_bound(polygon: np.array, tiles: List) -> Tuple[List[List[int]], int]:
     best_solution = (polygon, float('inf'))
+    def cost(used_tiles, polygon):
+        unfilled_square_indices = np.where(polygon == 1)
+        unfilled_square_cost = len(unfilled_square_indices[0])
+        for i in range(len(unfilled_square_indices[0])):
+            idx0 = unfilled_square_indices[0][i]
+            idx1 = unfilled_square_indices[1][i]
+            if 0 < idx0 < polygon.shape[0] - 1 and 0 < idx1 < polygon.shape[1] - 1 and (polygon[idx0 - 1:idx0+2, idx1 - 1:idx1+2] == 1).all():
+                unfilled_square_cost += 1
+        
+        return 0.5 * len(used_tiles) + unfilled_square_cost
+
+
     def dfs(polygon, total_cost, used_tiles):
         nonlocal best_solution
-        if total_cost >= best_solution[1]:
+        if total_cost > best_solution[1]:
             return
         best_solution = (polygon, total_cost, used_tiles)
         for i in range(polygon.shape[0]):
@@ -1196,9 +1209,9 @@ def branch_and_bound(polygon: np.array, tiles: List) -> Tuple[List[List[int]], i
                             polygon[i:i + tile[0], j:j + tile[1]] = 0
                             used_tiles = deepcopy(used_tiles)
                             used_tiles.append((tile, i, j, [(ii, jj) for ii in range(i, i + tile[0]) for jj in range(j, j + tile[1])]))
-                            dfs(polygon, len(used_tiles) + 1 + len(np.where(polygon == 1)[0]), used_tiles)
+                            dfs(polygon, cost(used_tiles, polygon), used_tiles)
 
-    dfs(polygon, len(np.where(polygon == 1)[0]), [])
+    dfs(polygon, cost([], polygon), [])
     return best_solution
 
 def _idx2rowcol(xidx, yidx, bounds, is_diagonal):
