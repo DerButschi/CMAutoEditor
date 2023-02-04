@@ -915,9 +915,17 @@ def process_building_outlines(osm_processor, config, name):
         else:
             condition = buildings.is_diagonal == is_diagonal
 
+        rng = np.random.default_rng()
+        level_int = rng.integers(0,4)
+        if level_int == 0:
+            level = 1
+        elif level_int == 1:
+            level = 3
+        else:
+            level = 2
         matched_buildings = []
         for mt in matched_tiles[1]:
-            building_candidates = buildings[condition & (buildings.width == mt[0][1]) & (buildings.height == mt[0][0])]
+            building_candidates = buildings[condition & (buildings.width == mt[0][1]) & (buildings.height == mt[0][0]) & (buildings.stories == level)]
             building = building_candidates.sample(n=1, weights=building_candidates.weight)
             matched_buildings.append(building)
 
