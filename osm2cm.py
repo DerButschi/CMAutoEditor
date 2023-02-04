@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import argparse
 import json
 import logging
 from typing import Dict, List, Optional
@@ -32,8 +33,6 @@ from tqdm import tqdm
 
 import osm_utils.processing
 from osm_utils.grid import get_all_grids
-
-config = json.load(open('default_osm_config.json', 'r'))
 
 class OSMProcessor:
     def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None, grid_file: Optional[str] = None):
@@ -326,7 +325,15 @@ class OSMProcessor:
 
 
 if __name__ == '__main__':
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('-i', '--osm-input', required=True)
+    argparser.add_argument('-g', '--grid-file', required=False)
+    argparser.add_argument('-c', '--config-file', required=False, default='default_osm_config.json')
+    argparser.add_argument('-o', '--output-file', required=True)
 
+    args = argparser.parse_args()
+
+    config = json.load(open(args.config_file, 'r'))
 
     # with codecs.open('scenarios/rhine_crossing/rhine_crossing_area1.osm', 'r', encoding='utf-8') as data:
     #     xml = data.read()
@@ -336,18 +343,23 @@ if __name__ == '__main__':
     #     geojson_file.write(json.dumps(osm_data2))
 
     # osm_data = geojson.load(open('scenarios/agger_valley/schlingenbach/osm/schlingenbach.geojson', encoding='utf8'))
-    osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
+    osm_data = geojson.load(open(args.osm_input, encoding='utf8'))
+    # osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
     # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
     # osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
     # osm_processor = OSMProcessor(config=config, bbox=[361607.305,5625049.525, 365540.291, 5627329.787])
-    # osm_processor = OSMProcessor(config=config, grid_file='schlingenbach_grid.shp')
+    if args.grid_file is not None:
+        osm_processor = OSMProcessor(config=config, grid_file='schlingenbach_grid.shp')
+    else:
+        osm_processor = OSMProcessor(config=config)
 
     # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
-    osm_processor = OSMProcessor(config=config)
+    # osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
     # osm_processor.write_to_file('scenarios/agger_valley/schlingenbach/schlingenbach_osm_civil.csv')
-    osm_processor.write_to_file('test/industrial_fences.csv')
+    osm_processor.write_to_file(args.output_file)
+    # osm_processor.write_to_file('test/industrial_fences.csv')
 
 
 
