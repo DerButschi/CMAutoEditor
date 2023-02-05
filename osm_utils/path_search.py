@@ -311,12 +311,32 @@ def search_path(osm_processor, config, name):
 
     plt.show()
 
+    # create square graph from paths
     for edge_idx in path_dict.keys():
+        # get path and edge data        
         path = path_dict[edge_idx][0]
         edge_data = path_dict[edge_idx][1]
 
-        square_graph.add_edge(path[0], path[-1], squares=path, element_idx=edge_data, from_node_to_node=[path[0], path[-1]])
+        # split path at nodes with more than 2 connections
+        # paths don't necessarily start at intersections so 0 and len(path)-1 have to be added that case
+        n_connections_per_node = [len(grid_graph.nodes[n]['connections']) for n in path]
+        intersection_indices = np.where(np.array(n_connections_per_node) > 2)[0].tolist()
 
+        if len(intersection_indices) == 0 or intersection_indices[0] != 0:
+            intersection_indices = [0] + intersection_indices
+        if intersection_indices[-1] != len(path) - 1:
+            intersection_indices = intersection_indices + [len(path) - 1]
+
+        sub_paths = []
+        for i in range(1, len(intersection_indices)):
+            sub_paths.append(path[intersection_indices[i-1]:intersection_indices[i]+1])
+
+        for sub_path in sub_paths:
+            square_graph.add_edge(sub_path[0], sub_path[-1], squares=sub_path, element_idx=edge_data, from_node_to_node=[sub_path[0], sub_path[-1]])
+
+    # grid graph is persistent over all path searches, so remove already used nodes
+    for edge_idx in path_dict.keys():
+        path = path_dict[edge_idx][0]
         grid_graph.remove_nodes_from(path)
 
     osm_processor.network_graphs[name]['square_graph'] = square_graph
