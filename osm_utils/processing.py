@@ -270,6 +270,7 @@ def get_matched_cm_type(config, element_entry):
 def assign_type_from_tag(osm_processor, config, element_entry):
     grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'])
     sub_df = osm_processor._get_sub_df(grid_cells)
+    sub_df.name = element_entry['name']
 
     cm_type = get_matched_cm_type(config, element_entry)
     if cm_type is not None:
@@ -478,6 +479,7 @@ def assign_type_randomly_in_area(osm_processor, config, element_entry):
 
     grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'])
     sub_df = osm_processor._get_sub_df(grid_cells)
+    sub_df.name = element_entry['name']
 
     sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
     probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
@@ -500,6 +502,7 @@ def assign_type_randomly_for_each_square(osm_processor, config, element_entry):
 
     grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'])
     sub_df = osm_processor._get_sub_df(grid_cells)
+    sub_df.name = element_entry['name']
 
     sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
     probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
@@ -684,6 +687,7 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
         path = valid_paths[0]
 
         sub_df = osm_processor._get_sub_df(gdf.xidx.isin([sq[0] for sq in squares]) & gdf.yidx.isin([sq[1] for sq in squares]))
+        sub_df.name = name
         element_idx = square_graph.get_edge_data(*edge)['element_idx']
         element_entry = osm_processor.matched_elements[element_idx]
         cm_type = get_matched_cm_type(config, element_entry)
@@ -911,7 +915,7 @@ def process_building_outlines(osm_processor, config, name):
         
         is_diagonal = matched_tiles[0]
 
-        if len(matched_tiles) > 1:
+        if len(matched_tiles[1]) > 1:
             condition = (buildings.menu == 'Modular Buildings') & (buildings.is_diagonal == is_diagonal)
         else:
             condition = buildings.is_diagonal == is_diagonal
@@ -950,6 +954,7 @@ def process_building_outlines(osm_processor, config, name):
             condition = (matching_gdf.xidx == llc_idx[0]) & (matching_gdf.yidx == llc_idx[1])
 
             sub_df = osm_processor._get_sub_df(condition, matching_gdf)
+            sub_df.name = name
             sub_df['xidx'] -= 0.25
             sub_df['yidx'] += 0.25
 
@@ -1162,6 +1167,7 @@ def single_object_random(osm_processor, config, element_entry):
     
 
     sub_df = osm_processor._get_sub_df(grid_cell)
+    sub_df.name = element_entry['name']
 
     sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
     probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
