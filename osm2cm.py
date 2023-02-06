@@ -82,10 +82,13 @@ class OSMProcessor:
                 (4, "create_square_graph_path_search", "by_config_name"), 
                 (5, "assign_fence_tiles_to_network", "by_config_name")
             ],
-            "type_from_building_outline": [
+            "type_from_residential_building_outline": [
                 (0, "collect_building_outlines", "by_element"),
-                (1, "process_building_outlines", "by_config_name")
-                # (1, "assing_buildings_to_outlines", "by_config_name")
+                (1, "process_residential_building_outlines", "by_config_name")
+            ],
+            "type_from_church_outline": [
+                (0, "collect_building_outlines", "by_element"),
+                (1, "process_church_outlines", "by_config_name")
             ]
         }
 
@@ -305,6 +308,52 @@ class OSMProcessor:
 
         # plt.axis('equal')
         # plt.show()
+
+    def post_process(self):
+        # remove invalid entries
+        self.df = self.df.drop_duplicates()
+        self.df = self.df.drop(self.df[(self.df.menu == -1) & (self.df.z == -1)].index)
+
+        duplicate_indices = self.df[self.df.duplicated(subset=['xidx', 'yidx'])].index
+        indices_to_drop = []
+        for idx in duplicate_indices:
+            xidx = self.df.loc[idx].xidx
+            yidx = self.df.loc[idx].yidx
+
+            min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority >= 0)].priority.max()
+            indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > min_valid_priority)].index)
+            indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority < 0)].index)
+
+            min_priority_names = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority == min_valid_priority)].name.unique()
+
+            for name in min_priority_names:
+                if len(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority == min_valid_priority) & (self.df.name == name)]) > 1:
+                    indices = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority == min_valid_priority) & (self.df.name == name)].index
+                    cm_types = self.config[name]['cm_types']
+                    indices_with_cm_rank = []
+                    for sub_idx in indices:
+                        menu = self.df.loc[sub_idx].menu
+                        cat1 = self.df.loc[sub_idx].cat1
+                        cat2 = self.df.loc[sub_idx].cat2
+
+                        for cidx, cm_type in enumerate(cm_types):
+                            if cm_type['menu'] == menu and cm_type['cat1'] == cat1 and (cat2 not in cm_type or ('cat2' in cm_type and cm_type['cat2'] == cat2)):
+                                indices_with_cm_rank.append((sub_idx, cidx))
+                                break
+                    indices_with_rank = [sub_idx[0] for sub_idx in sorted(indices_with_cm_rank, key=lambda x: x[1])[1:]]
+                    indices_to_drop.extend(indices_with_rank)
+                else:
+                    pass
+        
+        if len(indices_to_drop) > 0:
+            self.df = self.df.drop(indices_to_drop)
+
+
+
+
+
+
+
         
 
     def write_to_file(self, output_file_name):
@@ -358,6 +407,7 @@ if __name__ == '__main__':
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
     # osm_processor.write_to_file('scenarios/agger_valley/schlingenbach/schlingenbach_osm_civil.csv')
+    osm_processor.post_process()
     osm_processor.write_to_file(args.output_file)
     # osm_processor.write_to_file('test/industrial_fences.csv')
 

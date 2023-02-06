@@ -1,0 +1,18 @@
+churches = [  
+    ["Independent Buildings",   "Church",    0, 0, 0,    False, 1,     0,      1,      1,      0,    1.0,    2,  3, False],
+    ["Independent Buildings",   "Church",    0, 1, 0,    False, 1,     0,      1,      1,      0,    1.0,    2,  4, False],
+    ["Independent Buildings",   "Church",    0, 1, 1,    False, 1,     0,      1,      1,      0,    1.0,    2,  4, False],
+    ["Independent Buildings",   "Church",    0, 1, 2,    False, 1,     0,      1,      1,      0,    1.0,    2,  3, False],
+    ["Independent Buildings",   "Church",    1, 0, 0,    False, 1,     0,      1,      1,      0,    1.0,    3,  2, False],
+    ["Independent Buildings",   "Church",    1, 1, 0,    False, 1,     0,      1,      1,      0,    1.0,    4,  2, False],
+    ["Independent Buildings",   "Church",    1, 1, 1,    False, 1,     0,      1,      1,      0,    1.0,    4,  2, False],
+    ["Independent Buildings",   "Church",    1, 1, 2,    False, 1,     0,      1,      1,      0,    1.0,    3,  2, False],
+    ["Independent Buildings",   "Church",    2, 0, 0,    False, 1,     0,      1,      1,      0,    1.0,    2,  3, False],
+    ["Independent Buildings",   "Church",    2, 1, 0,    False, 1,     0,      1,      1,      0,    1.0,    2,  4, False],
+    ["Independent Buildings",   "Church",    2, 1, 1,    False, 1,     0,      1,      1,      0,    1.0,    2,  4, False],
+    ["Independent Buildings",   "Church",    2, 1, 2,    False, 1,     0,      1,      1,      0,    1.0,    2,  3, False],
+    ["Independent Buildings",   "Church",    3, 0, 0,    False, 1,     0,      1,      1,      0,    1.0,    3,  2, False],
+    ["Independent Buildings",   "Church",    3, 1, 0,    False, 1,     0,      1,      1,      0,    1.0,    4,  2, False],
+    ["Independent Buildings",   "Church",    3, 1, 1,    False, 1,     0,      1,      1,      0,    1.0,    4,  2, False],
+    ["Independent Buildings",   "Church",    3, 1, 2,    False, 1,     0,      1,      1,      0,    1.0,    3,  2, False],
+]

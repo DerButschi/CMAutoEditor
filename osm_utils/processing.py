@@ -23,7 +23,7 @@ import geopandas
 import pandas
 import logging
 from profiles.general import road_tiles, rail_tiles, stream_tiles, fence_tiles
-from profiles.cold_war import buildings
+from profiles.cold_war import get_building_tiles, get_building_cat2
 from .path_search import search_path, _get_closest_node_in_gdf, _remove_nodes_from_gdf
 import matplotlib.pyplot as plt
 from matplotlib.collections import PolyCollection
@@ -796,8 +796,8 @@ def collect_building_outlines(osm_processor, config, element_entry):
     if not geometry.intersects(osm_processor.effective_bbox_polygon):
         return
 
-    if 'raw_outlines' not in osm_processor.building_outlines:
-        osm_processor.building_outlines['raw_outlines'] = {}
+    if element_entry['name'] not in osm_processor.building_outlines:
+        osm_processor.building_outlines[element_entry['name']] = {}
 
     min_rot_rectangle = geometry.minimum_rotated_rectangle
     if min_rot_rectangle.area == 0:
@@ -817,16 +817,22 @@ def collect_building_outlines(osm_processor, config, element_entry):
 
     base_angle = (base_angle - axis_angle) % (2 * np.pi) - np.pi
 
-    osm_processor.building_outlines['raw_outlines'][element_entry['idx']] = (geometry, base_angle)
+    osm_processor.building_outlines[element_entry['name']][element_entry['idx']] = (geometry, base_angle)
 
     # if np.abs(base_angle) < np.pi / 8:
     #     is_diagonal = False
     # else:
     #     is_diagonal = True
 
-def process_building_outlines(osm_processor, config, name):
+def process_residential_building_outlines(osm_processor, config, name):
+    process_building_outlines(osm_processor, config, name, 'residential_buildings')
+
+def process_church_outlines(osm_processor, config, name):
+    process_building_outlines(osm_processor, config, name, 'churches')
+
+def process_building_outlines(osm_processor, config, name, building_type):
     logger = logging.getLogger('osm2cm')
-    raw_outlines = osm_processor.building_outlines['raw_outlines']
+    raw_outlines = osm_processor.building_outlines[name]
 
     diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
     grid_gdf = osm_processor.sub_square_grid_gdf
@@ -840,6 +846,8 @@ def process_building_outlines(osm_processor, config, name):
     occupancy_vertices = []
     for g in osm_processor.occupancy_gdf.geometry.values:
         occupancy_vertices.append([coord for coord in g.exterior.coords])
+
+    buildings = get_building_tiles(building_type)
 
     plt.figure()
     plt.axis('equal')
@@ -915,22 +923,26 @@ def process_building_outlines(osm_processor, config, name):
         
         is_diagonal = matched_tiles[0]
 
-        if len(matched_tiles[1]) > 1:
-            condition = (buildings.menu == 'Modular Buildings') & (buildings.is_diagonal == is_diagonal)
+        if len(matched_tiles[1]) > 1 and (buildings.is_modular).any():
+            condition = (buildings.is_modular == True) & (buildings.is_diagonal == is_diagonal)
         else:
             condition = buildings.is_diagonal == is_diagonal
 
-        rng = np.random.default_rng()
-        level_int = rng.integers(0,4)
-        if level_int == 0:
-            level = 1
-        elif level_int == 1:
-            level = 3
-        else:
-            level = 2
+        if (buildings.stories > 0).any() and (buildings.stories == 1).any() and (buildings.stories == 2).any() and (buildings.stories == 3).any():
+            rng = np.random.default_rng()
+            level_int = rng.integers(0,4)
+            if level_int == 0:
+                level = 1
+            elif level_int == 1:
+                level = 3
+            else:
+                level = 2
+            
+            condition = condition & (buildings.stories == level)
+
         matched_buildings = []
         for mt in matched_tiles[1]:
-            building_candidates = buildings[condition & (buildings.width == mt[0][1]) & (buildings.height == mt[0][0]) & (buildings.stories == level)]
+            building_candidates = buildings[condition & (buildings.width == mt[0][1]) & (buildings.height == mt[0][0])]
             building = building_candidates.sample(n=1, weights=building_candidates.weight)
             matched_buildings.append(building)
 
@@ -946,7 +958,7 @@ def process_building_outlines(osm_processor, config, name):
             plt.plot(*square.exterior.xy, '-r')
 
         if len(matched_buildings) == 0:
-            logger.debug('No matching CM building was found for building {}. Area: {}'.format(element_entry['idx'], geometry.area))
+            logger.debug('No matching CM building was found for building {}.'.format(element_idx))
 
         for bidx, building in enumerate(matched_buildings):
             llc_idx = matched_tiles[1][bidx][1]
@@ -963,7 +975,7 @@ def process_building_outlines(osm_processor, config, name):
             sub_df['menu'] = menu
             sub_df['cat1'] = cat1
             sub_df['direction'] = 'Direction {}'.format(direction + 1)
-            sub_df['cat2'] = 'Building {}'.format(row * 4 + col + 1)
+            sub_df['cat2'] = get_building_cat2(building_type, row, col)
             sub_df['priority'] = config[name]['priority']
             
             osm_processor._append_to_df(sub_df)
@@ -976,7 +988,7 @@ def _get_matched_squares(osm_processor, priority, geometry, diagonal):
         diamonds = diag_grid_gdf.geometry
         idx = diamonds.sindex.query(geometry, predicate='intersects')
         intersecting_diamonds = diamonds.iloc[idx].geometry
-        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority <= priority].sindex.query_bulk(intersecting_diamonds.geometry, predicate='intersects')
+        oidx = osm_processor.occupancy_gdf.loc[(osm_processor.occupancy_gdf.priority <= priority)].sindex.query_bulk(intersecting_diamonds.geometry, predicate='intersects')
         area_oidx = []
         for oi in range(len(oidx[0])):
             if intersecting_diamonds.iloc[oidx[0][oi]].intersection(osm_processor.occupancy_gdf.iloc[oidx[1][oi]].geometry).area > 0.0:
@@ -990,7 +1002,7 @@ def _get_matched_squares(osm_processor, priority, geometry, diagonal):
         squares = square_grid_gdf.geometry
         idx = squares.sindex.query(geometry, predicate='intersects')
         intersecting_squares = intersecting_squares = squares.iloc[idx]
-        oidx = osm_processor.occupancy_gdf.loc[osm_processor.occupancy_gdf.priority <= priority].sindex.query_bulk(intersecting_squares.geometry, predicate='intersects')
+        oidx = osm_processor.occupancy_gdf.loc[(osm_processor.occupancy_gdf.priority <= priority)].sindex.query_bulk(intersecting_squares.geometry, predicate='intersects')
         area_oidx = []
         for oi in range(len(oidx[0])):
             if intersecting_squares.iloc[oidx[0][oi]].intersection(osm_processor.occupancy_gdf.iloc[oidx[1][oi]].geometry).area > 0.0:
