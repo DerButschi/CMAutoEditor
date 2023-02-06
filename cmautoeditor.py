@@ -38,6 +38,10 @@ START_N_SQUARES_Y = 40
 PAGE_N_SQUARES_X = 26
 PAGE_N_SQUARES_Y = 26
 
+PAGE_TOP_MARGIN = 2
+PAGE_BOTTOM_MARGIN = 2
+PAGE_RIGHT_MARGIN = 2
+
 START_HEIGHT = 20
 
 POS_HORIZONTAL_PLUS = pyautogui.Point(764, 10)
@@ -86,6 +90,7 @@ MENU_DICT = {
     'density 4': pyautogui.Point(38, 657),
     'Grass': pyautogui.Point(189, 438),
     'Flowers': pyautogui.Point(137, 498),
+    'Clover': pyautogui.Point(82, 495),
     'Grass T': pyautogui.Point(191, 498),
     'Grass TY': pyautogui.Point(27, 554),
     'Weeds': pyautogui.Point(80, 554),
@@ -138,6 +143,7 @@ MENU_DICT = {
     'Cobblestone': pyautogui.Point(190, 497),
     'House': pyautogui.Point(110, 383),
     'Barn': pyautogui.Point(36, 440),
+    'Church': pyautogui.Point(110, 440),
     '1 Story': pyautogui.Point(81, 383),
     '2 Story': pyautogui.Point(134, 383),
     '3 Story': pyautogui.Point(189, 383),
@@ -428,7 +434,7 @@ def set_ground(df, map_df):
 
 
     
-def start_editor(filepath, countdown):
+def start_editor(filepath, countdown, start_size_from_file=False):
     if os.path.exists(args.input + '.checkpoint') and os.path.exists(args.input + '.meta.checkpoint'):
         map_df = pandas.read_csv(args.input + '.checkpoint')
         meta_df = pandas.read_csv(args.input + '.meta.checkpoint')
@@ -446,6 +452,10 @@ def start_editor(filepath, countdown):
 
         start_i_page_x = 0
         start_i_page_y = 0
+        if start_size_from_file:
+            START_N_SQUARES_X = np.floor(map_df.x.max()).astype(int)
+            START_N_SQUARES_Y = np.floor(map_df.y.max()).astype(int)
+
         prev_n_x = START_N_SQUARES_X
         prev_n_y = START_N_SQUARES_Y
 
@@ -566,6 +576,7 @@ if __name__ == '__main__':
         arg_parser = argparse.ArgumentParser()
         arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
         arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
+        arg_parser.add_argument('--start-size-from-file', required=False, action='store_true', help='If true take starting map size from file. Useful when continueing map creation.', default=False)
         args = arg_parser.parse_args()
     
         return_val = sg.popup_ok_cancel('CMAutoEditor is about to run on {}.'.format(args.input),
@@ -577,7 +588,7 @@ if __name__ == '__main__':
         if return_val == 'Cancel' or return_val is None:
             exit()
         
-        start_editor(args.input, args.countdown)
+        start_editor(args.input, args.countdown, args.start_size_from_file)
     
 
 
