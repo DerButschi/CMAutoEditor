@@ -335,9 +335,12 @@ def search_path(osm_processor, config, name):
             square_graph.add_edge(sub_path[0], sub_path[-1], squares=sub_path, element_idx=edge_data, from_node_to_node=[sub_path[0], sub_path[-1]])
 
     # grid graph is persistent over all path searches, so remove already used nodes
-    for edge_idx in path_dict.keys():
-        path = path_dict[edge_idx][0]
-        grid_graph.remove_nodes_from(path)
+    if config[name]['priority'] < 0:
+        osm_processor.grid_graph = None
+    else:
+        for edge_idx in path_dict.keys():
+            path = path_dict[edge_idx][0]
+            grid_graph.remove_nodes_from(path)
 
     osm_processor.network_graphs[name]['square_graph'] = square_graph
 
