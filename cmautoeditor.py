@@ -452,9 +452,9 @@ def start_editor(filepath, countdown, start_size_from_file=False):
 
         start_i_page_x = 0
         start_i_page_y = 0
-        if start_size_from_file:
-            START_N_SQUARES_X = np.floor(map_df.x.max()).astype(int)
-            START_N_SQUARES_Y = np.floor(map_df.y.max()).astype(int)
+        # if start_size_from_file:
+        #     START_N_SQUARES_X = np.floor(map_df.x.max()).astype(int)
+        #     START_N_SQUARES_Y = np.floor(map_df.y.max()).astype(int)
 
         prev_n_x = START_N_SQUARES_X
         prev_n_y = START_N_SQUARES_Y
@@ -472,8 +472,8 @@ def start_editor(filepath, countdown, start_size_from_file=False):
         total_n_squares_x = int(map_df.x.max()) + 1
         total_n_squares_y = int(map_df.y.max()) + 1
 
-        n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X, dtype=int)
-        n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y, dtype=int)
+        n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X - PAGE_RIGHT_MARGIN, dtype=int)
+        n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y - PAGE_TOP_MARGIN - PAGE_BOTTOM_MARGIN, dtype=int)
         n_x_remain = (np.floor(n_x_remain / 2) * 2).astype(int)
         n_y_remain = (np.floor(n_y_remain / 2) * 2).astype(int)
 
@@ -484,8 +484,8 @@ def start_editor(filepath, countdown, start_size_from_file=False):
         # map_df = map_df[map_df.x.between(0, (n_pages_x * PAGE_N_SQUARES_X + n_x_remain), inclusive='left')]
         # map_df = map_df[map_df.y.between(0, (n_pages_y * PAGE_N_SQUARES_Y + n_y_remain), inclusive='left')]
                         
-        total_n_squares_x = n_pages_x * PAGE_N_SQUARES_X + n_x_remain
-        total_n_squares_y = n_pages_y * PAGE_N_SQUARES_Y + n_y_remain
+        total_n_squares_x = n_pages_x * (PAGE_N_SQUARES_X - PAGE_RIGHT_MARGIN) + n_x_remain
+        total_n_squares_y = n_pages_y * (PAGE_N_SQUARES_Y - PAGE_TOP_MARGIN - PAGE_BOTTOM_MARGIN) + n_y_remain
 
         height = START_HEIGHT
 
@@ -513,25 +513,25 @@ def start_editor(filepath, countdown, start_size_from_file=False):
 
 
                 if i_page_x < n_pages_x:
-                    n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X
-                    xmax = total_n_squares_x - i_page_x * PAGE_N_SQUARES_X
-                    xmin = xmax - PAGE_N_SQUARES_X
-                    origin_x = total_n_squares_x - (i_page_x + 1) * PAGE_N_SQUARES_X
+                    n_squares_x = (i_page_x + 1) * PAGE_N_SQUARES_X - i_page_x * PAGE_RIGHT_MARGIN
+                    xmax = total_n_squares_x - i_page_x * (PAGE_N_SQUARES_X - PAGE_RIGHT_MARGIN)
+                    xmin = xmax - (PAGE_N_SQUARES_X - PAGE_RIGHT_MARGIN)
+                    origin_x = total_n_squares_x - (i_page_x + 1) * (PAGE_N_SQUARES_X - PAGE_RIGHT_MARGIN)
                 else:
-                    n_squares_x = i_page_x * PAGE_N_SQUARES_X + n_x_remain 
+                    n_squares_x = i_page_x * PAGE_N_SQUARES_X - (i_page_x - 1) * PAGE_RIGHT_MARGIN + n_x_remain #  ?
                     xmax = n_x_remain
                     xmin = 0
                     origin_x = 0
                 if i_page_y < n_pages_y:
-                    n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y
-                    ymax = (i_page_y + 1) * PAGE_N_SQUARES_Y
-                    ymin = ymax - PAGE_N_SQUARES_Y
-                    origin_y = i_page_y * PAGE_N_SQUARES_Y
+                    n_squares_y = (i_page_y + 1) * PAGE_N_SQUARES_Y - i_page_y * (PAGE_TOP_MARGIN + PAGE_BOTTOM_MARGIN)
+                    ymax = (i_page_y + 1) * (PAGE_N_SQUARES_Y - PAGE_TOP_MARGIN - PAGE_BOTTOM_MARGIN)
+                    ymin = ymax - (PAGE_N_SQUARES_Y - PAGE_TOP_MARGIN - PAGE_BOTTOM_MARGIN)
+                    origin_y = i_page_y * (PAGE_N_SQUARES_Y - PAGE_TOP_MARGIN) - (i_page_y + 1) * PAGE_BOTTOM_MARGIN
                 else:
-                    n_squares_y = i_page_y * PAGE_N_SQUARES_Y + n_y_remain
+                    n_squares_y = i_page_y * PAGE_N_SQUARES_Y - (i_page_y - 1) * (PAGE_TOP_MARGIN + PAGE_BOTTOM_MARGIN) + n_y_remain
                     ymax = total_n_squares_y
                     ymin = total_n_squares_y - n_y_remain
-                    origin_y = total_n_squares_y - PAGE_N_SQUARES_Y
+                    origin_y = total_n_squares_y - (PAGE_N_SQUARES_Y - PAGE_TOP_MARGIN)
 
                 if xmax == xmin or ymax == ymin:
                     continue
