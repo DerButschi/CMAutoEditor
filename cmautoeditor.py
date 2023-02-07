@@ -301,28 +301,32 @@ def process_segment(grid, start_height):
 
     return height
 
-def set_n_squares(start_n_x, start_n_y, n_x, n_y, init):
+def set_n_squares(start_n_x, start_n_y, n_x, n_y, mode='window'):
     n_clicks_x = abs(int((start_n_x - n_x) / 2))
     n_clicks_y = abs(int((start_n_y - n_y) / 2))
 
     for i in range(n_clicks_x):
         if n_x <= start_n_x:
-            if not init:
-                pyautogui.click(POS_HORIZONTAL_PLUS2, interval=0.05)    
-            pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.05)
+            if mode in ('window', 'finish'):
+                pyautogui.click(POS_HORIZONTAL_PLUS2, interval=0.05)
+            if mode in ('window', 'init'):
+                pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.05)
         else:
-            pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.05)
-            if not init:
+            if mode in ('window', 'init'):
+                pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.05)
+            if mode in ('window', 'finish'):
                 pyautogui.click(POS_HORIZONTAL_MINUS2, interval=0.05)    
     
     for i in range(n_clicks_y):
         if n_y <= start_n_y:
-            if not init:
+            if mode in ('window', 'finish'):
                 pyautogui.click(POS_VERTICAL_PLUS2, interval=0.05)    
-            pyautogui.click(POS_VERTICAL_MINUS, interval=0.05)
+            if mode in ('window', 'init'):
+                pyautogui.click(POS_VERTICAL_MINUS, interval=0.05)
         else:
-            pyautogui.click(POS_VERTICAL_PLUS, interval=0.05)
-            if not init:
+            if mode in ('window', 'init'):
+                pyautogui.click(POS_VERTICAL_PLUS, interval=0.05)
+            if mode in ('window', 'finish'):
                 pyautogui.click(POS_VERTICAL_MINUS2, interval=0.05)    
 
 def display_gui():
@@ -539,10 +543,10 @@ def start_editor(filepath, countdown, start_size_from_file=False):
                 #     continue
 
                 if prev_n_x == START_N_SQUARES_X and prev_n_y == START_N_SQUARES_Y:
-                    init = True
+                    mode = 'init'
                 else:
-                    init = False
-                set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y, init)
+                    mode = 'window'
+                set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y, mode)
                 prev_n_x = n_squares_x
                 prev_n_y = n_squares_y
 
@@ -556,6 +560,9 @@ def start_editor(filepath, countdown, start_size_from_file=False):
                 # set_roads(sub_df)
                 if 'menu' in map_df.columns:
                     set_ground(sub_df, map_df)
+
+        set_n_squares(total_n_squares_x, total_n_squares_y, PAGE_N_SQUARES_X, PAGE_N_SQUARES_Y, 'finish')
+        set_n_squares(total_n_squares_x, total_n_squares_y, total_n_squares_x, total_n_squares_y - PAGE_TOP_MARGIN, 'window')
 
     except pyautogui.FailSafeException:
         pass
