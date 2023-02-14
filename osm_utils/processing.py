@@ -271,6 +271,7 @@ def assign_type_from_tag(osm_processor, config, element_entry):
     grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
+    sub_df['priority'] = config[element_entry['name']]['priority']
 
     cm_type = get_matched_cm_type(config, element_entry)
     if cm_type is not None:
@@ -284,15 +285,32 @@ def assign_type_from_tag(osm_processor, config, element_entry):
 def create_line_graph(osm_processor, config, name):
     logger = logging.getLogger('osm2cm')
     lines = osm_processor.network_graphs[name]['lines']
-    lines_intersecting = lines.geometry.sindex.query_bulk(lines.geometry, 'intersects')
 
     line_graph = nx.MultiGraph()
+    lines_intersecting_dict = {}
+
+    for key in osm_processor.network_graphs.keys():
+        if not (key == name or 1 <= config[key]['priority'] <= config[name]['priority']):
+            continue
+        other_lines = osm_processor.network_graphs[key]['lines']
+        lines_intersecting = other_lines.geometry.sindex.query_bulk(lines.geometry, 'intersects')
+        lines_intersecting_dict[key] = lines_intersecting
 
     for line_idx in range(len(lines)):
         ls = lines.iloc[line_idx].geometry
-        other_line_indices = lines_intersecting[1][np.where(np.bitwise_and(lines_intersecting[0] == line_idx, lines_intersecting[1] != line_idx))[0]]
-        if len(other_line_indices) > 0:
-            intersection_points = lines.iloc[other_line_indices].intersection(ls).unique()
+        intersection_points = []
+        for key in lines_intersecting_dict.keys():
+            lines_intersecting = lines_intersecting_dict[key]
+            if key == name:
+                other_line_indices = lines_intersecting[1][np.where(np.bitwise_and(lines_intersecting[0] == line_idx, lines_intersecting[1] != line_idx))[0]]
+            else:
+                other_line_indices = lines_intersecting[1][np.where(lines_intersecting[0] == line_idx)[0]]
+
+            if len(other_line_indices) > 0:
+                other_lines = osm_processor.network_graphs[key]['lines']
+                intersection_points.extend(other_lines.iloc[other_line_indices].intersection(ls).unique())
+
+        if len(intersection_points) > 0:
             filtered_intersection_points = []
             for p in intersection_points:
                 if type(p) == Point:
@@ -492,6 +510,8 @@ def assign_type_randomly_in_area(osm_processor, config, element_entry):
         if key in sub_df.columns:
             sub_df.loc[:, key] = cm_type[key]
 
+    sub_df['priority'] = config[element_entry['name']]['priority']
+
     osm_processor._append_to_df(sub_df)
 
 
@@ -518,6 +538,8 @@ def assign_type_randomly_for_each_square(osm_processor, config, element_entry):
             for key in cm_type:
                 if type(cm_type[key]) != list and key in sub_df.columns:
                     sub_df.loc[sub_df.index[idx], key] = cm_type[key]
+
+    sub_df['priority'] = config[element_entry['name']]['priority']
 
     osm_processor._append_to_df(sub_df)
         
@@ -860,8 +882,8 @@ def process_building_outlines(osm_processor, config, name, building_type):
         plt.plot(*outline_entry[0].exterior.xy, '-m')
         plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
         matched_tiles_candidates = []
-        for is_diagonal in [True, False]:
-            squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal)
+        for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.33]):
+            squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal, min_square_overlap=min_square_overlap)
             if len(squares) == 0:
                 continue
 
@@ -930,10 +952,10 @@ def process_building_outlines(osm_processor, config, name, building_type):
 
         if (buildings.stories > 0).any() and (buildings.stories == 1).any() and (buildings.stories == 2).any() and (buildings.stories == 3).any():
             rng = np.random.default_rng()
-            level_int = rng.integers(0,4)
-            if level_int == 0:
+            level_int = rng.integers(0,10)
+            if 0 < level_int < 3:
                 level = 1
-            elif level_int == 1:
+            elif level_int == 3:
                 level = 3
             else:
                 level = 2
@@ -982,7 +1004,7 @@ def process_building_outlines(osm_processor, config, name, building_type):
     
     plt.show()
 
-def _get_matched_squares(osm_processor, priority, geometry, diagonal):
+def _get_matched_squares(osm_processor, priority, geometry, diagonal, min_square_overlap=0):
     if diagonal:
         diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
         diamonds = diag_grid_gdf.geometry
@@ -995,7 +1017,8 @@ def _get_matched_squares(osm_processor, priority, geometry, diagonal):
                 area_oidx.append(oidx[0][oi])
 
         intersecting_diamonds = intersecting_diamonds.drop(intersecting_diamonds.iloc[area_oidx].index)
-        idx = intersecting_diamonds.index
+        is_majority_square = intersecting_diamonds.intersection(geometry).area > 32 * min_square_overlap
+        idx = intersecting_diamonds[is_majority_square].index
         return diag_grid_gdf.iloc[idx]
     else:
         square_grid_gdf = osm_processor.sub_square_grid_gdf
@@ -1009,7 +1032,8 @@ def _get_matched_squares(osm_processor, priority, geometry, diagonal):
                 area_oidx.append(oidx[0][oi])
 
         intersecting_squares = intersecting_squares.drop(intersecting_squares.iloc[area_oidx].index)
-        idx = intersecting_squares.index
+        is_majority_square = intersecting_squares.intersection(geometry).area > 16 * min_square_overlap
+        idx = intersecting_squares[is_majority_square].index
         return square_grid_gdf.iloc[idx]
 
 def _get_rectangle_coords_starting_at_lower_left_corner(rectangle):
@@ -1195,6 +1219,8 @@ def single_object_random(osm_processor, config, element_entry):
             for key in cm_type:
                 if type(cm_type[key]) != list and key in sub_df.columns:
                     sub_df.loc[sub_df.index[idx], key] = cm_type[key]
+
+    sub_df['priority'] = config[element_entry['name']]['priority']
 
     osm_processor._append_to_df(sub_df)
 

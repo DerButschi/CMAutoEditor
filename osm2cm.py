@@ -124,7 +124,7 @@ class OSMProcessor:
         self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
 
     def _load_grid(self):
-        file_name_base = self.grid_file.split('_')[0]
+        file_name_base = str.join('_', self.grid_file.split('_')[:-1])
         import datetime
         dt = datetime.datetime.now()
         self.gdf = geopandas.GeoDataFrame.from_file(self.grid_file)
@@ -320,7 +320,9 @@ class OSMProcessor:
             xidx = self.df.loc[idx].xidx
             yidx = self.df.loc[idx].yidx
 
-            min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority >= 0)].priority.max()
+            min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx)].priority.max()
+            if min_valid_priority < 1:
+                continue
             indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > min_valid_priority)].index)
             indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority < 0)].index)
 
@@ -398,7 +400,7 @@ if __name__ == '__main__':
     # osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
     # osm_processor = OSMProcessor(config=config, bbox=[361607.305,5625049.525, 365540.291, 5627329.787])
     if args.grid_file is not None:
-        osm_processor = OSMProcessor(config=config, grid_file='schlingenbach_grid.shp')
+        osm_processor = OSMProcessor(config=config, grid_file=args.grid_file)
     else:
         osm_processor = OSMProcessor(config=config)
 
