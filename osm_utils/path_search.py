@@ -27,6 +27,7 @@ from heapq import heappop, heappush
 from itertools import count
 from networkx.algorithms.shortest_paths.weighted import _weight_function
 import itertools
+from tqdm import tqdm
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -42,7 +43,10 @@ road_direction_dict = {
 
 direction_dict = dict((v,k) for k,v in road_direction_dict.items())
 
-def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, source, target, current_path):
+def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, source, target, current_path, dist):
+    # Directly discard paths where the new node was already visited before the previous node
+    # if len(current_path) > 1 and node2 in current_path[-2::]:
+    #     return None
     # calculates the cost to go from current node (node1) to neighbor node (node2)
     # Caculate diff in squares between node1 and node2, obtain "direction" for that
     diff_node1_node2 = (node2[0] - node1[0], node2[1] - node1[1])
@@ -86,7 +90,7 @@ def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, sou
     if 'point' not in graph.nodes[node2]:
         graph.nodes[node2]['point'] = Point(node2)
 
-    point_node1 = graph.nodes[node1]['point']
+    # point_node1 = graph.nodes[node1]['point']
     point_node2 = graph.nodes[node2]['point']
 
     # # if all the checks above worked (i.e. there is a valid connection between both nodes),
@@ -95,13 +99,17 @@ def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, sou
     # cost1 = ref_line.interpolate(ref_line.project(point_node1)).distance(point_node1)
     # cost2 = ref_line.interpolate(ref_line.project(point_node2)).distance(point_node2)
     # return cost1 + cost2
-    ref_line_cut1 = substring(ref_line, 0, ref_line.project(point_node1))
+    # ref_line_cut1 = substring(ref_line, 0, ref_line.project(point_node1))
     ref_line_cut2 = substring(ref_line, 0, ref_line.project(point_node2))
     
-    geom1 = point_node1 if len(current_path) == 1 else LineString(current_path)
-    geom2 = LineString(current_path + [node2])
+    # geom1 = point_node1 if len(current_path) == 1 else LineString(current_path)
+    # geom2 = LineString(current_path + [node2])
 
-    return np.abs(geom2.hausdorff_distance(ref_line_cut2) - geom1.hausdorff_distance(ref_line_cut1))
+    # np.testing.assert_allclose(np.abs(geom2.hausdorff_distance(ref_line_cut2) - geom1.hausdorff_distance(ref_line_cut1)), max(np.min([Point(*ref_line_cut2.coords[i]).distance(Point(node2)) for i in range(len(ref_line_cut2.coords))]), dist) - dist)
+
+    # return np.abs(geom2.hausdorff_distance(ref_line_cut2) - geom1.hausdorff_distance(ref_line_cut1))
+    # return max(np.min([Point(*ref_line_cut2.coords[i]).distance(Point(node2)) for i in range(len(ref_line_cut2.coords))]), dist) - dist
+    return np.min([Point(*ref_line_cut2.coords[i]).distance(Point(node2)) for i in range(len(ref_line_cut2.coords))])
 
 def _find_astar_path(start_node, end_node, grid_graph, ls, tiles, allow_vary_first_node=False):
     path_found = False
@@ -143,7 +151,7 @@ def _find_astar_path(start_node, end_node, grid_graph, ls, tiles, allow_vary_fir
     else:
         return None
 
-def search_path(osm_processor, config, name):
+def search_path(osm_processor, config, name, tqdm_string):
     logger = logging.getLogger('osm2cm')
 
     if 'road_tiles' in config[name]['process']:
@@ -197,117 +205,123 @@ def search_path(osm_processor, config, name):
     # for g in grid_gdf.geometry.values:
     #     plt.plot(g.exterior.xy[0], g.exterior.xy[1], '-k', linewidth=0.1)
 
-    while len(edges_to_process) > 0:
-        edge_idx = edges_to_process.pop()
-        edge = edge_list[edge_idx]
-        # count += 1
-        # if count > 5:
-        #     break
-        closest_node_to_start = _get_closest_node_in_gdf(grid_gdf, edge[0])
-        closest_node_to_end = _get_closest_node_in_gdf(grid_gdf, edge[1])
+    with tqdm(total=len(edges_to_process)) as pbar:
+        pbar.desc = tqdm_string
+        while len(edges_to_process) > 0:
+            edge_idx = edges_to_process.pop()
+            edge = edge_list[edge_idx]
+            # count += 1
+            # if count > 5:
+            #     break
+            closest_node_to_start = _get_closest_node_in_gdf(grid_gdf, edge[0])
+            closest_node_to_end = _get_closest_node_in_gdf(grid_gdf, edge[1])
 
-        edge_data = line_graph.get_edge_data(*edge)
-        ls = edge_data['ls']
-        ls_points = []
-        for coord in ls.coords:
-            p_grid_closest = _get_closest_node_in_gdf(grid_gdf, coord)
-            # if p_grid_closest not in ls_valid:
-            #     ls_valid.append(p_grid_closest)
-            if len(ls_points) == 0 or (len(ls_points) > 0 and p_grid_closest != ls_points[-1]):
-                ls_points.append(p_grid_closest)
-        
-        if len(ls_points) < 2:
-            continue
-        ls_valid = LineString(ls_points)
+            edge_data = line_graph.get_edge_data(*edge)
+            ls = edge_data['ls']
+            ls_points = []
+            for coord in ls.coords:
+                p_grid_closest = _get_closest_node_in_gdf(grid_gdf, coord)
+                # if p_grid_closest not in ls_valid:
+                #     ls_valid.append(p_grid_closest)
+                if len(ls_points) == 0 or (len(ls_points) > 0 and p_grid_closest != ls_points[-1]):
+                    ls_points.append(p_grid_closest)
+            
+            if len(ls_points) < 2:
+                continue
+            ls_valid = LineString(ls_points)
 
-        # path = []
-        # for i in range(1, len(ls_points)):
-        #     if len(path) == 0:
-        #         node1 = ls_points[i-1]
-        #     else:
-        #         node1 = path[-1]
-        #     node2 = ls_points[i]
-        #     allow_vary_first_node = False if i > 1 else True
-        #     path_segment = _find_astar_path(node1, node2, grid_graph, LineString([node1, node2]), tiles, allow_vary_first_node)
-        #     if path_segment is not None:
-        #         if len(path) == 0:
-        #             path.extend(path_segment)
-        #         elif len(path_segment) > 1:
-        #             path.extend(path_segment[1:])
-        #     else:
-        #         break
+            # path = []
+            # for i in range(1, len(ls_points)):
+            #     if len(path) == 0:
+            #         node1 = ls_points[i-1]
+            #     else:
+            #         node1 = path[-1]
+            #     node2 = ls_points[i]
+            #     allow_vary_first_node = False if i > 1 else True
+            #     path_segment = _find_astar_path(node1, node2, grid_graph, LineString([node1, node2]), tiles, allow_vary_first_node)
+            #     if path_segment is not None:
+            #         if len(path) == 0:
+            #             path.extend(path_segment)
+            #         elif len(path_segment) > 1:
+            #             path.extend(path_segment[1:])
+            #     else:
+            #         break
 
-        path = _find_astar_path(ls_points[0], ls_points[-1], grid_graph, LineString(ls_points), tiles, allow_vary_first_node=True)
+            path = _find_astar_path(ls_points[0], ls_points[-1], grid_graph, LineString(ls_points), tiles, allow_vary_first_node=True)
 
-        if path is None or len(path) == 0:
-            logger.debug('No path found from {} to {}.'.format(edge[0], edge[1]))
-            plt.plot(ls.xy[0], ls.xy[1], '-ro')
-            continue
+            if path is None or len(path) == 0:
+                logger.debug('No path found from {} to {}.'.format(edge[0], edge[1]))
+                plt.plot(ls.xy[0], ls.xy[1], '-ro')
+                continue
 
 
-        # check if path crosses the path of another edge at node that is not the start or end node
-        crosses = False
-        for node_idx in range(1, len(path)-1):
-            node = path[node_idx]
-            node_dict = grid_graph.nodes[node]
-            if 'connections' in node_dict and len(node_dict['connections']) > 2:
-                crosses = True
-                edges_to_process.append(edge_idx)
-                other_edge_idx = node_dict['edges'][-1]
-                edges_to_process.append(other_edge_idx)
+            # check if path crosses the path of another edge at node that is not the start or end node
+            crosses = False
+            for node_idx in range(1, len(path)-1):
+                node = path[node_idx]
+                node_dict = grid_graph.nodes[node]
+                if 'connections' in node_dict and len(node_dict['connections']) > 2:
+                    crosses = True
+                    edges_to_process.append(edge_idx)
+                    other_edge_idx = node_dict['edges'][-1]
+                    edges_to_process.append(other_edge_idx)
 
-                logger.debug('Edge {} crosses edge {} reprocessing both.'.format(edge_idx, other_edge_idx))
+                    logger.debug('Edge {} crosses edge {} reprocessing both.'.format(edge_idx, other_edge_idx))
 
-                # remove the other edge from the grid_graph
-                other_path = path_dict[other_edge_idx]
-                for other_nodes in other_path[0]:
-                    indices_to_remove = []
-                    for lidx, eidx in enumerate(grid_graph.nodes[other_nodes]['edges']):
-                        if eidx == other_edge_idx:
-                            indices_to_remove.append(lidx)
-                
-                    for lidx in indices_to_remove[::-1]:
-                        grid_graph.nodes[other_nodes]['edges'].pop(lidx)
-                        grid_graph.nodes[other_nodes]['connections'].pop(lidx)
+                    # remove the other edge from the grid_graph
+                    other_path = path_dict[other_edge_idx]
+                    for other_nodes in other_path[0]:
+                        indices_to_remove = []
+                        for lidx, eidx in enumerate(grid_graph.nodes[other_nodes]['edges']):
+                            if eidx == other_edge_idx:
+                                indices_to_remove.append(lidx)
+                    
+                        for lidx in indices_to_remove[::-1]:
+                            grid_graph.nodes[other_nodes]['edges'].pop(lidx)
+                            grid_graph.nodes[other_nodes]['connections'].pop(lidx)
 
-        if crosses:
-            continue
+            if crosses:
+                continue
 
-        for nidx, node in enumerate(path):
-            if nidx < len(path) - 1:
-                next_node = path[nidx + 1]
-                diff = (next_node[0] - node[0], next_node[1] - node[1])
-                direction = road_direction_dict[diff]
-                if not 'connections' in grid_graph.nodes[path[nidx]]:
-                    grid_graph.nodes[path[nidx]]['connections'] = []
-                    grid_graph.nodes[path[nidx]]['edges'] = []
-                grid_graph.nodes[path[nidx]]['connections'].append(direction)
-                grid_graph.nodes[path[nidx]]['edges'].append(edge_idx)
-            if nidx > 0:
-                prev_node = path[nidx - 1]
-                diff = (prev_node[0] - node[0], prev_node[1] - node[1])
-                direction = road_direction_dict[diff]
-                if not 'connections' in grid_graph.nodes[path[nidx]]:
-                    grid_graph.nodes[path[nidx]]['connections'] = []
-                    grid_graph.nodes[path[nidx]]['edges'] = []
-                grid_graph.nodes[path[nidx]]['connections'].append(direction)
-                grid_graph.nodes[path[nidx]]['edges'].append(edge_idx)
+            for nidx, node in enumerate(path):
+                if nidx < len(path) - 1:
+                    next_node = path[nidx + 1]
+                    diff = (next_node[0] - node[0], next_node[1] - node[1])
+                    direction = road_direction_dict[diff]
+                    if not 'connections' in grid_graph.nodes[path[nidx]]:
+                        grid_graph.nodes[path[nidx]]['connections'] = []
+                        grid_graph.nodes[path[nidx]]['edges'] = []
+                    grid_graph.nodes[path[nidx]]['connections'].append(direction)
+                    grid_graph.nodes[path[nidx]]['edges'].append(edge_idx)
+                if nidx > 0:
+                    prev_node = path[nidx - 1]
+                    diff = (prev_node[0] - node[0], prev_node[1] - node[1])
+                    direction = road_direction_dict[diff]
+                    if not 'connections' in grid_graph.nodes[path[nidx]]:
+                        grid_graph.nodes[path[nidx]]['connections'] = []
+                        grid_graph.nodes[path[nidx]]['edges'] = []
+                    grid_graph.nodes[path[nidx]]['connections'].append(direction)
+                    grid_graph.nodes[path[nidx]]['edges'].append(edge_idx)
 
-        xy = [grid_gdf.loc[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1]), ['x', 'y']].values[0] for p in path]
-        if len(path) == 1:
-            plt.plot(ls.xy[0], ls.xy[1], ':go')
-            plt.plot(xy[0][0], xy[0][1], 'go')
-            continue
-        plt.plot(ls.xy[0], ls.xy[1], ':ko')
-        plt.text(ls.interpolate(0.5, normalized=True).x, ls.interpolate(0.5, normalized=True).y, str(edge_idx))
-        # square_geom = [grid_gdf[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1])].geometry.values[0] for p in path]
-        ls_xy = LineString(xy)
-        plt.plot([xy[i][0] for i in range(len(xy))], [xy[i][1] for i in range(len(xy))], '-b')
-        plt.plot(xy[0][0], xy[0][1], 'bo')
-        plt.plot(xy[-1][0], xy[-1][1], 'bD')
-        plt.text(ls_xy.interpolate(0.5, normalized=True).x, ls_xy.interpolate(0.5, normalized=True).y, str(edge_idx), color='b')
+            xy = [grid_gdf.loc[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1]), ['x', 'y']].values[0] for p in path]
+            if len(path) == 1:
+                plt.plot(ls.xy[0], ls.xy[1], ':go')
+                plt.plot(xy[0][0], xy[0][1], 'go')
+                continue
+            plt.plot(ls.xy[0], ls.xy[1], ':ko')
+            plt.text(ls.interpolate(0.5, normalized=True).x, ls.interpolate(0.5, normalized=True).y, str(edge_idx))
+            # square_geom = [grid_gdf[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1])].geometry.values[0] for p in path]
+            ls_xy = LineString(xy)
+            plt.plot([xy[i][0] for i in range(len(xy))], [xy[i][1] for i in range(len(xy))], '-b')
+            plt.plot(xy[0][0], xy[0][1], 'bo')
+            plt.plot(xy[-1][0], xy[-1][1], 'bD')
+            plt.text(ls_xy.interpolate(0.5, normalized=True).x, ls_xy.interpolate(0.5, normalized=True).y, str(edge_idx), color='b')
 
-        path_dict[edge_idx] = [path, edge_data['element_idx']]
+            path_dict[edge_idx] = [path, edge_data['element_idx']]
+
+            pbar.total = len(edges_to_process)
+            pbar.refresh()
+            pbar.update(1)
 
     plt.show()
 
@@ -335,7 +349,7 @@ def search_path(osm_processor, config, name):
             square_graph.add_edge(sub_path[0], sub_path[-1], squares=sub_path, element_idx=edge_data, from_node_to_node=[sub_path[0], sub_path[-1]])
 
     # grid graph is persistent over all path searches, so remove already used nodes
-    if config[name]['priority'] < 0:
+    if config[name]['priority'] < 1:
         osm_processor.grid_graph = None
     else:
         for edge_idx in path_dict.keys():
@@ -666,8 +680,8 @@ def custom_weight_astar_path(G, source, target, heuristic=None, weight="weight",
         explored[curnode] = parent
 
         for neighbor, w in G[curnode].items():
-            cost = weight(G, curnode, neighbor, w, ref, tiles, source, target, _get_current_path(curnode, parent, explored))
-            if cost is None:
+            cost = weight(G, curnode, neighbor, w, ref, tiles, source, target, _get_current_path(curnode, parent, explored), dist)
+            if cost is None or cost > 5:
                 continue
             ncost = dist + cost
             if neighbor in enqueued:
@@ -682,6 +696,10 @@ def custom_weight_astar_path(G, source, target, heuristic=None, weight="weight",
                 h = heuristic(neighbor, target)
             enqueued[neighbor] = ncost, h
             push(queue, (ncost + h, next(c), neighbor, ncost, curnode))
+
+        # if len(_get_current_path(curnode, parent, explored)) > 1 and LineString(_get_current_path(curnode, parent, explored)).length > ref.length * 5:
+        #     raise nx.NetworkXNoPath(f"Node {target} not reachable from {source}")
+
 
     raise nx.NetworkXNoPath(f"Node {target} not reachable from {source}")
 

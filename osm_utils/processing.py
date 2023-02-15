@@ -30,6 +30,7 @@ from matplotlib.collections import PolyCollection
 from osm_utils.geometry import find_concave_vertices, find_chords, find_subdividing_chords, rectangulate_polygon
 import itertools
 from copy import deepcopy
+from tqdm import tqdm
 
 
 DRAW_DEBUG_PLOTS = False
@@ -282,7 +283,7 @@ def assign_type_from_tag(osm_processor, config, element_entry):
         osm_processor._append_to_df(sub_df)
 
 
-def create_line_graph(osm_processor, config, name):
+def create_line_graph(osm_processor, config, name, tqdm_string):
     logger = logging.getLogger('osm2cm')
     lines = osm_processor.network_graphs[name]['lines']
 
@@ -296,7 +297,7 @@ def create_line_graph(osm_processor, config, name):
         lines_intersecting = other_lines.geometry.sindex.query_bulk(lines.geometry, 'intersects')
         lines_intersecting_dict[key] = lines_intersecting
 
-    for line_idx in range(len(lines)):
+    for line_idx in tqdm(range(len(lines)), tqdm_string):
         ls = lines.iloc[line_idx].geometry
         intersection_points = []
         for key in lines_intersecting_dict.keys():
@@ -544,19 +545,19 @@ def assign_type_randomly_for_each_square(osm_processor, config, element_entry):
     osm_processor._append_to_df(sub_df)
         
 
-def assign_road_tiles_to_network(osm_processor, config, name):
-    assign_tiles_to_network(osm_processor, config, name, road_tiles)
+def assign_road_tiles_to_network(osm_processor, config, name, tqdm_string):
+    assign_tiles_to_network(osm_processor, config, name, road_tiles, tqdm_string)
 
-def assign_rail_tiles_to_network(osm_processor, config, name):
-    assign_tiles_to_network(osm_processor, config, name, rail_tiles)
+def assign_rail_tiles_to_network(osm_processor, config, name, tqdm_string):
+    assign_tiles_to_network(osm_processor, config, name, rail_tiles, tqdm_string)
 
-def assign_stream_tiles_to_network(osm_processor, config, name):
-    assign_tiles_to_network(osm_processor, config, name, stream_tiles)
+def assign_stream_tiles_to_network(osm_processor, config, name, tqdm_string):
+    assign_tiles_to_network(osm_processor, config, name, stream_tiles, tqdm_string)
 
-def assign_fence_tiles_to_network(osm_processor, config, name):
-    assign_tiles_to_network(osm_processor, config, name, fence_tiles)
+def assign_fence_tiles_to_network(osm_processor, config, name, tqdm_string):
+    assign_tiles_to_network(osm_processor, config, name, fence_tiles, tqdm_string)
 
-def assign_tiles_to_network(osm_processor, config, name, tile_df):
+def assign_tiles_to_network(osm_processor, config, name, tile_df, tqdm_string):
     logger = logging.getLogger('osm2cm')
     square_graph = osm_processor.network_graphs[name]['square_graph']
     edge_graphs = {}
@@ -671,7 +672,7 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df):
 
     gdf = osm_processor.gdf
 
-    for edge in edge_graphs:
+    for edge in tqdm(edge_graphs, tqdm_string):
         node1_id, node2_id, edge_key = edge
 
         if node1_id not in valid_tiles_dict or len(valid_tiles_dict[node1_id]) == 0:
@@ -806,9 +807,9 @@ def collect_network_data(osm_processor, config, element_entry):
         else:
             osm_processor.network_graphs[name]['lines'] = pandas.concat((osm_processor.network_graphs[name]['lines'], element_gdf), ignore_index=True)
         
-def create_square_graph_path_search(osm_processor, config, name):
+def create_square_graph_path_search(osm_processor, config, name, tqdm_string):
     # search_path(osm_processor.network_graphs[name]['line_graph'], osm_processor.gdf, osm_processor.df)
-    search_path(osm_processor, config, name)
+    search_path(osm_processor, config, name, tqdm_string)
 
 def collect_building_outlines(osm_processor, config, element_entry):
     logger = logging.getLogger('osm2cm')
@@ -837,7 +838,7 @@ def collect_building_outlines(osm_processor, config, element_entry):
     p_xaxis_max = grid_gdf.loc[(grid_gdf.xidx == grid_gdf.xidx.max()) & (grid_gdf.yidx == grid_gdf.yidx.min()), ['x', 'y']].values[0]
     axis_angle = np.arctan2(p_xaxis_max[1] - origin[1], p_xaxis_max[0] - origin[0])
 
-    base_angle = (base_angle - axis_angle) % (2 * np.pi) - np.pi
+    base_angle = _angle_diff(base_angle, axis_angle)
 
     osm_processor.building_outlines[element_entry['name']][element_entry['idx']] = (geometry, base_angle)
 
@@ -846,13 +847,13 @@ def collect_building_outlines(osm_processor, config, element_entry):
     # else:
     #     is_diagonal = True
 
-def process_residential_building_outlines(osm_processor, config, name):
-    process_building_outlines(osm_processor, config, name, 'residential_buildings')
+def process_residential_building_outlines(osm_processor, config, name, tqdm_string):
+    process_building_outlines(osm_processor, config, name, 'residential_buildings', tqdm_string)
 
-def process_church_outlines(osm_processor, config, name):
-    process_building_outlines(osm_processor, config, name, 'churches')
+def process_church_outlines(osm_processor, config, name, tqdm_string):
+    process_building_outlines(osm_processor, config, name, 'churches', tqdm_string)
 
-def process_building_outlines(osm_processor, config, name, building_type):
+def process_building_outlines(osm_processor, config, name, building_type, tqdm_string):
     logger = logging.getLogger('osm2cm')
     raw_outlines = osm_processor.building_outlines[name]
 
@@ -878,11 +879,17 @@ def process_building_outlines(osm_processor, config, name, building_type):
     occupancy_collection = PolyCollection(occupancy_vertices, closed=False, edgecolor='g', facecolor='g')
     ax.add_collection(grid_collection)
     ax.add_collection(occupancy_collection)
-    for element_idx, outline_entry in raw_outlines.items():
+    for element_idx, outline_entry in tqdm(raw_outlines.items(), tqdm_string):
         plt.plot(*outline_entry[0].exterior.xy, '-m')
         plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
         matched_tiles_candidates = []
-        for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.33]):
+        if np.abs(outline_entry[1]) < np.pi / 8:
+            is_diagonal = False
+        else:
+            is_diagonal = True
+
+        # for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.33]):
+        for min_square_overlap in [0, 0.33]:
             squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal, min_square_overlap=min_square_overlap)
             if len(squares) == 0:
                 continue
@@ -1283,3 +1290,10 @@ def _rowcol2idx(row, col, bounds, is_diagonal):
         xidx = col / 2 + xmin
 
     return xidx, yidx
+
+def _angle_diff(angle1, angle2):
+    angle_diff = abs(angle1 - angle2) % (2 * np.pi)
+    if angle_diff > np.pi:
+        angle_diff = 2 * np.pi - angle_diff
+
+    return angle_diff

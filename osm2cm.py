@@ -300,11 +300,14 @@ class OSMProcessor:
         for priority in sorted(stages.keys()):
             for stage_idx in sorted(stages[priority].keys()):
                 for stage in stages[priority][stage_idx]:
-                    for item in tqdm(stages[priority][stage_idx][stage], 'Processing Priority {}, Stage {}, processor {}'.format(priority, stage_idx, stage)):
-                        if type(item) == int:
+                    if type(stages[priority][stage_idx][stage][0]) == int:
+                        for item in tqdm(stages[priority][stage_idx][stage], 'Processing Priority {}, Stage {}, processor {}'.format(priority, stage_idx, stage)):
                             osm_utils.processing.__getattribute__(stage)(self, config, self.matched_elements[item])
-                        else:
-                            osm_utils.processing.__getattribute__(stage)(self, config, item)
+                    else:
+                        for item in stages[priority][stage_idx][stage]:
+                            osm_utils.processing.__getattribute__(stage)(self, config, item, tqdm_string='Processing Priority {}, Stage {}, processor {}'.format(priority, stage_idx, stage))
+
+                            
 
         # plt.axis('equal')
         # plt.show()
