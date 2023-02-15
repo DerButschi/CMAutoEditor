@@ -840,7 +840,12 @@ def collect_building_outlines(osm_processor, config, element_entry):
 
     base_angle = _angle_diff(base_angle, axis_angle)
 
-    osm_processor.building_outlines[element_entry['name']][element_entry['idx']] = (geometry, base_angle)
+    if np.abs(base_angle) < np.pi / 8 or np.pi * 3 / 8 <= np.abs(base_angle) < np.pi * 5 / 8 or np.abs(base_angle) > np.pi * 7 / 8:
+        is_diagonal = False
+    else:
+        is_diagonal = True
+
+    osm_processor.building_outlines[element_entry['name']][element_entry['idx']] = (geometry, is_diagonal)
 
     # if np.abs(base_angle) < np.pi / 8:
     #     is_diagonal = False
@@ -883,13 +888,9 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
         plt.plot(*outline_entry[0].exterior.xy, '-m')
         plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
         matched_tiles_candidates = []
-        if np.abs(outline_entry[1]) < np.pi / 8:
-            is_diagonal = False
-        else:
-            is_diagonal = True
 
-        # for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.33]):
-        for min_square_overlap in [0, 0.33]:
+        for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.33]):
+        # for min_square_overlap in [0, 0.33]:
             squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal, min_square_overlap=min_square_overlap)
             if len(squares) == 0:
                 continue
@@ -943,7 +944,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
         if len(matched_tiles_candidates) == 0:
             continue
 
-        matched_tiles_candidates = sorted(matched_tiles_candidates, key=lambda x: -x[2])
+        matched_tiles_candidates = sorted(matched_tiles_candidates, key=lambda x: (x[0] != outline_entry[1], -x[2]))
 
         matched_tiles = matched_tiles_candidates[0]
         
