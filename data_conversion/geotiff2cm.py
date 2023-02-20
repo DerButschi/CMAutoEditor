@@ -104,9 +104,9 @@ def process_geotiff(args):
                 x_arr = []
                 y_arr = []
                 z_arr = []
-                pbar = tqdm(total=(pic_bottom - pic_top + 2) * (pic_right - pic_left + 2))
-                for row in range(pic_top-1, pic_bottom+2):
-                    for col in range(pic_left-1, pic_right+2):
+                pbar = tqdm(total=(pic_bottom - pic_top) * (pic_right - pic_left))
+                for row in range(pic_top, pic_bottom):
+                    for col in range(pic_left, pic_right):
                         x, y = transformer.xy(row, col)
                         z = pic_data[row, col]
                         x_arr.append(x)
