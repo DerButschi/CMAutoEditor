@@ -182,6 +182,7 @@ MENU_DICT = {
     'Pond': pyautogui.Point(81, 554),
     'Bench': pyautogui.Point(135, 383),
     'Roadside': pyautogui.Point(191, 554),
+    'Tel Pole': pyautogui.Point(27, 494),
     'Object 1': pyautogui.Point(36, 614),
     'Object 2': pyautogui.Point(110, 614),
     'Object 3': pyautogui.Point(185, 614),
