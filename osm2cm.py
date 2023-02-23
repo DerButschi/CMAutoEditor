@@ -165,7 +165,11 @@ class OSMProcessor:
             # geometry = geometry.to_crs(epsg=25832)
             # return geometry[0]
 
-            geometry_object = shape(geojson_geometry)
+            try:
+                geometry_object = shape(geojson_geometry)
+            except:
+                return None
+
             projected_geometry_object = transform(self.transformer.transform, geometry_object)
 
             return projected_geometry_object
@@ -201,8 +205,12 @@ class OSMProcessor:
 
 
         element_idx = 0
+        unprocessed_tags = {'key': [], 'value': []}
         for element in tqdm(osm_data.features, 'Preprocessing OSM Data'):
+            element_matched = False
             geometry = self._get_projected_geometry(element.geometry)
+            if geometry is None:
+                continue
 
             if bbox_from_data:
                 xmin = min(xmin, geometry.bounds[0])
@@ -254,6 +262,17 @@ class OSMProcessor:
                 if matched:
                     self.matched_elements.append({'element': element, 'geometry': geometry, 'name': name, 'idx': element_idx})
                     element_idx += 1
+                    element_matched = True
+
+            if not element_matched:
+                for key, value in element_tags.items():
+                    unprocessed_tags['key'].append(key)
+                    unprocessed_tags['value'].append(value)
+            
+        unprocessed_tags_df = pandas.DataFrame(unprocessed_tags)
+        unprocessed_tags_df = unprocessed_tags_df.drop_duplicates()
+        unprocessed_tags_df.to_csv('unprocessed_tags.csv')
+
 
         if self.grid_file is None:
             self._init_grid([xmin, ymin, xmax, ymax])
@@ -323,8 +342,11 @@ class OSMProcessor:
             xidx = self.df.loc[idx].xidx
             yidx = self.df.loc[idx].yidx
 
-            min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx)].priority.max()
-            if min_valid_priority < 1:
+            # min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx)].priority.max()
+            min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > 0)].priority.min()
+            # if min_valid_priority < 1:
+            #     continue
+            if np.isnan(min_valid_priority):
                 continue
             indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > min_valid_priority)].index)
             indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority < 0)].index)

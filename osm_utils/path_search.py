@@ -323,7 +323,7 @@ def search_path(osm_processor, config, name, tqdm_string):
             pbar.refresh()
             pbar.update(1)
 
-    plt.show()
+    plt.savefig('debug/path_search_{}.svg'.format(name))
 
     # create square graph from paths
     for edge_idx in path_dict.keys():

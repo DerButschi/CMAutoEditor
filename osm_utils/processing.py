@@ -816,6 +816,9 @@ def collect_building_outlines(osm_processor, config, element_entry):
 
     grid_gdf = osm_processor.sub_square_grid_gdf
     geometry = element_entry['geometry']
+    if type(geometry) == MultiPolygon:
+        logger.warn('Building geometries of type MultiPolygon are not supported.')
+        return
     if not geometry.intersects(osm_processor.effective_bbox_polygon):
         return
 
@@ -860,6 +863,9 @@ def process_church_outlines(osm_processor, config, name, tqdm_string):
 
 def process_building_outlines(osm_processor, config, name, building_type, tqdm_string):
     logger = logging.getLogger('osm2cm')
+    if name not in osm_processor.building_outlines:
+        return
+    
     raw_outlines = osm_processor.building_outlines[name]
 
     diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
@@ -889,7 +895,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
         plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
         matched_tiles_candidates = []
 
-        for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.33]):
+        for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.33, 0.5]):
         # for min_square_overlap in [0, 0.33]:
             squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal, min_square_overlap=min_square_overlap)
             if len(squares) == 0:
@@ -1010,7 +1016,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
             
             osm_processor._append_to_df(sub_df)
     
-    plt.show()
+    plt.savefig('debug/buildings.svg')
 
 def _get_matched_squares(osm_processor, priority, geometry, diagonal, min_square_overlap=0):
     if diagonal:
@@ -1205,7 +1211,13 @@ def single_object_random(osm_processor, config, element_entry):
     n_types = len(cm_types)
     df = osm_processor.df
 
-    grid_cell = osm_processor.gdf.sindex.query(element_entry["geometry"], predicate='within')
+
+    if type(element_entry["geometry"]) != Point:
+        geometry = element_entry["geometry"].centroid
+    else:
+        geometry = element_entry["geometry"]
+
+    grid_cell = osm_processor.gdf.sindex.query(geometry, predicate='within')
     if len(grid_cell) == 0:
         return
     
