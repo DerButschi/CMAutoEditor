@@ -544,6 +544,51 @@ def assign_type_randomly_for_each_square(osm_processor, config, element_entry):
 
     osm_processor._append_to_df(sub_df)
         
+def assign_type_at_linear_feature(osm_processor, config, name, tqdm_string):
+    logger = logging.getLogger('osm2cm')
+    if not "modifiers" in config[name]:
+        logger.warn('Process \'type_from_linear\' requires modifiers, key was not found for {}, though.'.format(name))
+        return
+    if not "linear_name" in config[name]['modifiers']:
+        logger.warn('Process \'type_from_linear\' requires modifier \'linear_name\', modifier was not found for {}, though.'.format(name))
+        return
+
+    cm_types = config[name]['cm_types']
+    n_types = len(cm_types)
+
+    # FIXME (osm_processor.df.menu != -1) shouldn't really be necessary. But otherwise not just the actual squares but all squares within the bounding box of the linear feature
+    # are selected.
+    idx_values = osm_processor.df.loc[(osm_processor.df.name == config[name]['modifiers']['linear_name']) & (osm_processor.df.menu != -1), ['xidx', 'yidx']].values
+    cell_indices = []
+    for idx in range(len(idx_values)):
+        cell_idx = osm_processor.gdf.loc[(osm_processor.gdf.xidx == idx_values[idx,0]) & (osm_processor.gdf.yidx == idx_values[idx,1])].index
+        if len(cell_idx) > 0:
+            cell_indices.append(cell_idx[0])
+
+    if len(cell_indices) == 0:
+        return
+    
+    sub_df = osm_processor._get_sub_df(cell_indices)
+
+    sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
+    probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
+
+    rng = np.random.default_rng()
+    type_indices = rng.choice(list(range(n_types)), p=probabilities, size=(len(sub_df),))
+
+    # type_indices = np.random.randint(0, n_types, size=(len(sub_df),))
+    for type_idx in range(n_types):
+        idx = np.where(type_indices == type_idx)[0]
+        if len(idx) > 0:
+            cm_type = cm_types[type_idx]
+            for key in cm_type:
+                if type(cm_type[key]) != list and key in sub_df.columns:
+                    sub_df.loc[sub_df.index[idx], key] = cm_type[key]
+
+    sub_df['priority'] = config[name]['priority']
+
+    osm_processor._append_to_df(sub_df)
+
 
 def assign_road_tiles_to_network(osm_processor, config, name, tqdm_string):
     assign_tiles_to_network(osm_processor, config, name, road_tiles, tqdm_string)
@@ -919,7 +964,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
                 match_polygon[int(rowcol[0] - matched_square_rowcols[:,0].min()), int(rowcol[1] - matched_square_rowcols[:,1].min())] = 1
 
             tiles = list(set([(t[0], t[1]) for t in buildings[buildings.is_diagonal == is_diagonal].loc[:,['width', 'height']].values]))
-            solution = branch_and_bound(match_polygon, tiles)
+            solution = branch_and_bound(match_polygon, tiles, (buildings.is_modular).any())
 
             if len(solution[2]) == 0:
                 continue
@@ -1016,7 +1061,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
             
             osm_processor._append_to_df(sub_df)
     
-    plt.savefig('debug/buildings.svg')
+    plt.savefig('debug/buildings_{}.svg'.format(name))
 
 def _get_matched_squares(osm_processor, priority, geometry, diagonal, min_square_overlap=0):
     if diagonal:
@@ -1247,16 +1292,37 @@ def single_object_random(osm_processor, config, element_entry):
 
 from typing import List, Tuple
 
-def branch_and_bound(polygon: np.array, tiles: List) -> Tuple[List[List[int]], int]:
+def branch_and_bound(polygon: np.array, tiles: List, modular: bool = False) -> Tuple[List[List[int]], int]:
     best_solution = (polygon, float('inf'))
-    def cost(used_tiles, polygon):
-        unfilled_square_indices = np.where(polygon == 1)
-        unfilled_square_cost = len(unfilled_square_indices[0])
-        for i in range(len(unfilled_square_indices[0])):
-            idx0 = unfilled_square_indices[0][i]
-            idx1 = unfilled_square_indices[1][i]
-            if 0 < idx0 < polygon.shape[0] - 1 and 0 < idx1 < polygon.shape[1] - 1 and (polygon[idx0 - 1:idx0+2, idx1 - 1:idx1+2] == 1).all():
-                unfilled_square_cost += 1
+    def cost(used_tiles, polygon, modular):
+        if len(used_tiles) > 0 and not modular:
+            return float('inf')
+        
+        cost_polygon = np.copy(polygon)
+        unfilled_square_indices = np.where(cost_polygon == 1)
+        # unfilled_square_cost = len(unfilled_square_indices[0])
+        # for i in range(len(unfilled_square_indices[0])):
+        #     idx0 = unfilled_square_indices[0][i]
+        #     idx1 = unfilled_square_indices[1][i]
+        #     if 0 < idx0 < polygon.shape[0] - 1 and 0 < idx1 < polygon.shape[1] - 1 and (polygon[idx0 - 1:idx0+2, idx1 - 1:idx1+2] == 1).all():
+        #         unfilled_square_cost += 1
+        unfilled_square_cost = 0
+        cnt = 1
+        go_on = True
+        while go_on:
+            go_on = False
+            unaccounted_square_indices = np.where(cost_polygon == cnt)
+            cost_polygon[cost_polygon == cnt] = cnt + 1
+            for i in range(len(unaccounted_square_indices[0])):
+                idx0 = unaccounted_square_indices[0][i]
+                idx1 = unaccounted_square_indices[1][i]
+                border_squares_idx = np.where(cost_polygon[max(idx0-1,0):min(idx0+1,cost_polygon.shape[0])+1, max(idx1-1,0):min(idx1+1,cost_polygon.shape[1])+1] < cnt)
+                if len(border_squares_idx[0]) > 0:
+                    unfilled_square_cost += cnt
+                    go_on = True
+                    cost_polygon[idx0, idx1] = cnt
+
+            cnt += 1
         
         return 0.5 * len(used_tiles) + unfilled_square_cost
 
@@ -1275,9 +1341,9 @@ def branch_and_bound(polygon: np.array, tiles: List) -> Tuple[List[List[int]], i
                             polygon[i:i + tile[0], j:j + tile[1]] = 0
                             used_tiles = deepcopy(used_tiles)
                             used_tiles.append((tile, i, j, [(ii, jj) for ii in range(i, i + tile[0]) for jj in range(j, j + tile[1])]))
-                            dfs(polygon, cost(used_tiles, polygon), used_tiles)
+                            dfs(polygon, cost(used_tiles, polygon, modular), used_tiles)
 
-    dfs(polygon, cost([], polygon), [])
+    dfs(polygon, cost([], polygon, modular), [])
     return best_solution
 
 def _idx2rowcol(xidx, yidx, bounds, is_diagonal):
