@@ -13,25 +13,31 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import numpy as np
-import networkx as nx
-from shapely.geometry import LineString, Point, MultiPoint, MultiLineString, Polygon, MultiPolygon
-from shapely.ops import split, substring, snap
-from shapely.affinity import scale, rotate, translate
-from shapely import unary_union
-import geopandas
-import pandas
-import logging
-from profiles.general import road_tiles, rail_tiles, stream_tiles, fence_tiles
-from profiles.cold_war import get_building_tiles, get_building_cat2
-from .path_search import search_path, _get_closest_node_in_gdf, _remove_nodes_from_gdf
-import matplotlib.pyplot as plt
-from matplotlib.collections import PolyCollection
-from osm_utils.geometry import find_concave_vertices, find_chords, find_subdividing_chords, rectangulate_polygon
 import itertools
+import logging
 from copy import deepcopy
+from typing import List, Tuple
+
+import geopandas
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+import pandas
+from matplotlib.collections import PolyCollection
+from shapely import unary_union
+from shapely.affinity import rotate, scale, translate
+from shapely.geometry import (LineString, MultiLineString, MultiPoint,
+                              MultiPolygon, Point, Polygon)
+from shapely.ops import snap, split, substring
 from tqdm import tqdm
 
+from osm_utils.geometry import (find_chords, find_concave_vertices,
+                                find_subdividing_chords, rectangulate_polygon)
+from profiles.cold_war import get_building_cat2, get_building_tiles
+from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
+
+from .path_search import (_get_closest_node_in_gdf, _remove_nodes_from_gdf,
+                          search_path)
 
 DRAW_DEBUG_PLOTS = False
 
@@ -858,12 +864,24 @@ def create_square_graph_path_search(osm_processor, config, name, tqdm_string):
 
 def collect_building_outlines(osm_processor, config, element_entry):
     logger = logging.getLogger('osm2cm')
+    geometry = element_entry['geometry']
+    if type(geometry) == MultiPolygon:
+        for geom in geometry.geoms:
+            if type(geom) == Polygon:
+                collect_building_outlines(osm_processor, geometry, element_entry)
+            else:
+                logger.deubg('Multipolygon of building contains unsupported geometry of type {}'.format(type(geom)))
+    elif type(geometry) == Polygon:
+        collect_building_outlines(osm_processor, polygon, element_entry)
+    else:
+        logger.debug('Building outline is of unsupported type {}.'.format(type(geometry)))
+    
+
+def collect_building_outlines(osm_processor, geometry, element_entry):
+    logger = logging.getLogger('osm2cm')
 
     grid_gdf = osm_processor.sub_square_grid_gdf
     geometry = element_entry['geometry']
-    if type(geometry) == MultiPolygon:
-        logger.warn('Building geometries of type MultiPolygon are not supported.')
-        return
     if not geometry.intersects(osm_processor.effective_bbox_polygon):
         return
 
@@ -1290,12 +1308,11 @@ def single_object_random(osm_processor, config, element_entry):
     osm_processor._append_to_df(sub_df)
 
 
-from typing import List, Tuple
 
 def branch_and_bound(polygon: np.array, tiles: List, modular: bool = False) -> Tuple[List[List[int]], int]:
     best_solution = (polygon, float('inf'))
     def cost(used_tiles, polygon, modular):
-        if len(used_tiles) > 0 and not modular:
+        if len(used_tiles) > 1 and not modular:
             return float('inf')
         
         cost_polygon = np.copy(polygon)
