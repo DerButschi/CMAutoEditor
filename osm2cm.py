@@ -91,6 +91,10 @@ class OSMProcessor:
                 (0, "collect_building_outlines", "by_element"),
                 (1, "process_church_outlines", "by_config_name")
             ],
+            "type_from_barn_outline": [
+                (0, "collect_building_outlines", "by_element"),
+                (1, "process_barn_outlines", "by_config_name")
+            ],
         }
 
         self.logger = logging.getLogger('osm2cm')
