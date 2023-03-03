@@ -113,7 +113,10 @@ def draw_square_graph(graph: nx.MultiGraph, gdf: geopandas.GeoDataFrame = None, 
     if show:
         plt.show()
 
-def get_grid_cells_to_fill(gdf, geometry):
+def get_grid_cells_to_fill(gdf, geometry, config_entry):
+    if 'modifiers' in config_entry and 'is_core' in config_entry['modifiers'] and "border_size" in config_entry['modifiers']:
+        geometry = geometry.buffer(-config_entry['modifiers']['border_size'] * 8)
+
     within = gdf.index.isin(gdf.sindex.query(geometry, predicate='contains'))
     intersecting = gdf.index.isin(gdf.sindex.query(geometry, predicate='intersects'))
     # within = gdf.geometry.within(geometry)
@@ -275,7 +278,7 @@ def get_matched_cm_type(config, element_entry):
     return matched_cm_type
 
 def assign_type_from_tag(osm_processor, config, element_entry):
-    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'])
+    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
     sub_df['priority'] = config[element_entry['name']]['priority']
@@ -502,7 +505,7 @@ def assign_type_randomly_in_area(osm_processor, config, element_entry):
     n_types = len(cm_types)
     df = osm_processor.df
 
-    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'])
+    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
 
@@ -527,7 +530,7 @@ def assign_type_randomly_for_each_square(osm_processor, config, element_entry):
     n_types = len(cm_types)
     df = osm_processor.df
 
-    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'])
+    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
 
@@ -868,16 +871,16 @@ def collect_building_outlines(osm_processor, config, element_entry):
     if type(geometry) == MultiPolygon:
         for geom in geometry.geoms:
             if type(geom) == Polygon:
-                collect_building_outlines(osm_processor, geometry, element_entry)
+                collect_building_geometries(osm_processor, geometry, element_entry)
             else:
                 logger.deubg('Multipolygon of building contains unsupported geometry of type {}'.format(type(geom)))
     elif type(geometry) == Polygon:
-        collect_building_outlines(osm_processor, polygon, element_entry)
+        collect_building_geometries(osm_processor, geometry, element_entry)
     else:
         logger.debug('Building outline is of unsupported type {}.'.format(type(geometry)))
     
 
-def collect_building_outlines(osm_processor, geometry, element_entry):
+def collect_building_geometries(osm_processor, geometry, element_entry):
     logger = logging.getLogger('osm2cm')
 
     grid_gdf = osm_processor.sub_square_grid_gdf
@@ -923,6 +926,9 @@ def process_residential_building_outlines(osm_processor, config, name, tqdm_stri
 
 def process_church_outlines(osm_processor, config, name, tqdm_string):
     process_building_outlines(osm_processor, config, name, 'churches', tqdm_string)
+
+def process_barn_outlines(osm_processor, config, name, tqdm_string):
+    process_building_outlines(osm_processor, config, name, 'barns', tqdm_string)
 
 def process_building_outlines(osm_processor, config, name, building_type, tqdm_string):
     logger = logging.getLogger('osm2cm')
