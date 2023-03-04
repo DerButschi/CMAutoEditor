@@ -208,12 +208,13 @@
             {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 3", "weight": 1},
             {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 1", "weight": 1},
             {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 2", "weight": 2},
-            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 3", "weight": 1}
+            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 3", "weight": 1},
+            {"dummy": true, "weight": 1.6}            
         ],
         "process": [
             "type_random_individual"
         ],
-        "priority": 5,
+        "priority": -1,
         "active": true
     },
 
@@ -243,12 +244,13 @@
             {"menu": "Foliage", "cat1": "Tree F", "cat2": "density 3", "weight": 1},
             {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 1", "weight": 1},
             {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 2", "weight": 2},
-            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 3", "weight": 1}
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 3", "weight": 1},
+            {"dummy": true, "weight": 1.2}
         ],
         "process": [
             "type_random_individual"
         ],
-        "priority": 5,
+        "priority": -1,
         "active": true
     },
 
@@ -266,12 +268,13 @@
             {"menu": "Foliage", "cat1": "Tree E", "cat2": "density 3", "weight": 1},
             {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 1", "weight": 1},
             {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 2", "weight": 2},
-            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 3", "weight": 1}
+            {"menu": "Foliage", "cat1": "Tree H", "cat2": "density 3", "weight": 1},
+            {"dummy": true, "weight": 0.4}
         ],
         "process": [
             "type_random_individual"
         ],
-        "priority": 5,
+        "priority": -1,
         "active": true
     },
 
@@ -365,7 +368,7 @@
         "process": [
             "type_random_area"
         ],
-        "priority": 0,
+        "priority": -1,
         "active": true
     },
 
@@ -380,7 +383,7 @@
         "process": [
             "type_random_individual"
         ],
-        "priority": 0,
+        "priority": -1,
         "active": true
     },
 
