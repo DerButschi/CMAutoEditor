@@ -55,7 +55,7 @@ argparser.add_argument('--bounding-box', '-b', required=True, help='Coordinates 
 argparser.add_argument('--input-crs', required=False, type=int, help='epsg-code of input data. [default: 4326]', default=4326)
 argparser.add_argument('--contour', '-c', required=False, type=float, help='contour level distance (default: 5 m)', default=5.0)
 argparser.add_argument('--output-name', '-o', required=False, type=str, help='output name (without file extension) (default: output)', default='output')
-argparser.add_argument('--water-level-correction', '-w', required=False, type=float, nargs=4, help='correct elevation for the fact that in CM water does not flow downhill expects x,y coordinates of lowest and highest water level of one river.')
+argparser.add_argument('--water-level-correction', '-w', required=False, type=float, nargs=5, help='correct elevation for the fact that in CM water does not flow downhill expects x,y coordinates of lowest and highest water level of one river.')
 argparser.add_argument('--stride', '-s', required=False, type=int, help='ouput will contain only every stride-th point')
 
 args = argparser.parse_args()
@@ -107,10 +107,17 @@ grid_size_x_cm = np.floor(grid_size_x / 8).astype(int)
 grid_size_y_cm = np.floor(grid_size_y / 8).astype(int)
 
 if args.water_level_correction is not None:
-    p1_x_condition = df.x.between(args.water_level_correction[0] - grid_cell_x / 2, args.water_level_correction[0] + grid_cell_x / 2)
-    p1_y_condition = df.y.between(args.water_level_correction[1] - grid_cell_y / 2, args.water_level_correction[1] + grid_cell_y / 2)
-    p2_x_condition = df.x.between(args.water_level_correction[2] - grid_cell_x / 2, args.water_level_correction[2] + grid_cell_x / 2)
-    p2_y_condition = df.y.between(args.water_level_correction[3] - grid_cell_y / 2, args.water_level_correction[3] + grid_cell_y / 2)
+    water_level_points = get_projected_bbox(args.water_level_correction[0], args.input_crs, 
+                        [
+                            Point(args.water_level_correction[1], args.water_level_correction[2]),
+                            Point(args.water_level_correction[3], args.water_level_correction[4])
+                        ]
+                      )
+
+    p1_x_condition = df.x.between(water_level_points[0].x - grid_cell_x / 2, water_level_points[0].x + grid_cell_x / 2)
+    p1_y_condition = df.y.between(water_level_points[0].y - grid_cell_y / 2, water_level_points[0].y + grid_cell_y / 2)
+    p2_x_condition = df.x.between(water_level_points[1].x - grid_cell_x / 2, water_level_points[1].x + grid_cell_x / 2)
+    p2_y_condition = df.y.between(water_level_points[1].y - grid_cell_y / 2, water_level_points[1].y + grid_cell_y / 2)
 
     z1 = df.loc[p1_x_condition & p1_y_condition, 'z']
     z2 = df.loc[p2_x_condition & p2_y_condition, 'z']
@@ -122,7 +129,7 @@ if args.water_level_correction is not None:
         z2 = z2.values[0]
         print('Water level correction requested. The difference in height between both points is {} m.'.format(z2 - z1))
 
-        zp = z_on_plain((args.water_level_correction[0], args.water_level_correction[1], z1), (args.water_level_correction[2], args.water_level_correction[3], z2), df.x, df.y)
+        zp = z_on_plain((water_level_points[0].x, water_level_points[0].y, z1), (water_level_points[1].x, water_level_points[1].y, z2), df.x, df.y)
 
         df.z = df.z - (zp - z1)
 
