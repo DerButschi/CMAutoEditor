@@ -347,7 +347,7 @@ def create_line_graph(osm_processor, config, name, tqdm_string):
         for lidx, ls_split in enumerate(ls_splits):
             if len(ls_split.coords) == 0:
                 # TODO: check how this can happen
-                logger.warn('LineString split is empty.')
+                logger.debug('LineString split is empty.')
                 continue
             if type(ls_split) == LineString:
                 p1 = Point(ls_split.coords[0])
@@ -964,7 +964,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
         plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
         matched_tiles_candidates = []
 
-        for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.33, 0.5]):
+        for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.5, 1.0]):
         # for min_square_overlap in [0, 0.33]:
             squares = _get_matched_squares(osm_processor, config[name]['priority'], outline_entry[0], is_diagonal, min_square_overlap=min_square_overlap)
             if len(squares) == 0:
@@ -988,7 +988,14 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
                 match_polygon[int(rowcol[0] - matched_square_rowcols[:,0].min()), int(rowcol[1] - matched_square_rowcols[:,1].min())] = 1
 
             tiles = list(set([(t[0], t[1]) for t in buildings[buildings.is_diagonal == is_diagonal].loc[:,['width', 'height']].values]))
-            solution = branch_and_bound(match_polygon, tiles, (buildings.is_modular).any())
+            
+            area_factor = 32 if is_diagonal else 16
+            if outline_entry[0].area > (buildings[buildings['is_diagonal'] == is_diagonal]['height'] * buildings[buildings['is_diagonal'] == is_diagonal]['width']).max() * area_factor:
+                modular = (buildings.is_modular).any()
+            else:
+                modular = False
+
+            solution = branch_and_bound(match_polygon, tiles, modular)
 
             if len(solution[2]) == 0:
                 continue
