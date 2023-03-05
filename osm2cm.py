@@ -34,6 +34,8 @@ from tqdm import tqdm
 import osm_utils.processing
 from osm_utils.grid import get_all_grids
 
+import os
+
 class OSMProcessor:
     def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None, grid_file: Optional[str] = None):
         self.config = config
@@ -413,6 +415,8 @@ if __name__ == '__main__':
     argparser.add_argument('-o', '--output-file', required=True)
 
     args = argparser.parse_args()
+
+    os.makedirs('debug', exist_ok=True)
 
     config = json.load(open(args.config_file, 'r'))
 
