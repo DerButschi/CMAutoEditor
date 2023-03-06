@@ -112,6 +112,7 @@ def display_gui():
         [sg.Text('Select file: ')], 
         [sg.Input(), sg.FileBrowse(key='filepath', file_types=(('CSV files', '*.csv'),))],
         [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
+        [sg.Checkbox('Take start size from file (only for continueing a map!)', key='start_size_from_file', enable_events=True, default=False)],
         [sg.Text(text='', key='error_text')],
         [sg.Push(), sg.Button('Start CMAutoEditor', key='start'), sg.Exit(), sg.Push()]]
 
@@ -137,7 +138,7 @@ def display_gui():
     window.close()
     # Start editor with UI inputs
     if start and values['filepath'] != '' and values['filepath'] != None:
-        start_editor(values['filepath'], values['countdown'])
+        start_editor(values['filepath'], values['countdown'], values['start_size_from_file'])
             
 
 def set_ground(df, map_df):
@@ -164,27 +165,27 @@ def set_ground(df, map_df):
 
     
 def start_editor(filepath, countdown, start_size_from_file=False):
-    if os.path.exists(args.input + '.checkpoint') and os.path.exists(args.input + '.meta.checkpoint'):
-        map_df = pandas.read_csv(args.input + '.checkpoint')
-        meta_df = pandas.read_csv(args.input + '.meta.checkpoint')
-        start_i_page_x = meta_df['start_i_page_x'][0]
-        start_i_page_y = meta_df['start_i_page_y'][0]
-        prev_n_x = meta_df['prev_n_x'][0]
-        prev_n_y = meta_df['prev_n_y'][0]
+    # if os.path.exists(args.input + '.checkpoint') and os.path.exists(args.input + '.meta.checkpoint'):
+    #     map_df = pandas.read_csv(args.input + '.checkpoint')
+    #     meta_df = pandas.read_csv(args.input + '.meta.checkpoint')
+    #     start_i_page_x = meta_df['start_i_page_x'][0]
+    #     start_i_page_y = meta_df['start_i_page_y'][0]
+    #     prev_n_x = meta_df['prev_n_x'][0]
+    #     prev_n_y = meta_df['prev_n_y'][0]
 
+    # else:
+    map_df = pandas.read_csv(filepath)
+    map_df.z = map_df.z.round().astype(int)
+
+    if 'done' not in map_df:
+        map_df['done'] = 0
+
+    start_i_page_x = 0
+    start_i_page_y = 0
+    if start_size_from_file:
+        prev_n_x = np.floor(map_df.x.max()).astype(int) + PAGE_RIGHT_MARGIN
+        prev_n_y = np.floor(map_df.y.max()).astype(int) + PAGE_BOTTOM_MARGIN
     else:
-        map_df = pandas.read_csv(args.input)
-        map_df.z = map_df.z.round().astype(int)
-
-        if 'done' not in map_df:
-            map_df['done'] = 0
-
-        start_i_page_x = 0
-        start_i_page_y = 0
-        # if start_size_from_file:
-        #     START_N_SQUARES_X = np.floor(map_df.x.max()).astype(int)
-        #     START_N_SQUARES_Y = np.floor(map_df.y.max()).astype(int)
-
         prev_n_x = START_N_SQUARES_X
         prev_n_y = START_N_SQUARES_Y
 
@@ -233,11 +234,13 @@ def start_editor(filepath, countdown, start_size_from_file=False):
                 if xmax == xmin or ymax == ymin:
                     continue
 
-                if prev_n_x == START_N_SQUARES_X and prev_n_y == START_N_SQUARES_Y:
+                if (prev_n_x == START_N_SQUARES_X and prev_n_y == START_N_SQUARES_Y) or start_size_from_file:
                     mode = 'init'
                 else:
                     mode = 'window'
                 set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y, mode)
+                if start_size_from_file:
+                    set_n_squares(n_squares_x, n_squares_y, n_squares_x - 2, n_squares_y - 2, 'window')
                 prev_n_x = n_squares_x
                 prev_n_y = n_squares_y
 
