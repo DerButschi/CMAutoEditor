@@ -16,12 +16,11 @@
 import argparse
 import json
 import logging
+import os
 from typing import Dict, List, Optional
 
 import geojson
 import geopandas
-import matplotlib.pyplot as plt
-import networkx as nx
 import numpy as np
 import pandas
 import pyproj
@@ -34,7 +33,6 @@ from tqdm import tqdm
 import osm_utils.processing
 from osm_utils.grid import get_all_grids
 
-import os
 
 class OSMProcessor:
     def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None, grid_file: Optional[str] = None):

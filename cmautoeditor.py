@@ -13,15 +13,17 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import argparse
+import os
+import sys
 from time import sleep
-import pyautogui
+
+import keyboard
 import numpy as np
 import pandas
-import argparse
-import keyboard
-import os
+import pyautogui
 import PySimpleGUI as sg
-import sys
+
 from profiles.cold_war.menu import MENU_DICT
 from profiles.general.buttons import *
 from profiles.general.constants import *
@@ -165,15 +167,6 @@ def set_ground(df, map_df):
 
     
 def start_editor(filepath, countdown, start_size_from_file=False):
-    # if os.path.exists(args.input + '.checkpoint') and os.path.exists(args.input + '.meta.checkpoint'):
-    #     map_df = pandas.read_csv(args.input + '.checkpoint')
-    #     meta_df = pandas.read_csv(args.input + '.meta.checkpoint')
-    #     start_i_page_x = meta_df['start_i_page_x'][0]
-    #     start_i_page_y = meta_df['start_i_page_y'][0]
-    #     prev_n_x = meta_df['prev_n_x'][0]
-    #     prev_n_y = meta_df['prev_n_y'][0]
-
-    # else:
     map_df = pandas.read_csv(filepath)
     map_df.z = map_df.z.round().astype(int)
 

@@ -13,21 +13,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import networkx as nx
-import matplotlib.pyplot as plt
-import numpy as np
-from shapely.geometry import Point, LineString, MultiPoint
-from shapely.affinity import translate, scale
-from shapely.ops import substring
-from profiles.general import fence_tiles, road_tiles, rail_tiles, stream_tiles
-import pandas
+import itertools
 import logging
-
 from heapq import heappop, heappush
 from itertools import count
-from networkx.algorithms.shortest_paths.weighted import _weight_function
-import itertools
+
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+import pandas
+from shapely.affinity import scale, translate
+from shapely.geometry import LineString, MultiPoint, Point
+from shapely.ops import substring
 from tqdm import tqdm
+
+from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -555,77 +555,43 @@ def _get_invalid_nodes_around_node(node_xy, node_connections_dict, gdf, tiles):
     return invalid_nodes
 
 def custom_weight_astar_path(G, source, target, heuristic=None, weight="weight", ref=None, tiles=None):
-    """Returns a list of nodes in a shortest path between source and target
-    using the A* ("A-star") algorithm.
+    # heavily modified version of networkx astar,
+    # original license:
 
-    There may be more than one shortest path.  This returns only one.
+    # Copyright (C) 2004-2019, NetworkX Developers
+    # Aric Hagberg <hagberg@lanl.gov>
+    # Dan Schult <dschult@colgate.edu>
+    # Pieter Swart <swart@lanl.gov>
+    # All rights reserved.
 
-    Parameters
-    ----------
-    G : NetworkX graph
+    # Redistribution and use in source and binary forms, with or without
+    # modification, are permitted provided that the following conditions are
+    # met:
 
-    source : node
-       Starting node for path
+    #   * Redistributions of source code must retain the above copyright
+    #     notice, this list of conditions and the following disclaimer.
 
-    target : node
-       Ending node for path
+    #   * Redistributions in binary form must reproduce the above
+    #     copyright notice, this list of conditions and the following
+    #     disclaimer in the documentation and/or other materials provided
+    #     with the distribution.
 
-    heuristic : function
-       A function to evaluate the estimate of the distance
-       from the a node to the target.  The function takes
-       two nodes arguments and must return a number.
-       If the heuristic is inadmissible (if it might
-       overestimate the cost of reaching the goal from a node),
-       the result may not be a shortest path.
-       The algorithm does not support updating heuristic
-       values for the same node due to caching the first
-       heuristic calculation per node.
+    #   * Neither the name of the NetworkX Developers nor the names of its
+    #     contributors may be used to endorse or promote products derived
+    #     from this software without specific prior written permission.
 
-    weight : string or function
-       If this is a string, then edge weights will be accessed via the
-       edge attribute with this key (that is, the weight of the edge
-       joining `u` to `v` will be ``G.edges[u, v][weight]``). If no
-       such edge attribute exists, the weight of the edge is assumed to
-       be one.
-       If this is a function, the weight of an edge is the value
-       returned by the function. The function must accept exactly three
-       positional arguments: the two endpoints of an edge and the
-       dictionary of edge attributes for that edge. The function must
-       return a number or None to indicate a hidden edge.
+    # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+    # "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+    # LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+    # A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+    # OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+    # SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+    # LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+    # DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+    # THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.    
 
-    Raises
-    ------
-    NetworkXNoPath
-        If no path exists between source and target.
-
-    Examples
-    --------
-    >>> G = nx.path_graph(5)
-    >>> print(nx.astar_path(G, 0, 4))
-    [0, 1, 2, 3, 4]
-    >>> G = nx.grid_graph(dim=[3, 3])  # nodes are two-tuples (x,y)
-    >>> nx.set_edge_attributes(G, {e: e[1][0] * 2 for e in G.edges()}, "cost")
-    >>> def dist(a, b):
-    ...     (x1, y1) = a
-    ...     (x2, y2) = b
-    ...     return ((x1 - x2) ** 2 + (y1 - y2) ** 2) ** 0.5
-    >>> print(nx.astar_path(G, (0, 0), (2, 2), heuristic=dist, weight="cost"))
-    [(0, 0), (0, 1), (0, 2), (1, 2), (2, 2)]
-
-    Notes
-    -----
-    Edge weight attributes must be numerical.
-    Distances are calculated as sums of weighted edges traversed.
-
-    The weight function can be used to hide edges by returning None.
-    So ``weight = lambda u, v, d: 1 if d['color']=="red" else None``
-    will find the shortest red path.
-
-    See Also
-    --------
-    shortest_path, dijkstra_path
-
-    """
     if source not in G or target not in G:
         msg = f"Either source {source} or target {target} is not in G"
         raise nx.NodeNotFound(msg)

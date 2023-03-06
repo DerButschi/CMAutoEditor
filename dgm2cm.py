@@ -15,8 +15,8 @@
 
 import argparse
 import os
+import sys
 
-import geopandas
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas
@@ -24,10 +24,8 @@ import PySimpleGUI as sg
 import skimage
 from pyproj.transformer import Transformer
 from shapely import MultiPoint, Point, Polygon
-from shapely.ops import nearest_points
 
 from osm_utils.grid import get_all_grids
-import sys
 
 
 #Validates if the value is a float
