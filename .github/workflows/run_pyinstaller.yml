@@ -16,7 +16,8 @@ jobs:
           activate-environment: py310_cmautoeditor
           environment-file: conda_requirements_py310.txt
     - run: conda install -c conda-forge pyinstaller
-    - run: pyinstaller --noconfirm --log-level=INFO --clean build.spec
+    - run: python -m PyInstaller --noconfirm --log-level=INFO --clean build.spec
+    - run: python -m PyInstaller --noconfirm --log-level=INFO --clean --onefile --hidden-import matplotlib.backends.backend_svg .\osm2cm.py
     - run: copy LICENSE dist/LICENSE
     - run: copy README.md dist/README.md
     - run: copy example_height_map.csv dist/example_height_map.csv
