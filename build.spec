@@ -1,13 +1,16 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import profiles.cold_war.barns
+from osm_utils import *
+
 block_cipher = None
 
 a_cmautoeditor = Analysis(
     ['cmautoeditor.py'],
-    pathex=[],
+    pathex=['osm_utils', 'profiles'],
     binaries=[],
     datas=[],
-    hiddenimports=[],
+    hiddenimports=["profiles"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -23,7 +26,7 @@ a_dgm2cm = Analysis(
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=["skimage.measure"],
+    hiddenimports=["skimage.measure", "skimage.transform", "osm_utils"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -49,6 +52,7 @@ a_geotiff2cm = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
 
 MERGE((a_cmautoeditor, 'cmautoeditor', 'cmautoeditor'), (a_dgm2cm, 'dgm2cm', 'dgm2cm'), (a_geotiff2cm, 'geotiff2cm', 'geotiff2cm'))
 
@@ -126,3 +130,5 @@ exe_geotiff2cm = EXE(
     codesign_identity=None,
     entitlements_file=None,
 )
+
+
