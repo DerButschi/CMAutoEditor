@@ -33,6 +33,46 @@ from tqdm import tqdm
 import osm_utils.processing
 from osm_utils.grid import get_all_grids
 
+import PySimpleGUI as sg
+
+import sys
+
+def run_startup_gui():
+    sg.theme('Dark')
+    sg.theme_button_color('#002366')
+
+    layout = [
+        [sg.Titlebar('OSM to CM Converter')],
+        [sg.Text('OSM Input File: '), sg.Input(key='input_file_path'), sg.FileBrowse(file_types=(('GeoJSON', '*.geojson'),))],
+        [sg.Text('Output File Name: '), sg.Input('output.csv', key='output_file_name')],
+        [sg.Text('OSM Configuration File: '), sg.Input('default_osm_config.json', key='osm_config_name'), sg.FileBrowse(file_types=(('JSON', '*.json'), ))],
+        [sg.Checkbox('Read grid from file', key='read_grid_from_file', default=False, enable_events=True)],
+        [sg.pin(
+            sg.Column([
+                [sg.Text('Grid File: '), sg.Input(key='grid_file_name'), sg.FileBrowse(file_types=(('ESRI Shape File', '*.shp'), ))]
+            ], visible=False, key='grid_file_input')
+        )],
+        [sg.Push(), sg.Submit('Start OSM to CM Converter', key='start'), sg.Exit(), sg.Push()]
+
+    ]
+
+    window = sg.Window('OSM Converter', layout)
+    while True:
+        event, values = window.read()
+
+        if event == 'read_grid_from_file':
+            window['grid_file_input'].update(visible=values['read_grid_from_file'])
+        elif event == 'start':
+            break
+
+    if values['grid_file_name'] == '':
+        outlist = ['-i', values['input_file_path'], '-o', values['output_file_name'], '-c', values['osm_config_name']]
+    else:
+        outlist = ['-i', values['input_file_path'], '-o', values['output_file_name'], '-c', values['osm_config_name'], '-g', values['grid_file_name']]
+    
+    window.close()
+    return outlist
+
 
 class OSMProcessor:
     def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None, grid_file: Optional[str] = None):
@@ -412,7 +452,11 @@ if __name__ == '__main__':
     argparser.add_argument('-c', '--config-file', required=False, default='default_osm_config.json')
     argparser.add_argument('-o', '--output-file', required=True)
 
-    args = argparser.parse_args()
+    if len(sys.argv) == 1:
+        argv_list = run_startup_gui()
+        args = argparser.parse_args(argv_list)
+    else:
+        args = argparser.parse_args()
 
     os.makedirs('debug', exist_ok=True)
 
