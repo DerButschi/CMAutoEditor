@@ -871,7 +871,7 @@ def collect_building_outlines(osm_processor, config, element_entry):
     if type(geometry) == MultiPolygon:
         for geom in geometry.geoms:
             if type(geom) == Polygon:
-                collect_building_geometries(osm_processor, geometry, element_entry)
+                collect_building_geometries(osm_processor, geom, element_entry)
             else:
                 logger.deubg('Multipolygon of building contains unsupported geometry of type {}'.format(type(geom)))
     elif type(geometry) == Polygon:
@@ -884,7 +884,7 @@ def collect_building_geometries(osm_processor, geometry, element_entry):
     logger = logging.getLogger('osm2cm')
 
     grid_gdf = osm_processor.sub_square_grid_gdf
-    geometry = element_entry['geometry']
+    # geometry = element_entry['geometry']
     if not geometry.intersects(osm_processor.effective_bbox_polygon):
         return
 
