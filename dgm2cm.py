@@ -539,4 +539,10 @@ if __name__ == '__main__':
         args = argparser.parse_args()
 
     convert_dgm(args)
+
+    sg.theme('Dark')
+    sg.theme_button_color('#002366')
+    sg.popup('DGM conversion complete.')
+
+
     
