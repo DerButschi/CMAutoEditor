@@ -170,37 +170,12 @@ class OSMProcessor:
 
     def _load_grid(self):
         file_name_base = str.join('_', self.grid_file.split('_')[:-1])
-        import datetime
-        dt = datetime.datetime.now()
         self.gdf = geopandas.GeoDataFrame.from_file(self.grid_file)
         self.sub_square_grid_diagonal_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_diagonal_grid.shp')
         self.sub_square_grid_gdf = geopandas.GeoDataFrame.from_file(file_name_base + '_sub_square_grid.shp')
-        print((datetime.datetime.now() - dt).total_seconds())
 
-        total_bounds = self.gdf.geometry.total_bounds
-        # self.effective_bbox_polygon = Polygon([
-        #     (total_bounds[0], total_bounds[1]),
-        #     (total_bounds[2], total_bounds[1]),
-        #     (total_bounds[2], total_bounds[3]),
-        #     (total_bounds[0], total_bounds[3])
-        # ])
         grid_polygons = MultiPolygon(self.gdf.geometry.values)
         self.effective_bbox_polygon = grid_polygons.buffer(0)
-
-        p_origin = self.gdf.loc[(self.gdf.xidx == self.gdf.xidx.min()) & (self.gdf.yidx == self.gdf.yidx.min()), ['x', 'y']].values[0]
-        p_xaxis_max = self.gdf.loc[(self.gdf.xidx == self.gdf.xidx.max()) & (self.gdf.yidx == self.gdf.yidx.min()), ['x', 'y']].values[0]
-        p_yaxis_max = self.gdf.loc[(self.gdf.xidx == self.gdf.xidx.min()) & (self.gdf.yidx == self.gdf.yidx.max()), ['x', 'y']].values[0]
-
-        idx_origin_point = Point(p_origin[0] - 4, p_origin[1] - 4)
-        idx_point_x_axis_max = Point(p_xaxis_max[0] + 4, p_xaxis_max[1] - 4)
-        idx_point_y_axis_max = Point(p_yaxis_max[0] - 4, p_yaxis_max[1] + 4)
-
-        eff_bbox_points = [Point(*coords) for coords in self.effective_bbox_polygon.exterior.coords]
-
-        origin_point = nearest_points(idx_origin_point, eff_bbox_points)
-        point_x_axis_max = nearest_points(idx_point_x_axis_max, eff_bbox_points)
-        point_y_axis_max = nearest_points(idx_point_y_axis_max, eff_bbox_points)
-
 
         self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
 
@@ -462,32 +437,16 @@ if __name__ == '__main__':
 
     config = json.load(open(args.config_file, 'r'))
 
-    # with codecs.open('scenarios/rhine_crossing/rhine_crossing_area1.osm', 'r', encoding='utf-8') as data:
-    #     xml = data.read()
-
-    # osm_data2 = osm2geojson.xml2geojson(xml, filter_used_refs=False, log_level='ERROR')
-    # with open('scenarios/rhine_crossing/rhine_crossing_area1.geojson', 'w', encoding='utf8') as geojson_file:
-    #     geojson_file.write(json.dumps(osm_data2))
-
-    # osm_data = geojson.load(open('scenarios/agger_valley/schlingenbach/osm/schlingenbach.geojson', encoding='utf8'))
     osm_data = geojson.load(open(args.osm_input, encoding='utf8'))
-    # osm_data = geojson.load(open('test/industrial_fences.geojson', encoding='utf8'))
-    # osm_processor = OSMProcessor(config=config, bbox=[379877.0, 5643109.0, 381461.0, 5645022.0])
-    # osm_processor = OSMProcessor(config=config, bbox=[383148.0, 5647828.0, 385543.0, 5649632.0])
-    # osm_processor = OSMProcessor(config=config, bbox=[361607.305,5625049.525, 365540.291, 5627329.787])
     if args.grid_file is not None:
         osm_processor = OSMProcessor(config=config, grid_file=args.grid_file)
     else:
         osm_processor = OSMProcessor(config=config)
 
-    # osm_processor = OSMProcessor(config=config, bbox_lon_lat=[7.2961798, 50.9429712, 7.3008123, 50.9447395])
-    # osm_processor = OSMProcessor(config=config)
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
-    # osm_processor.write_to_file('scenarios/agger_valley/schlingenbach/schlingenbach_osm_civil.csv')
     osm_processor.post_process()
     osm_processor.write_to_file(args.output_file)
-    # osm_processor.write_to_file('test/industrial_fences.csv')
 
-
+    sg.popup('OSM conversion complete.')
 
