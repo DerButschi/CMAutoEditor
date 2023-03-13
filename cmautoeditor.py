@@ -234,6 +234,8 @@ def start_editor(filepath, countdown, start_size_from_file=False):
                 set_n_squares(prev_n_x, prev_n_y, n_squares_x, n_squares_y, mode)
                 if start_size_from_file:
                     set_n_squares(n_squares_x, n_squares_y, n_squares_x - 2, n_squares_y - 2, 'window')
+                    start_size_from_file = False
+
                 prev_n_x = n_squares_x
                 prev_n_y = n_squares_y
 
