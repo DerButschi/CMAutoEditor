@@ -24,6 +24,10 @@ import geopandas
 import numpy as np
 import pandas
 import pyproj
+from pyproj.aoi import AreaOfInterest
+from pyproj.database import query_utm_crs_info
+from pyproj import CRS
+
 from matplotlib.font_manager import json_load
 from shapely.geometry import (LineString, MultiLineString, MultiPoint,
                               MultiPolygon, Point, Polygon, shape)
@@ -31,7 +35,7 @@ from shapely.ops import nearest_points, snap, split, transform
 from tqdm import tqdm
 
 import osm_utils.processing
-from osm_utils.grid import get_all_grids
+from osm_utils.grid import get_all_grids, get_reference_rectanlge_points
 
 import PySimpleGUI as sg
 
@@ -46,12 +50,63 @@ def run_startup_gui():
         [sg.Text('OSM Input File: '), sg.Input(key='input_file_path'), sg.FileBrowse(file_types=(('GeoJSON', '*.geojson'),))],
         [sg.Text('Output File Name: '), sg.Input('output.csv', key='output_file_name')],
         [sg.Text('OSM Configuration File: '), sg.Input('default_osm_config.json', key='osm_config_name'), sg.FileBrowse(file_types=(('JSON', '*.json'), ))],
-        [sg.Checkbox('Read grid from file', key='read_grid_from_file', default=False, enable_events=True)],
+        [sg.Column([[sg.Radio('Read grid/bounding box from grid-file', key='read_grid_from_grid_file', default=True, enable_events=True, group_id='bbox_input'),
+                     sg.Radio('Enter bounding box', key='enter_bbox', default=False, enable_events=True, group_id='bbox_input'),
+                     sg.Radio('Take bounding box from OSM-File', key='read_bbox_from_osm_file', default=False, enable_events=True, group_id='bbox_input'),
+                     ]])],
         [sg.pin(
             sg.Column([
                 [sg.Text('Grid File: '), sg.Input(key='grid_file_name'), sg.FileBrowse(file_types=(('ESRI Shape File', '*.shp'), ))]
-            ], visible=False, key='grid_file_input')
+            ], visible=True, key='grid_file_input')
         )],
+        [sg.pin(sg.Column([[sg.Radio('axis parallel', group_id='bbox_type_selection', key='bbox_axis_parallel', enable_events=True, default=True), sg.Radio('freely rotatable', group_id='bbox_type_selection', key='bbox_freely_rotatable', enable_events=True)],
+                          [sg.Text('Bounding box coordinates CRS: EPSG:'), sg.InputText('4326', enable_events=True, key='bbox_crs')]],
+                          visible=False, key='enter_bbox_type'))],
+        [sg.pin(sg.Column([
+            [sg.Text('Select data within a rectangle where the sides are parallel to the x-axis.')],
+            [sg.Text('The x-axis will be the W <-> E axis in CM.')],
+            [sg.Column([
+                [sg.Text('')],
+                [sg.Text('lower left point')],
+                [sg.Text('upper right point')]
+            ]),
+            sg.Column([
+                [sg.Text('x')],
+                [sg.InputText(key='bb_xmin', enable_events=True)],
+                [sg.InputText(key='bb_xmax', enable_events=True)],
+            ]),
+            sg.Column([
+                [sg.Text('y')],
+                [sg.InputText(key='bb_ymin', enable_events=True)],
+                [sg.InputText(key='bb_ymax', enable_events=True)],
+            ]),
+        ]], key='bbox_two_points', visible=False))],
+        [sg.pin(sg.Column([
+            [sg.Text('Select data within an arbitrary rectangle.')],
+            [sg.Text('The line between point 1 and 2 will be the W <-> E axis in CM.')],
+            [sg.Column([
+                [sg.Text('')],
+                [sg.Text('point 1')],
+                [sg.Text('point 2')],
+                [sg.Text('point 3')],
+                [sg.Text('point 4')],
+            ]),
+            sg.Column([
+                [sg.Text('x')],
+                [sg.InputText(key='bb_point1_x', enable_events=True)],
+                [sg.InputText(key='bb_point2_x', enable_events=True)],
+                [sg.InputText(key='bb_point3_x', enable_events=True)],
+                [sg.InputText(key='bb_point4_x', enable_events=True)],
+            ]),
+            sg.Column([
+                [sg.Text('y')],
+                [sg.InputText(key='bb_point1_y', enable_events=True)],
+                [sg.InputText(key='bb_point2_y', enable_events=True)],
+                [sg.InputText(key='bb_point3_y', enable_events=True)],
+                [sg.InputText(key='bb_point4_y', enable_events=True)],
+            ]),
+        ]], key='bbox_four_points', visible=False))],
+
         [sg.Push(), sg.Submit('Start OSM to CM Converter', key='start'), sg.Exit(), sg.Push()]
 
     ]
@@ -60,15 +115,41 @@ def run_startup_gui():
     while True:
         event, values = window.read()
 
-        if event == 'read_grid_from_file':
-            window['grid_file_input'].update(visible=values['read_grid_from_file'])
+        if event == 'read_grid_from_grid_file':
+            window['grid_file_input'].update(visible=True)
+            window['enter_bbox_type'].update(visible=False)
+            window['bbox_two_points'].update(visible=False)
+            window['bbox_four_points'].update(visible=False)
+        elif event == 'enter_bbox':
+            window['grid_file_input'].update(visible=False)
+            window['enter_bbox_type'].update(visible=True)
+            window['bbox_two_points'].update(visible=True)
+            window['bbox_four_points'].update(visible=False)
+        elif event == 'read_bbox_from_osm_file':
+            window['grid_file_input'].update(visible=False)
+            window['enter_bbox_type'].update(visible=False)
+            window['bbox_two_points'].update(visible=False)
+            window['bbox_four_points'].update(visible=False)
+        elif event == 'bbox_axis_parallel':
+            window['bbox_two_points'].update(visible=True)
+            window['bbox_four_points'].update(visible=False)
+        elif event == 'bbox_freely_rotatable':
+            window['bbox_two_points'].update(visible=False)
+            window['bbox_four_points'].update(visible=True)
+        elif event == sg.WIN_CLOSED or event == 'Exit':
+            sys.exit(0)
         elif event == 'start':
             break
 
-    if values['grid_file_name'] == '':
-        outlist = ['-i', values['input_file_path'], '-o', values['output_file_name'], '-c', values['osm_config_name']]
-    else:
-        outlist = ['-i', values['input_file_path'], '-o', values['output_file_name'], '-c', values['osm_config_name'], '-g', values['grid_file_name']]
+    outlist = ['-o', values['output_file_name'], '-c', values['osm_config_name'], '-i', values['input_file_path']]
+    if values['grid_file_name'] != '':
+        outlist.extend(['-g', values['grid_file_name']])
+    elif values['bb_xmin'] != '':
+        outlist.extend(['-b', values['bbox_crs'], values['bb_xmin'], values['bb_ymin'], values['bb_xmax'], values['bb_ymax']])
+    elif values['bb_point1_x'] != '':
+        outlist.extend(['-b', values['bbox_crs'],
+                        values['bb_point1_x'], values['bb_point1_y'], values['bb_point2_x'], values['bb_point2_y'],
+                        values['bb_point3_x'], values['bb_point3_y'], values['bb_point4_x'], values['bb_point4_y']])
     
     window.close()
     return outlist
@@ -148,17 +229,31 @@ class OSMProcessor:
         self.logger.addHandler(file_handler)
         self.logger.debug('Initialization complete.')
 
-    def _init_grid(self, bounding_box_data):
-        if self.bbox is None:
-            self.bbox = bounding_box_data
+    def _init_grid(self, bbox_polygon: Polygon):
+        # grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf = get_all_grids(
+        #     trf_lower_left[0], 
+        #     trf_lower_left[1], 
+        #     trf_lower_left[0] + height_map.shape[0], 
+        #     trf_lower_left[1] + height_map.shape[1],
+        #     int(height_map.shape[0] / 8),
+        #     int(height_map.shape[1] / 8),
+        #     rotation_angle=rotation_angle,
+        #     rotation_center=trf_lower_left
+        # )
 
-        xmin, ymin, xmax, ymax = self.bbox
-        n_bins_x = np.ceil((xmax - xmin) / 8).astype(int)
-        n_bins_y = np.ceil((ymax - ymin) / 8).astype(int)
+        bbox_rectangle = bbox_polygon.minimum_rotated_rectangle
+        p0, p1, p2 = get_reference_rectanlge_points(bbox_polygon, bbox_rectangle)
+
+        n_bins_x = np.floor((p0.distance(p1)) / 8).astype(int)
+        n_bins_y = np.floor((p1.distance(p2)) / 8).astype(int)
+
+        xmin, ymin = p0.x, p0.y
         xmax = xmin + n_bins_x * 8
         ymax = ymin + n_bins_y * 8
+        rotation_angle = np.arctan2(p1.y - p0.y, p1.x - p0.x) * 180.0 / np.pi
         
-        grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf = get_all_grids(xmin, ymin, xmax, ymax, n_bins_x, n_bins_y)
+        grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf = get_all_grids(xmin, ymin, xmax, ymax, n_bins_x, n_bins_y, 
+                                                                         rotation_angle=rotation_angle, rotation_center=[p0.x, p0.y])
         self.gdf = grid_gdf
         self.sub_square_grid_diagonal_gdf = diagonal_grid_gdf
         self.sub_square_grid_gdf = sub_square_grid_gdf
@@ -179,6 +274,22 @@ class OSMProcessor:
 
         self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
 
+    def _get_epsg_code_from_bbox(self, bbox_crs, bbox):
+        aoi = AreaOfInterest(*bbox.bounds)
+
+        crs_list = query_utm_crs_info(area_of_interest=aoi)
+
+        if not bbox_crs.is_projected:
+            crs = None
+            for crs_candidate in crs_list:
+                if 'WGS 84 / UTM' in crs_candidate.name:
+                    crs = crs_candidate
+                
+            if crs is None:
+                crs = crs_list[-1]
+
+        return crs.code
+
     def _get_projected_geometry(self, geojson_geometry):
             # geometry = geopandas.GeoSeries(shape(geojson_geometry))
             # geometry = geometry.set_crs(epsg=4326)
@@ -197,31 +308,30 @@ class OSMProcessor:
 
 
     def preprocess_osm_data(self, osm_data: Dict):
-        self.transformer = pyproj.Transformer.from_crs('epsg:4326', 'epsg:25832', always_xy=True)
-
-        if self.bbox_lon_lat is not None and self.bbox is None:
-            self.bbox = [
-                *self.transformer.transform(*self.bbox_lon_lat[0:2]), 
-                *self.transformer.transform(*self.bbox_lon_lat[2:4])
-            ]
-
-        bbox_from_data = False
-        if 'bbox' in osm_data:
-            xmin, ymin = self.transformer.transform(osm_data['bbox'][0], osm_data['bbox'][1])
-            xmax, ymax = self.transformer.transform(osm_data['bbox'][2], osm_data['bbox'][3])
-        elif self.bbox is not None:
-            x_dist = self.bbox[2] - self.bbox[0]
-            y_dist = self.bbox[3] - self.bbox[1]
-            xmin = self.bbox[0] - x_dist * 0.05
-            xmax = self.bbox[2] + x_dist * 0.05
-            ymin = self.bbox[1] - y_dist * 0.05
-            ymax = self.bbox[3] + y_dist * 0.05
+        bbox_polygon = None
+        if self.bbox is not None:
+            bbox_crs = CRS.from_epsg(self.bbox[0])
+            bbox_polygon = Polygon([(self.bbox[i-1], self.bbox[i]) for i in range(2, len(self.bbox), 2)])
+            epsg_code = self._get_epsg_code_from_bbox(bbox_crs=bbox_crs, bbox=bbox_polygon)
+            bbox_from_data = False
+        elif 'bbox' in osm_data and osm_data.bbox is not None:
+            bbox_crs = CRS.from_epsg(4326)
+            bbox_polygon = Polygon([(osm_data.bbox[0], osm_data.bbox[1]), 
+                                    (osm_data.bbox[2], osm_data.bbox[1]),
+                                    (osm_data.bbox[2], osm_data.bbox[3]),
+                                    (osm_data.bbox[0], osm_data.bbox[3])])
+            epsg_code = self._get_epsg_code_from_bbox(bbox_crs=bbox_crs, bbox=bbox_polygon)
+            bbox_from_data = False
         else:
+            epsg_code = 32632
             bbox_from_data = True
             xmin = np.inf
             xmax = -np.inf
             ymin = np.inf
             ymax = -np.inf
+
+        self.transformer = pyproj.Transformer.from_crs('epsg:4326', 'epsg:{}'.format(epsg_code), always_xy=True)
+
 
 
         element_idx = 0
@@ -293,9 +403,13 @@ class OSMProcessor:
         unprocessed_tags_df = unprocessed_tags_df.drop_duplicates()
         unprocessed_tags_df.to_csv('unprocessed_tags.csv')
 
+        if bbox_from_data:
+            bbox_polygon = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+        else:
+            bbox_polygon = transform(self.transformer.transform, bbox_polygon)
 
         if self.grid_file is None:
-            self._init_grid([xmin, ymin, xmax, ymax])
+            self._init_grid(bbox_polygon)
         else:
             self._load_grid()
 
@@ -424,6 +538,8 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser()
     argparser.add_argument('-i', '--osm-input', required=True)
     argparser.add_argument('-g', '--grid-file', required=False)
+    argparser.add_argument('-b', '--bounding-box', required=False, help='Coordinates of box in which to extract data. 2 or 4 points. If an additional number is provided, the first number is interpreted as epsg-code.'
+        'Otherwise 4326 (longitude/latitude) is assumend.', type=float, nargs='+')
     argparser.add_argument('-c', '--config-file', required=False, default='default_osm_config.json')
     argparser.add_argument('-o', '--output-file', required=True)
 
@@ -440,7 +556,10 @@ if __name__ == '__main__':
     osm_data = geojson.load(open(args.osm_input, encoding='utf8'))
     if args.grid_file is not None:
         osm_processor = OSMProcessor(config=config, grid_file=args.grid_file)
+    elif args.bounding_box is not None:
+        osm_processor = OSMProcessor(config=config, bbox=args.bounding_box)
     else:
+
         osm_processor = OSMProcessor(config=config)
 
     osm_processor.preprocess_osm_data(osm_data=osm_data)

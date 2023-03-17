@@ -16,6 +16,7 @@
 import numpy as np
 import geopandas
 import pandas
+from shapely import Polygon, Point
 
 def _create_geodataframe(xarr, yarr, xiarr, yiarr, geometry):
     gdf = geopandas.GeoDataFrame({
@@ -145,3 +146,25 @@ def get_all_grids(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_ang
     sub_square_grid_gdf = get_sub_square_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle, rotation_center)
 
     return grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf
+
+def get_reference_rectanlge_points(polygon, ref_rectangle):
+    polygon_points = [Point(coord[0], coord[1]) for coord in polygon.exterior.coords]
+
+    if not ref_rectangle.exterior.is_ccw:
+        ref_rectangle = Polygon(ref_rectangle.exterior.coords[::-1])
+    # get closest point in minimum rotated rectangle to first point of bounding box
+    rectangle_points = [Point(*coord) for coord in ref_rectangle.exterior.coords]
+    dist = [polygon_points[0].distance(pt) for pt in rectangle_points]
+    min_idx = np.argmin(dist)
+
+    # get rotation angle of x-axis, assumed to be defined by (x0, y0) -> (x1, y1)
+    # since the last point in a polygon is always identical to the first point and np.argmin returns the first match,
+    # there should always be min_idx + 1 within the array
+    p0 = rectangle_points[min_idx]
+    p1 = rectangle_points[min_idx + 1]
+    if min_idx + 2 == len(rectangle_points):
+        p2 = rectangle_points[1]
+    else:
+        p2 = rectangle_points[min_idx + 2]
+
+    return p0, p1, p2
