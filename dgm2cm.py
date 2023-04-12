@@ -286,10 +286,21 @@ def convert_dgm(args):
 
     df = None
     print('Processing input files...')
+    delimiter = r"\s+"
+    delimiter_checked = False
     for filename in os.listdir(args.dgm_dir):
         # if filename.endswith('.xyz.gz'):
         if os.path.isfile(os.path.join(args.dgm_dir, filename)):
-            df_file = pandas.read_csv(os.path.join(args.dgm_dir, filename), delimiter=r"\s+", names=['x','y','z'])
+
+            df_file = pandas.read_csv(os.path.join(args.dgm_dir, filename), delimiter=delimiter, names=['x','y','z'])
+            if not delimiter_checked and not df_file.x.isna().all() and df_file.y.isna().all():
+                print('Input data is not space separated. Trying comma as column delimiter.')
+                delimiter = ','
+                df_file = pandas.read_csv(os.path.join(args.dgm_dir, filename), delimiter=delimiter, names=['x','y','z'])
+            if not delimiter_checked and not df_file.x.isna().all() and df_file.y.isna().all():
+                print('Input data has unknown format! Exiting.')
+                exit(1)
+            delimiter_checked = True
             # df_file = df_file[df_file.x.between(xmin_request, xmax_request) & df_file.y.between(ymin_request, ymax_request)]
             if df is not None:
                 df = pandas.concat((df, df_file))
