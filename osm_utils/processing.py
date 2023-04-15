@@ -33,7 +33,7 @@ from tqdm import tqdm
 
 from osm_utils.geometry import (find_chords, find_concave_vertices,
                                 find_subdividing_chords, rectangulate_polygon)
-from profiles.cold_war import get_building_cat2, get_building_tiles
+from profiles import get_building_cat2, get_building_tiles
 from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
 
 from .path_search import (_get_closest_node_in_gdf, _remove_nodes_from_gdf,
@@ -950,7 +950,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
     for g in osm_processor.occupancy_gdf.geometry.values:
         occupancy_vertices.append([coord for coord in g.exterior.coords])
 
-    buildings = get_building_tiles(building_type)
+    buildings = get_building_tiles(building_type, osm_processor.profile)
 
     plt.figure()
     plt.axis('equal')
@@ -1040,21 +1040,26 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
         else:
             condition = buildings.is_diagonal == is_diagonal
 
-        if (buildings.stories > 0).any() and (buildings.stories == 1).any() and (buildings.stories == 2).any() and (buildings.stories == 3).any():
-            rng = np.random.default_rng()
-            level_int = rng.integers(0,10)
-            if 0 < level_int < 3:
-                level = 1
-            elif level_int == 3:
-                level = 3
-            else:
-                level = 2
+        # if (buildings.stories > 0).any() and (buildings.stories == 1).any() and (buildings.stories == 2).any() and (buildings.stories == 3).any():
+        #     rng = np.random.default_rng()
+        #     level_int = rng.integers(0,10)
+        #     if 0 < level_int < 3:
+        #         level = 1
+        #     elif level_int == 3:
+        #         level = 3
+        #     else:
+        #         level = 2
             
-            condition = condition & (buildings.stories == level)
+        #     condition = condition & (buildings.stories == level)
 
         matched_buildings = []
         for mt in matched_tiles[1]:
-            building_candidates = buildings[condition & (buildings.width == mt[0][1]) & (buildings.height == mt[0][0])]
+            building_candidates = buildings[condition & (buildings.width == mt[0][1]) & (buildings.height == mt[0][0])].copy()
+            if len(building_candidates) == 0:
+                continue
+            building_candidates.loc[building_candidates.stories == 1, 'weight'] *= 0.3
+            building_candidates.loc[building_candidates.stories == 3, 'weight'] *= 0.1
+            building_candidates.loc[building_candidates.stories == 2, 'weight'] *= 0.6
             building = building_candidates.sample(n=1, weights=building_candidates.weight)
             matched_buildings.append(building)
 
@@ -1087,7 +1092,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
             sub_df['menu'] = menu
             sub_df['cat1'] = cat1
             sub_df['direction'] = 'Direction {}'.format(direction + 1)
-            sub_df['cat2'] = get_building_cat2(building_type, row, col)
+            sub_df['cat2'] = get_building_cat2(building_type, row, col, osm_processor.profile)
             sub_df['priority'] = config[name]['priority']
             
             osm_processor._append_to_df(sub_df)

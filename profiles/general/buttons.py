@@ -24,3 +24,8 @@ POS_VERTICAL_PLUS = pyautogui.Point(1014, 10)
 POS_VERTICAL_MINUS = pyautogui.Point(903, 10)
 POS_VERTICAL_PLUS2 = pyautogui.Point(1014, 27)
 POS_VERTICAL_MINUS2 = pyautogui.Point(903, 27)
+
+DIRECTION_1 = pyautogui.Point(248,17)
+DIRECTION_2 = pyautogui.Point(278,17)
+DIRECTION_3 = pyautogui.Point(308,17)
+DIRECTION_4 = pyautogui.Point(338,17)

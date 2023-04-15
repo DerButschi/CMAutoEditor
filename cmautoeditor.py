@@ -23,8 +23,10 @@ import numpy as np
 import pandas
 import pyautogui
 import PySimpleGUI as sg
+import importlib
 
-from profiles.cold_war.menu import MENU_DICT
+from profiles import available_profiles
+# from profiles.cold_war.menu import MENU_DICT
 from profiles.general.buttons import *
 from profiles.general.constants import *
 
@@ -104,6 +106,8 @@ def display_gui():
     # Construct window layout
     layout = [
         [sg.Titlebar('CMAutoEditor')],
+        [sg.Text('Profile: '), sg.Combo(values=list(available_profiles.keys()), default_value=list(available_profiles.keys())[0], 
+                                        key='cm_profile')],
         [sg.Text('You are about to start CMAutoEditor.')],
         [sg.Text('If you haven\'t done so yet, open up the CM Scenario Editor.')], 
         [sg.Text('If you want to set elevations, go to map->Elevation and click \'Direct\'.')],
@@ -142,7 +146,7 @@ def display_gui():
     window.close()
     # Start editor with UI inputs
     if start and values['filepath'] != '' and values['filepath'] != None:
-        start_editor(values['filepath'], values['countdown'], values['start_size_from_file'])
+        start_editor(values['filepath'], values['countdown'], values['start_size_from_file'], available_profiles[values['cm_profile']])
             
 
 def set_ground(df, map_df):
@@ -168,7 +172,9 @@ def set_ground(df, map_df):
             map_df.loc[row_idx, 'done'] = 1
 
     
-def start_editor(filepath, countdown, start_size_from_file=False):
+def start_editor(filepath, countdown, start_size_from_file=False, profile='cold_war'):
+    global MENU_DICT
+    MENU_DICT = importlib.import_module('profiles.{}.menu'.format(profile)).MENU_DICT
     map_df = pandas.read_csv(filepath)
     map_df.z = map_df.z.round().astype(int)
 
@@ -271,6 +277,7 @@ if __name__ == '__main__':
         arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
         arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
         arg_parser.add_argument('--start-size-from-file', required=False, action='store_true', help='If true take starting map size from file. Useful when continueing map creation.', default=False)
+        arg_parser.add_argument('-p', '--profile', required=False, default='cold_war', type=str)
         args = arg_parser.parse_args()
     
         return_val = sg.popup_ok_cancel('CMAutoEditor is about to run on {}.'.format(args.input),
@@ -282,4 +289,4 @@ if __name__ == '__main__':
         if return_val == 'Cancel' or return_val is None:
             exit()
         
-        start_editor(args.input, args.countdown, args.start_size_from_file)
+        start_editor(args.input, args.countdown, args.start_size_from_file, args.profile)

@@ -36,7 +36,7 @@ from tqdm import tqdm
 
 import osm_utils.processing
 from osm_utils.grid import get_all_grids, get_reference_rectanlge_points
-
+from profiles import available_profiles
 import PySimpleGUI as sg
 
 import sys
@@ -47,6 +47,8 @@ def run_startup_gui():
 
     layout = [
         [sg.Titlebar('OSM to CM Converter')],
+        [sg.Text('Profile: '), sg.Combo(values=list(available_profiles.keys()), default_value=list(available_profiles.keys())[0], 
+                                        key='cm_profile')],
         [sg.Text('OSM Input File: '), sg.Input(key='input_file_path'), sg.FileBrowse(file_types=(('GeoJSON', '*.geojson'),))],
         [sg.Text('Output File Name: '), sg.Input('output.csv', key='output_file_name')],
         [sg.Text('OSM Configuration File: '), sg.Input('default_osm_config.json', key='osm_config_name'), sg.FileBrowse(file_types=(('JSON', '*.json'), ))],
@@ -141,7 +143,8 @@ def run_startup_gui():
         elif event == 'start':
             break
 
-    outlist = ['-o', values['output_file_name'], '-c', values['osm_config_name'], '-i', values['input_file_path']]
+    outlist = ['-o', values['output_file_name'], '-c', values['osm_config_name'], '-i', values['input_file_path'], 
+               '-p', available_profiles[values['cm_profile']]]
     if values['grid_file_name'] != '':
         outlist.extend(['-g', values['grid_file_name']])
     elif values['bb_xmin'] != '':
@@ -156,8 +159,9 @@ def run_startup_gui():
 
 
 class OSMProcessor:
-    def __init__(self, config: Dict, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None, grid_file: Optional[str] = None):
+    def __init__(self, config: Dict, profile: str, bbox: Optional[List[float]] = None, bbox_lon_lat: Optional[List[float]] = None, grid_file: Optional[str] = None):
         self.config = config
+        self.profile = profile
         self.bbox = bbox
         self.bbox_lon_lat = bbox_lon_lat
         self.grid_file = grid_file
@@ -309,7 +313,11 @@ class OSMProcessor:
 
     def preprocess_osm_data(self, osm_data: Dict):
         bbox_polygon = None
-        if self.bbox is not None:
+        if self.grid_file is not None:
+            self._load_grid()
+            epsg_code = self.gdf.crs.to_epsg()
+            bbox_from_data = False
+        elif self.bbox is not None:
             bbox_crs = CRS.from_epsg(self.bbox[0])
             bbox_polygon = Polygon([(self.bbox[i-1], self.bbox[i]) for i in range(2, len(self.bbox), 2)])
             epsg_code = self._get_epsg_code_from_bbox(bbox_crs=bbox_crs, bbox=bbox_polygon)
@@ -403,15 +411,12 @@ class OSMProcessor:
         unprocessed_tags_df = unprocessed_tags_df.drop_duplicates()
         unprocessed_tags_df.to_csv('unprocessed_tags.csv')
 
-        if bbox_from_data:
-            bbox_polygon = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
-        else:
-            bbox_polygon = transform(self.transformer.transform, bbox_polygon)
-
         if self.grid_file is None:
+            if bbox_from_data:
+                bbox_polygon = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
+            else:
+                bbox_polygon = transform(self.transformer.transform, bbox_polygon)
             self._init_grid(bbox_polygon)
-        else:
-            self._load_grid()
 
     def _collect_stages(self):
         stages = {}
@@ -542,6 +547,7 @@ if __name__ == '__main__':
         'Otherwise 4326 (longitude/latitude) is assumend.', type=float, nargs='+')
     argparser.add_argument('-c', '--config-file', required=False, default='default_osm_config.json')
     argparser.add_argument('-o', '--output-file', required=True)
+    argparser.add_argument('-p', '--profile', type=str, required=False, default='cold_war')
 
     if len(sys.argv) == 1:
         argv_list = run_startup_gui()
@@ -555,12 +561,12 @@ if __name__ == '__main__':
 
     osm_data = geojson.load(open(args.osm_input, encoding='utf8'))
     if args.grid_file is not None:
-        osm_processor = OSMProcessor(config=config, grid_file=args.grid_file)
+        osm_processor = OSMProcessor(config=config, grid_file=args.grid_file, profile=args.profile)
     elif args.bounding_box is not None:
-        osm_processor = OSMProcessor(config=config, bbox=args.bounding_box)
+        osm_processor = OSMProcessor(config=config, bbox=args.bounding_box, profile=args.profile)
     else:
 
-        osm_processor = OSMProcessor(config=config)
+        osm_processor = OSMProcessor(config=config, profile=args.profile)
 
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
