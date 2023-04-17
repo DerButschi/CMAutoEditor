@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Create a report about a bug or crash
 title: ''
 labels: ''
 assignees: ''
@@ -8,31 +8,24 @@ assignees: ''
 ---
 
 **Describe the bug**
-A clear and concise description of what the bug is.
+Please provide clear and concise description of what the bug is.
 
 **To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+I can only fix something I can reproduce. So, please give me a precise list of steps that led to the bug or crash. E.g.
+1. I downloaded data XY
+2. I started script Z by clicking the .exe file
+3. I entered the following parameters: ...
 
 **Expected behavior**
 A clear and concise description of what you expected to happen.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Setup:**
+ - OS: [e.g. Windows 10]
+ - Python distribution: [e.g. miniconda]
+ - CMAutoEditor version: [e.g. 2.0.1, manually installed from source]
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
-
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
+**Screenshot**
+Please provide a screenshot if possible. (Drag and drop to the field at the bottom of this issue text field)
 
 **Additional context**
 Add any other context about the problem here.
