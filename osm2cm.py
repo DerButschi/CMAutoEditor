@@ -182,7 +182,8 @@ class OSMProcessor:
             "type_from_tag": [(0, "assign_type_from_tag", "by_element")],
             "type_random_area": [(0, "assign_type_randomly_in_area", "by_element")],
             "type_random_individual": [(0, "assign_type_randomly_for_each_square", "by_element")],
-            "type_from_linear": [(4, "assign_type_at_linear_feature", "by_config_name")],
+            "type_random_clusters": [(0, "assign_type_in_random_clusters", "by_element")],
+            "type_from_linear": [(6, "assign_type_at_linear_feature", "by_config_name")],
             "single_object_random": [(0, "single_object_random", "by_element")],
             "road_tiles": [
                 (0, "collect_network_data", "by_element"), 

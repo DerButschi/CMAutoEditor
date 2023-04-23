@@ -509,6 +509,17 @@ def assign_type_randomly_in_area(osm_processor, config, element_entry):
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
 
+    if len(sub_df) > 0 and not sub_df.xidx.isna().any() and not sub_df.xidx.isna().any() and 'modifiers' in config[element_entry['name']]:
+        modifiers = config[element_entry['name']]['modifiers']
+        condition = True
+        if 'stride_x' in modifiers or 'stride_y' in modifiers:
+            if 'stride_x' in modifiers:
+                condition = condition & sub_df.xidx.isin(list(range(sub_df.xidx.min(), sub_df.xidx.max(), int(modifiers['stride_x']))))
+            if 'stride_y' in modifiers:
+                condition = condition & sub_df.yidx.isin(list(range(sub_df.yidx.min(), sub_df.yidx.max(), int(modifiers['stride_y']))))
+        
+            sub_df = sub_df.loc[condition, :]
+
     sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
     probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
 
@@ -533,6 +544,17 @@ def assign_type_randomly_for_each_square(osm_processor, config, element_entry):
     grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
+
+    if len(sub_df) > 0 and not sub_df.xidx.isna().any() and not sub_df.xidx.isna().any() and 'modifiers' in config[element_entry['name']]:
+        modifiers = config[element_entry['name']]['modifiers']
+        condition = True
+        if 'stride_x' in modifiers or 'stride_y' in modifiers:
+            if 'stride_x' in modifiers:
+                condition = condition & sub_df.xidx.isin(list(range(sub_df.xidx.min(), sub_df.xidx.max(), int(modifiers['stride_x']))))
+            if 'stride_y' in modifiers:
+                condition = condition & sub_df.yidx.isin(list(range(sub_df.yidx.min(), sub_df.yidx.max(), int(modifiers['stride_y']))))
+            
+            sub_df = sub_df.loc[condition, :]
 
     sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
     probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
@@ -598,6 +620,84 @@ def assign_type_at_linear_feature(osm_processor, config, name, tqdm_string):
 
     osm_processor._append_to_df(sub_df)
 
+def assign_type_in_random_clusters(osm_processor, config, element_entry):
+    cm_types = config[element_entry['name']]['cm_types']
+    n_types = len(cm_types)
+
+    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
+    sub_df = osm_processor._get_sub_df(grid_cells)
+    sub_df.name = element_entry['name']
+
+    sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
+    probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
+
+    # Define the size of the forest area
+    n_rows = 500
+    n_cols = 500
+
+    # Define the number of trees you want to generate
+    n_trees = n_rows * n_cols
+
+    # Define the clustering level of the trees
+    cluster_size = 25000
+
+    # Define the tree types and their probabilities
+    tree_types = ['oak', 'pine', 'birch']
+    tree_probs = [0.4, 0.3, 0.3]
+
+    tree_types_indices = np.random.choice(range(len(tree_types)), size=n_trees)
+
+    # Adjust the frequencies of the tree types to match the desired distribution
+    tree_counts = np.zeros(len(tree_types))
+    for i in range(n_trees):
+        tree_counts[tree_types_indices[i]] += 1
+
+    # Calculate the desired frequencies of the tree types
+    desired_tree_freqs = np.array(tree_probs) * n_trees
+
+    # Adjust the frequencies of the tree types to match the desired distribution
+    adjusted_tree_probs = desired_tree_freqs / tree_counts
+    
+    # Generate clusters of trees
+    n_clusters = n_trees // cluster_size
+    cluster_centers = np.random.rand(n_clusters, 2) * [n_rows, n_cols]
+    cluster_centers_tree_type = np.random.choice(tree_types, size=n_clusters, p=tree_probs)
+    points = []
+    for i in range(n_clusters):
+        center = cluster_centers[i]
+        tree_type = cluster_centers_tree_type[i]
+        cluster_points = center + np.random.randn(cluster_size, 2) * cluster_size
+        for point in cluster_points:
+            if point[0] >= 0 and point[0] < n_rows and point[1] >= 0 and point[1] < n_cols:
+                points.append(point)
+    points = np.array(points)
+
+    # Assign each point a tree type based on the adjusted frequencies
+    tree_types_indices = np.random.choice(range(len(tree_types)), size=n_trees, p=tree_probs)
+    tree_types_names = [tree_types[i] for i in tree_types_indices]
+
+    # Create a heatmap showing the distribution of tree types
+    tree_counts = np.zeros((n_rows, n_cols, len(tree_types)))
+    for i in range(n_trees):
+        row, col = np.unravel_index(i, (n_rows, n_cols))
+        tree_counts[row, col, tree_types_indices[i]] += 1
+
+
+    rng = np.random.default_rng()
+    type_indices = rng.choice(list(range(n_types)), p=probabilities, size=(len(sub_df),))
+
+    # type_indices = np.random.randint(0, n_types, size=(len(sub_df),))
+    for type_idx in range(n_types):
+        idx = np.where(type_indices == type_idx)[0]
+        if len(idx) > 0:
+            cm_type = cm_types[type_idx]
+            for key in cm_type:
+                if type(cm_type[key]) != list and key in sub_df.columns:
+                    sub_df.loc[sub_df.index[idx], key] = cm_type[key]
+
+    sub_df['priority'] = config[element_entry['name']]['priority']
+
+    osm_processor._append_to_df(sub_df)
 
 def assign_road_tiles_to_network(osm_processor, config, name, tqdm_string):
     assign_tiles_to_network(osm_processor, config, name, road_tiles, tqdm_string)
