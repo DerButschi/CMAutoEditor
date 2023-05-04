@@ -20,7 +20,7 @@ jobs:
     - run: copy LICENSE dist/LICENSE
     - run: copy README.md dist/README.md
     - run: copy example_height_map.csv dist/example_height_map.csv
-    - run: copy default_osm_config.json dist/default_osm_config.json
+    - run: copy default_osm* dist/
     - uses: actions/upload-artifact@v3
       with:
         name: release
