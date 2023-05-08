@@ -7,10 +7,10 @@ block_cipher = None
 
 a_cmautoeditor = Analysis(
     ['cmautoeditor.py'],
-    pathex=['osm_utils', 'profiles'],
+    pathex=['osm_utils', 'profiles', "profiles/cold_war", "profiles/fortress_italy"],
     binaries=[],
     datas=[],
-    hiddenimports=["profiles"],
+    hiddenimports=["profiles", "profiles.cold_war", "profiles.cold_war.menu", "profiles.fortress_italy", "profiles.fortress_italy.menu"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
