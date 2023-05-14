@@ -1,4 +1,55 @@
 {
+    "default_ground": {
+        "tags": [
+            ["default", "ground"]
+        ],
+        "cm_types": [
+            {"menu": "Ground 1", "cat1": "Grass T", "weight": 2.0},
+            {"menu": "Ground 1", "cat1": "Grass TY", "weight": 0.2},
+            {"menu": "Ground 1", "cat1": "Weeds", "weight": 2.0},
+            {"menu": "Ground 1", "cat1": "Grass XT", "weight": 5.0},
+            {"menu": "Ground 1", "cat1": "Grass XTY", "weight": 0.2}
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": -999
+    },
+
+    "default_foliage": {
+        "tags": [
+            ["default", "foliage"]
+        ],
+        "cm_types": [
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 1", "weight": 0.13},
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 2", "weight": 0.025},
+            {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 3", "weight": 0.008},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 1", "weight": 0.13},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 2", "weight": 0.025},
+            {"menu": "Foliage", "cat1": "Tree D", "cat2": "density 3", "weight": 0.008},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 1", "weight": 0.13},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 2", "weight": 0.025},
+            {"menu": "Foliage", "cat1": "Tree G", "cat2": "density 3", "weight": 0.008},
+            {"menu": "Foliage", "cat1": "Bush A", "cat2": "density 1", "weight": 0.66},
+            {"menu": "Foliage", "cat1": "Bush A", "cat2": "density 2", "weight": 0.46},
+            {"menu": "Foliage", "cat1": "Bush A", "cat2": "density 3", "weight": 0.2},
+            {"menu": "Foliage", "cat1": "Bush B", "cat2": "density 1", "weight": 0.66},
+            {"menu": "Foliage", "cat1": "Bush B", "cat2": "density 2", "weight": 0.46},
+            {"menu": "Foliage", "cat1": "Bush B", "cat2": "density 3", "weight": 0.2},
+            {"menu": "Foliage", "cat1": "Bush C", "cat2": "density 1", "weight": 0.66},
+            {"menu": "Foliage", "cat1": "Bush C", "cat2": "density 2", "weight": 0.46},
+            {"menu": "Foliage", "cat1": "Bush C", "cat2": "density 3", "weight": 0.2},
+            {"menu": "Brush", "cat1": "Brush_brush", "weight": 22},
+            {"dummy": true, "weight": 66}            
+
+        ],
+        "process": [
+            "type_random_individual"
+        ],
+        "priority": -999
+    },
+
+
     "road": {
         "tags": [
             ["highway", "primary"],

@@ -407,7 +407,7 @@ class OSMProcessor:
                 for key, value in element_tags.items():
                     unprocessed_tags['key'].append(key)
                     unprocessed_tags['value'].append(value)
-            
+
         unprocessed_tags_df = pandas.DataFrame(unprocessed_tags)
         unprocessed_tags_df = unprocessed_tags_df.drop_duplicates()
         unprocessed_tags_df.to_csv('unprocessed_tags.csv')
@@ -418,6 +418,15 @@ class OSMProcessor:
             else:
                 bbox_polygon = transform(self.transformer.transform, bbox_polygon)
             self._init_grid(bbox_polygon)
+
+        # add default entries
+        if "default_ground" in config:
+            self.matched_elements.append({'element': None, 'geometry': self.effective_bbox_polygon, 
+                                          'name': 'default_ground', 'idx': element_idx + 1})
+        if "default_foliage" in config:
+            self.matched_elements.append({'element': None, 'geometry': self.effective_bbox_polygon, 
+                                          'name': 'default_foliage', 'idx': element_idx + 2})
+
 
     def _collect_stages(self):
         stages = {}
@@ -483,13 +492,22 @@ class OSMProcessor:
             yidx = self.df.loc[idx].yidx
 
             # min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx)].priority.max()
-            min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > 0)].priority.min()
+            contains_default = len(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority == -999)]) > 0
+
+            if contains_default:
+                min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > -999)].priority.min()
+            else:
+                min_valid_priority = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > 0)].priority.min()
             # if min_valid_priority < 1:
             #     continue
             if np.isnan(min_valid_priority):
                 continue
-            indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > min_valid_priority)].index)
-            indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority < 0)].index)
+
+            if contains_default:
+                indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority == -999)].index)
+            else:
+                indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority > min_valid_priority)].index)
+                indices_to_drop.extend(self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority < 0)].index)
 
             min_priority_names = self.df[(self.df.xidx == xidx) & (self.df.yidx == yidx) & (self.df.priority == min_valid_priority)].name.unique()
 
