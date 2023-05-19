@@ -18,7 +18,7 @@ jobs:
           auto-update-conda: false
           activate-environment: py310_cmautoeditor
           channels: conda-forge
-          python-version: 3.10
+          python-version: "3.10"
     - run: conda install --file requirements.txt
     - run: python -m PyInstaller --noconfirm --log-level=INFO --clean build.spec
     - run: python -m PyInstaller --noconfirm --log-level=INFO --clean --onefile --hidden-import matplotlib.backends.backend_svg .\osm2cm.py
