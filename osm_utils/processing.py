@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas
+import datetime
 from matplotlib.collections import PolyCollection
 from shapely import unary_union
 from shapely.affinity import rotate, scale, translate
@@ -33,11 +34,13 @@ from tqdm import tqdm
 
 from osm_utils.geometry import (find_chords, find_concave_vertices,
                                 find_subdividing_chords, rectangulate_polygon)
-from profiles import get_building_cat2, get_building_tiles
+from profiles import get_building_cat2, get_building_tiles, get_building_tokens
 from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
 
 from .path_search import (_get_closest_node_in_gdf, _remove_nodes_from_gdf,
                           search_path)
+
+from osm_utils.building_placement import custom_branch_and_bound
 
 DRAW_DEBUG_PLOTS = False
 
@@ -1022,15 +1025,49 @@ def collect_building_geometries(osm_processor, geometry, element_entry):
     #     is_diagonal = True
 
 def process_residential_building_outlines(osm_processor, config, name, tqdm_string):
-    process_building_outlines(osm_processor, config, name, 'residential_buildings', tqdm_string)
+    process_building_outlines_global(osm_processor, config, name, 'residential_buildings', tqdm_string)
 
 def process_church_outlines(osm_processor, config, name, tqdm_string):
-    process_building_outlines(osm_processor, config, name, 'churches', tqdm_string)
+    process_building_outlines_global(osm_processor, config, name, 'churches', tqdm_string)
 
 def process_barn_outlines(osm_processor, config, name, tqdm_string):
-    process_building_outlines(osm_processor, config, name, 'barns', tqdm_string)
+    process_building_outlines_global(osm_processor, config, name, 'barns', tqdm_string)
+
+def process_building_outlines_global(osm_processor, config, name, building_type, tqdm_string):
+    d0 = datetime.datetime.now()
+    logger = logging.getLogger('osm2cm')
+    if name not in osm_processor.building_outlines:
+        return
+
+    grid_gdf = osm_processor.sub_square_grid_gdf
+    square_bounds = [grid_gdf.xidx.min(), grid_gdf.yidx.min(), grid_gdf.xidx.max(), grid_gdf.yidx.max()]
+    building_tokens = get_building_tokens(building_type, osm_processor.profile)
+
+    board = np.zeros((
+        int((square_bounds[2] - square_bounds[0]) / 0.5),
+        int((square_bounds[3] - square_bounds[1]) / 0.5)
+    ), dtype=int)
+
+    for element_idx in osm_processor.building_outlines[name].keys():
+        building_geometry = osm_processor.building_outlines[name][element_idx][0]
+        matched_indices = grid_gdf.geometry.sindex.query(building_geometry, predicate='intersects')
+
+        for idx in matched_indices:
+            board_idx = (
+                int((grid_gdf.loc[idx,'xidx'] - square_bounds[0]) / 0.5),
+                int((grid_gdf.loc[idx,'yidx'] - square_bounds[0]) / 0.5)
+            )
+            board[board_idx[0], board_idx[1]] = element_idx
+
+        a = 1
+
+    best_solution, best_score = custom_branch_and_bound(board, building_tokens)
+    print((datetime.datetime.now - d0).total_seconds())
+    a = 1
+
 
 def process_building_outlines(osm_processor, config, name, building_type, tqdm_string):
+    
     logger = logging.getLogger('osm2cm')
     if name not in osm_processor.building_outlines:
         return
@@ -1051,6 +1088,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
         occupancy_vertices.append([coord for coord in g.exterior.coords])
 
     buildings = get_building_tiles(building_type, osm_processor.profile)
+    
 
     plt.figure()
     plt.axis('equal')
