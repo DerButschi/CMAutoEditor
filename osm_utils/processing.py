@@ -40,7 +40,7 @@ from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
 from .path_search import (_get_closest_node_in_gdf, _remove_nodes_from_gdf,
                           search_path)
 
-from osm_utils.building_placement import custom_branch_and_bound
+from osm_utils.building_placement_ga import ga_placement
 
 DRAW_DEBUG_PLOTS = False
 
@@ -1061,8 +1061,7 @@ def process_building_outlines_global(osm_processor, config, name, building_type,
 
         a = 1
 
-    best_solution, best_score = custom_branch_and_bound(board, building_tokens)
-    print((datetime.datetime.now - d0).total_seconds())
+    ga_placement(board, building_tokens)
     a = 1
 
 
