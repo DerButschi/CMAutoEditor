@@ -1039,13 +1039,14 @@ def process_building_outlines_global(osm_processor, config, name, building_type,
     if name not in osm_processor.building_outlines:
         return
 
+    logger.debug('Preparing board.')
     grid_gdf = osm_processor.sub_square_grid_gdf
     square_bounds = [grid_gdf.xidx.min(), grid_gdf.yidx.min(), grid_gdf.xidx.max(), grid_gdf.yidx.max()]
     building_tokens = get_building_tokens(building_type, osm_processor.profile)
 
     board = np.zeros((
-        int((square_bounds[2] - square_bounds[0]) / 0.5),
-        int((square_bounds[3] - square_bounds[1]) / 0.5)
+        np.ceil((square_bounds[2] - square_bounds[0]) / 0.5).astype(int) + 1,
+        np.ceil((square_bounds[3] - square_bounds[1]) / 0.5).astype(int) + 1
     ), dtype=int)
 
     for element_idx in osm_processor.building_outlines[name].keys():
@@ -1055,13 +1056,27 @@ def process_building_outlines_global(osm_processor, config, name, building_type,
         for idx in matched_indices:
             board_idx = (
                 int((grid_gdf.loc[idx,'xidx'] - square_bounds[0]) / 0.5),
-                int((grid_gdf.loc[idx,'yidx'] - square_bounds[0]) / 0.5)
+                int((grid_gdf.loc[idx,'yidx'] - square_bounds[1]) / 0.5)
             )
             board[board_idx[0], board_idx[1]] = element_idx
 
         a = 1
 
-    ga_placement(board, building_tokens)
+    tokens_placed, _ = ga_placement(board, building_tokens)
+    import matplotlib.pyplot as plt
+    state = np.zeros_like(board)
+    for tpidx, tp in enumerate(tokens_placed):
+        state[tp['row']:tp['row'] + tp['pattern'].shape[0], tp['col']:tp['col'] + tp['pattern'].shape[1]] = (tp['pattern'] > 0).astype(int) * tpidx
+
+    plt.figure()
+    plt.imshow(state)
+    plt.figure()
+    plt.imshow(board)
+    plt.show()
+
+    
+
+    
     a = 1
 
 
