@@ -1,0 +1,176 @@
+# Copyright (C) 2023  Nicolas Möser
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+from ..general import ui_positions
+from ..general import buttons
+import pyautogui
+
+MENU_DICT = {
+    'Ground 1': pyautogui.Point(*ui_positions.MENU_SLOT01),
+    'Ground 2': pyautogui.Point(*ui_positions.MENU_SLOT02),
+    'Ground 3': pyautogui.Point(*ui_positions.MENU_SLOT03),
+    'Brush': pyautogui.Point(*ui_positions.MENU_SLOT04),
+    'Foliage': pyautogui.Point(*ui_positions.MENU_SLOT05),
+    'Roads': pyautogui.Point(*ui_positions.MENU_SLOT06),
+    "Walls/Fences/Ditches": pyautogui.Point(*ui_positions.MENU_SLOT07),
+    "Buildings": pyautogui.Point(*ui_positions.MENU_SLOT08),
+    "Flavor Objects #1": pyautogui.Point(*ui_positions.MENU_SLOT09),
+    "Flavor Objects #2": pyautogui.Point(*ui_positions.MENU_SLOT10),
+    "Craters": pyautogui.Point(*ui_positions.MENU_SLOT11),
+
+    'Dirt': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_1),
+    'Dirt Red': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_1),
+    'Hard': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_1),
+    'Hard Red': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_1),
+    'Rocky': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_2),
+    'Rocky Red': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_2),
+    'Heavy Rocks': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_2),
+    'Sand': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_2),
+    'Grass': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_3),
+    'Grass Y': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_3),
+    'Grass T': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_3),
+    'Grass TY': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_3),
+    'Weeds': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_4),
+    'Lt Forest': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_4),
+    'Hvy Forest': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_4),
+    'Mud': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_4),
+
+    'Marsh': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_1),
+    'Deep Marsh': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_1),
+    'Water': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_1),
+    'Reeds': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_1),
+    'Shallow Ford': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_2),
+    'Deep Ford': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_2),
+    'Pavement 1': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_2),
+    'Pavement 2': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_2),
+    'Gravel': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_3),
+    'Dirt Lot': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_3),
+    'Grain': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_3),
+    'Plow NS': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_3),
+    'Plow EW': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_4),
+    'Crop 1': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_4),
+    'Crop 2': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_4),
+    'Crop 3': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_4),
+
+    'Crop 4': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_1),
+    'Crop 5': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_1),
+    'Crop 6': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_1),
+
+    'Brush_brush': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_2_1),
+
+    'Tree A': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_2_1),
+    'Tree B': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_3_1),
+    'Tree C': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_1_2),
+    'Tree D': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_2_2),
+    'Tree E': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_3_2),
+    'Tree F': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_1_3),
+    'Bush A': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_2_3),
+    'Bush B': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_3_3),
+    'Bush C': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_1_4),
+
+    'density 1': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_1),
+    'density 2': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_2_1),
+    'density 3': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_3_1),
+    'density 4': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_2),
+
+    'Dirt Road': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_2_1),
+    'Gravel Road': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_3_1),
+    'Paved 1': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_1_2),
+    'Paved 2': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_2_2),
+    'Foot Path': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_3_2),
+    'Railroad': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_1_3),
+    'Stream': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_2_3),
+    'Highway': pyautogui.Point(*ui_positions.SUB_MENU_1_3x4_3_3),
+
+    'Road Tile 1': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_1),
+    'Road Tile 2': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_2_1),
+    'Road Tile 3': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_3_1),
+    'Road Tile 4': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_2),
+    'Road Tile 5': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_2_2),
+    'Road Tile 6': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_3_2),
+    'Road Tile 7': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_3),
+    'Road Tile 8': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_2_3),
+    'Road Tile 9': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_3_3),
+    'Road Tile 10': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_4),
+    'Road Tile 11': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_2_4),
+    'Road Tile 12': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_3_4),
+
+    'Direction 1': buttons.DIRECTION_1,
+    'Direction 2': buttons.DIRECTION_2,
+    'Direction 3': buttons.DIRECTION_3,
+    'Direction 4': buttons.DIRECTION_4,
+
+    'Stone': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_1),
+    'Tall Stone': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_1),
+    'Brick': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_1),
+    'Tall Brick': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_2),
+    'Rural Stone': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_2),
+    'Hedge': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_2),
+    'Wood Fence': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_2),
+    'Wire Fence': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_3),
+    'Ditch': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_3),
+
+    'Rubbled': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_1),
+    '1 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_1),
+    '2 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_1),
+    '3 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_2),
+    '4 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_2),
+    '5 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_2),
+    '6 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_3),
+    '7 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_3),
+    '8 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_3),
+    '9 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_3),
+    '10 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_3),
+    '11 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_4),
+    '12 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_4),
+    '13 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_4),
+    '14 Story': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_4),
+
+    'AirCon': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_1),
+    'ATM': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_1),
+    'Barrel': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_1),
+    'Bench': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_1),
+    'Bin': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_2),
+    'Crate': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_2),
+    'Drum': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_2),
+    'Fountain': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_2),
+    'Junk': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_3),
+    'Log': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_3),
+    'Manhole': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_3),
+    'Pallet': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_3),
+    'Pole': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_4),
+    'Pond': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_4),
+    'Road Sgn 1': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_4),
+    'Rock': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_4),
+
+    'Sack': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_1),
+    'Shelter': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_1),
+    'Strt Lt 1': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_1),
+    'Strt Lt 2': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_1),
+    'Stump': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_1_2),
+    'Tel Pole': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_2_2),
+    'Tire': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_3_2),
+    'Traf Lt': pyautogui.Point(*ui_positions.SUB_MENU_1_4x4_4_2),
+
+    'Object 1': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_1),
+    'Object 2': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_2_1),
+    'Object 3': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_3_1),
+    'Object 4': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_2),
+    'Object 5': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_2_2),
+    'Object 6': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_3_2),
+    'Object 7': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_1_3),
+    'Object 8': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_2_3),
+    'Object 9': pyautogui.Point(*ui_positions.SUB_MENU_2_3x4_3_3),
+}

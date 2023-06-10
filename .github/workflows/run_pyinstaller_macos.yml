@@ -3,10 +3,13 @@ on: [workflow_dispatch]
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    defaults:
+          run:
+            shell: bash -el {0}    
     strategy:
       fail-fast: false
       matrix:
-        os: ['windows-latest']
+        os: ['macos-latest']
 
     steps:
     - uses: actions/checkout@v3
@@ -14,7 +17,10 @@ jobs:
       with:
           auto-update-conda: false
           activate-environment: py310_cmautoeditor
-          environment-file: conda_requirements_py310.txt
+          channels: conda-forge
+          python-version: "3.10"
+    - run: conda install --file requirements.txt
+    - run: conda install pyinstaller
     - run: python -m PyInstaller --noconfirm --log-level=INFO --clean build.spec
     - run: python -m PyInstaller --noconfirm --log-level=INFO --clean --onefile --hidden-import matplotlib.backends.backend_svg .\osm2cm.py
     - run: copy LICENSE dist/LICENSE
