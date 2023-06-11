@@ -223,7 +223,7 @@ def start_editor(filepath, countdown, start_size_from_file=False, profile='cold_
 
         pyautogui.countdown(countdown)
 
-        #Adjust the starting position right and up to allow maps greater the 4160m to be created
+        #Adjust the starting position right and down to allow maps greater the 4160m to be created
         if not start_size_from_file:
             set_n_squares(0, 0, start_adjustment_x, start_adjustment_y)
             
