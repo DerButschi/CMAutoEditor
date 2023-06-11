@@ -112,7 +112,7 @@ def display_gui():
         [sg.Text('If you haven\'t done so yet, open up the CM Scenario Editor.')], 
         [sg.Text('If you want to set elevations, go to map->Elevation and click \'Direct\'.')],
         [sg.Text('For OSM data, just go to \'map\' and stay on the first menu page (\'Ground 1\', etc).')],
-        [sg.Text('Make sure the map size is 320m x 320m or check \'Take start size from file\' (only when continueing a map!).')],
+        [sg.Text('Make sure the map size is 320m x 320m or check \'Take start size from file\' (only when continuing a map!).')],
         [sg.Text('Once you are ready to start click, \'Start CMAutoEditor\'.')], 
         [sg.Text('During the countdown switch back to the CM Scenario Editor.')],
         [sg.Text('In case something goes wrong, move the mouse cursor to one of the screen corners.')],
@@ -120,7 +120,7 @@ def display_gui():
         [sg.Text('Select file: ')], 
         [sg.Input(), sg.FileBrowse(key='filepath', file_types=(('CSV files', '*.csv'),))],
         [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
-        [sg.Checkbox('Take start size from file (only for continueing a map!)', key='start_size_from_file', enable_events=True, default=False)],
+        [sg.Checkbox('Take start size from file (only for continuing a map!)', key='start_size_from_file', enable_events=True, default=False)],
         [sg.Text(text='', key='error_text')],
         [sg.Push(), sg.Button('Start CMAutoEditor', key='start'), sg.Exit(), sg.Push()]]
 
