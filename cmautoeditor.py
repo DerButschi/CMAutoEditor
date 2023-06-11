@@ -183,18 +183,32 @@ def start_editor(filepath, countdown, start_size_from_file=False, profile='cold_
 
     start_i_page_x = 0
     start_i_page_y = 0
-    if start_size_from_file:
-        prev_n_x = np.floor(map_df.x.max()).astype(int) + PAGE_RIGHT_MARGIN
-        prev_n_y = np.floor(map_df.y.max()).astype(int) + PAGE_BOTTOM_MARGIN
-    else:
-        prev_n_x = START_N_SQUARES_X
-        prev_n_y = START_N_SQUARES_Y
+    
 
     try:    
         map_df = map_df[map_df['done'] == 0]
         total_n_squares_x = int(map_df.x.max()) + 1
         total_n_squares_y = int(map_df.y.max()) + 1
 
+        if start_size_from_file:
+            prev_n_x = np.floor(map_df.x.max()).astype(int) + PAGE_RIGHT_MARGIN
+            prev_n_y = np.floor(map_df.y.max()).astype(int) + PAGE_BOTTOM_MARGIN
+        else:
+            prev_n_x = START_N_SQUARES_X
+            prev_n_y = START_N_SQUARES_Y
+            
+            #Calculate if the x of the map is greater then 4160m
+            if total_n_squares_x > N_SQUARES_LIMIT_X:
+                start_adjustment_x = -abs(int(map_df.x.max()) - N_SQUARES_LIMIT_X + PAGE_RIGHT_MARGIN)
+            else:
+                start_adjustment_x = 0
+            
+            #Calculate if the y of the map is greater then 4160m    
+            if total_n_squares_y > N_SQUARES_LIMIT_Y:
+                start_adjustment_y = -abs(int(map_df.y.max()) - N_SQUARES_LIMIT_Y + PAGE_TOP_MARGIN + PAGE_BOTTOM_MARGIN + 3)
+            else:
+                start_adjustment_y = 0
+            
         n_pages_x, n_x_remain = np.divmod(total_n_squares_x, PAGE_N_SQUARES_X - PAGE_RIGHT_MARGIN, dtype=int)
         n_pages_y, n_y_remain = np.divmod(total_n_squares_y, PAGE_N_SQUARES_Y - PAGE_TOP_MARGIN - PAGE_BOTTOM_MARGIN, dtype=int)
         n_x_remain = (np.floor(n_x_remain / 2) * 2).astype(int)
@@ -209,6 +223,10 @@ def start_editor(filepath, countdown, start_size_from_file=False, profile='cold_
 
         pyautogui.countdown(countdown)
 
+        #Adjust the starting position right and up to allow maps greater the 4160m to be created
+        if not start_size_from_file:
+            set_n_squares(0, 0, start_adjustment_x, start_adjustment_y)
+            
         for i_page_y in range(n_pages_y + 1):
             for i_page_x in range(n_pages_x + 1):
                 if i_page_x < n_pages_x:
