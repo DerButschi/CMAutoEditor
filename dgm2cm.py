@@ -63,7 +63,7 @@ def display_gui():
     # Construct window layout
     layout = [
         [sg.Titlebar('DGM Converter')],
-        [sg.Text('Select directory containg dgm files:')], 
+        [sg.Text('Select directory containing dgm files:')], 
         [sg.Input(key='folderpath'), sg.FolderBrowse()],
         [sg.Text('Coordinate Reference System (CRS) of data: EPSG:'), sg.InputText('25832', enable_events=True, key='data_crs')],
         [sg.Text('File output name: '), sg.Input('output', key='output')],
