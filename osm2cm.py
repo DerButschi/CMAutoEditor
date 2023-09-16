@@ -295,20 +295,28 @@ class OSMProcessor:
 
         return crs.code
 
+    def _get_geometry(self, geojson_geometry):
+        try:
+            return shape(geojson_geometry)
+        except:
+            return None
+        
+
+
     def _get_projected_geometry(self, geojson_geometry):
             # geometry = geopandas.GeoSeries(shape(geojson_geometry))
             # geometry = geometry.set_crs(epsg=4326)
             # geometry = geometry.to_crs(epsg=25832)
             # return geometry[0]
 
-            try:
-                geometry_object = shape(geojson_geometry)
-            except:
+            geometry_object = self._get_geometry(geojson_geometry)
+
+            if geometry_object is not None:
+                projected_geometry_object = transform(self.transformer.transform, geometry_object)
+
+                return projected_geometry_object
+            else:
                 return None
-
-            projected_geometry_object = transform(self.transformer.transform, geometry_object)
-
-            return projected_geometry_object
 
 
 
@@ -332,22 +340,32 @@ class OSMProcessor:
             epsg_code = self._get_epsg_code_from_bbox(bbox_crs=bbox_crs, bbox=bbox_polygon)
             bbox_from_data = False
         else:
-            epsg_code = 32632
+            epsg_code = None  # By default use WGS84/Transverse Mercator as in JOSM
             bbox_from_data = True
             xmin = np.inf
             xmax = -np.inf
             ymin = np.inf
             ymax = -np.inf
 
-        self.transformer = pyproj.Transformer.from_crs('epsg:4326', 'epsg:{}'.format(epsg_code), always_xy=True)
-
-
+        self.transformer = None
+        if epsg_code is not None:
+            self.transformer = pyproj.Transformer.from_crs('epsg:4326', 'epsg:{}'.format(epsg_code), always_xy=True)
+            
 
         element_idx = 0
         unprocessed_tags = {'key': [], 'value': []}
         for element in tqdm(osm_data.features, 'Preprocessing OSM Data'):
             element_matched = False
+            if bbox_from_data and epsg_code is None:
+                raw_geometry = self._get_geometry(element.geometry)
+                if raw_geometry is not None:
+                    epsg_code = self._get_epsg_code_from_bbox(bbox_crs=CRS.from_epsg(4326), bbox=raw_geometry)
+                    self.transformer = pyproj.Transformer.from_crs('epsg:4326', 'epsg:{}'.format(epsg_code), always_xy=True)
+                else:
+                    continue
+
             geometry = self._get_projected_geometry(element.geometry)
+
             if geometry is None:
                 continue
 
@@ -417,6 +435,7 @@ class OSMProcessor:
                 bbox_polygon = Polygon([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
             else:
                 bbox_polygon = transform(self.transformer.transform, bbox_polygon)
+            
             self._init_grid(bbox_polygon)
 
         # add default entries
