@@ -85,7 +85,7 @@ def run_startup_gui():
         ]], key='bbox_two_points', visible=False))],
         [sg.pin(sg.Column([
             [sg.Text('Select data within an arbitrary rectangle.')],
-            [sg.Text('The line between point 1 and 2 will be the W <-> E axis in CM.')],
+            [sg.Text('Point 1 will be the lower left corner in CM. From there enter the other corners of the rectangle in counter-clockwise order.')],
             [sg.Column([
                 [sg.Text('')],
                 [sg.Text('point 1')],
@@ -293,7 +293,9 @@ class OSMProcessor:
             if crs is None:
                 crs = crs_list[-1]
 
-        return crs.code
+            return crs.code
+        else:
+            return bbox_crs.to_epsg()
 
     def _get_geometry(self, geojson_geometry):
         try:

@@ -30,6 +30,8 @@ from profiles import available_profiles
 from profiles.general.buttons import *
 from profiles.general.constants import *
 
+DEBUG_MODE = False
+
 pyautogui.PAUSE = 0.05  # 0.12 almost!! works
 
 def set_height(current_height, target_height):
@@ -38,14 +40,16 @@ def set_height(current_height, target_height):
     elif current_height < target_height:
         n_diff = target_height - current_height
         for i in range(n_diff):
-            keyboard.send('+')
-            sleep(0.1)
+            if not DEBUG_MODE:
+                keyboard.send('+')
+                sleep(0.1)
     else:
         n_diff = current_height - target_height
         print(n_diff)
         for i in range(n_diff):
-            keyboard.send('-')
-            sleep(0.1)
+            if not DEBUG_MODE:
+                keyboard.send('-')
+                sleep(0.1)
 
 
 def process_segment(grid, start_height):
@@ -70,7 +74,8 @@ def process_segment(grid, start_height):
             y_pos = int(LOWER_RIGHT_SQUARE.y - idx1 * SQUARE_SIZE_Y)
             height = val
 
-            pyautogui.click(x=x_pos, y=y_pos)
+            if not DEBUG_MODE:
+                pyautogui.click(x=x_pos, y=y_pos)
 
     return height
 
@@ -79,28 +84,30 @@ def set_n_squares(start_n_x, start_n_y, n_x, n_y, mode='window'):
     n_clicks_y = abs(int((start_n_y - n_y) / 2))
 
     for i in range(n_clicks_x):
-        if n_x <= start_n_x:
-            if mode in ('window', 'finish'):
-                pyautogui.click(POS_HORIZONTAL_PLUS2, interval=0.05)
-            if mode in ('window', 'init'):
-                pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.05)
-        else:
-            if mode in ('window', 'init'):
-                pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.05)
-            if mode in ('window', 'finish'):
-                pyautogui.click(POS_HORIZONTAL_MINUS2, interval=0.05)    
+        if not DEBUG_MODE:
+            if n_x <= start_n_x:
+                if mode in ('window', 'finish'):
+                    pyautogui.click(POS_HORIZONTAL_PLUS2, interval=0.05)
+                if mode in ('window', 'init'):
+                    pyautogui.click(POS_HORIZONTAL_MINUS, interval=0.05)
+            else:
+                if mode in ('window', 'init'):
+                    pyautogui.click(POS_HORIZONTAL_PLUS, interval=0.05)
+                if mode in ('window', 'finish'):
+                    pyautogui.click(POS_HORIZONTAL_MINUS2, interval=0.05)    
     
     for i in range(n_clicks_y):
-        if n_y <= start_n_y:
-            if mode in ('window', 'finish'):
-                pyautogui.click(POS_VERTICAL_PLUS2, interval=0.05)    
-            if mode in ('window', 'init'):
-                pyautogui.click(POS_VERTICAL_MINUS, interval=0.05)
-        else:
-            if mode in ('window', 'init'):
-                pyautogui.click(POS_VERTICAL_PLUS, interval=0.05)
-            if mode in ('window', 'finish'):
-                pyautogui.click(POS_VERTICAL_MINUS2, interval=0.05)    
+        if not DEBUG_MODE:
+            if n_y <= start_n_y:
+                if mode in ('window', 'finish'):
+                    pyautogui.click(POS_VERTICAL_PLUS2, interval=0.05)    
+                if mode in ('window', 'init'):
+                    pyautogui.click(POS_VERTICAL_MINUS, interval=0.05)
+            else:
+                if mode in ('window', 'init'):
+                    pyautogui.click(POS_VERTICAL_PLUS, interval=0.05)
+                if mode in ('window', 'finish'):
+                    pyautogui.click(POS_VERTICAL_MINUS2, interval=0.05)    
 
 def display_gui():
     # Construct window layout
@@ -156,18 +163,66 @@ def set_ground(df, map_df):
 
         if group_info[0] not in MENU_DICT or group_info[1] not in MENU_DICT:
             continue
-        pyautogui.click(MENU_DICT[group_info[0]])
-        pyautogui.click(MENU_DICT[group_info[1]])
+        if not DEBUG_MODE:
+            pyautogui.click(MENU_DICT[group_info[0]])
+            pyautogui.click(MENU_DICT[group_info[1]])
 
         if group_info[2] in MENU_DICT:
-            pyautogui.click(MENU_DICT[group_info[2]])
+            if not DEBUG_MODE:
+                pyautogui.click(MENU_DICT[group_info[2]])
         if group_info[3] in MENU_DICT:
-            pyautogui.click(MENU_DICT[group_info[3]])
+            if not DEBUG_MODE:
+                pyautogui.click(MENU_DICT[group_info[3]])
 
-        for row_idx, row in group.iterrows():
-            x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
-            y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
-            pyautogui.click(x=x_pos, y=y_pos)
+        if group_info[0].startswith('Ground') or group_info[0].startswith('Brush'): 
+            xmin, ymin = group.loc[:,['x','y']].min()
+            xmax, ymax = group.loc[:,['x','y']].max()
+
+            xy_mat = np.full((xmax-xmin+1, ymax-ymin+1), -1, dtype=int)
+            
+            for _, row in group.iterrows():
+                xy_mat[row.x - xmin, row.y - ymin] = row.name
+
+            group1 = pandas.DataFrame(columns=group.columns)
+            group3 = pandas.DataFrame(columns=group.columns)
+            group7 = pandas.DataFrame(columns=group.columns)
+            group15 = pandas.DataFrame(columns=group.columns)
+
+            brush_idx_lists = [[], [], [], []]
+
+            for step, brush_idx_list in ((15, brush_idx_lists[1]), (7, brush_idx_lists[2]), (3, brush_idx_lists[3])):
+                for x in range(step-1, xy_mat.shape[0]):
+                    for y in range(step-1, xy_mat.shape[1]):
+                        if not (xy_mat[x-step+1:x+1, y-step+1:y+1] < 0).any():
+                            brush_indices = xy_mat[x-step+1+int(step/2), y-step+1+int(step/2)]
+                            brush_idx_list.append(brush_indices)
+
+                            xy_mat[x-step+1:x+1, y-step+1:y+1] = -1
+
+            brush_idx_lists[0].extend(xy_mat[xy_mat >= 0])
+
+            group1 = group[group.index.isin(brush_idx_lists[0])]
+            group3 = group[group.index.isin(brush_idx_lists[3])]
+            group7 = group[group.index.isin(brush_idx_lists[2])]
+            group15 = group[group.index.isin(brush_idx_lists[1])]
+
+            brush_groups = []
+            for brush_group in [(BRUSH_1, group1), (BRUSH_3, group3), (BRUSH_7, group7), (BRUSH_15, group15)]:
+                if len(brush_group[1]) > 0:
+                    brush_groups.append(brush_group)
+
+            
+        else:
+            brush_groups = [(BRUSH_1, group)]
+
+        for brush_button, brush_group in brush_groups:
+            if not DEBUG_MODE:
+                pyautogui.click(brush_button)
+            for row_idx, row in brush_group.iterrows():
+                x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
+                y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
+                if not DEBUG_MODE:
+                    pyautogui.click(x=x_pos, y=y_pos)
 
             map_df.loc[row_idx, 'done'] = 1
 
@@ -207,7 +262,8 @@ def start_editor(filepath, countdown, start_size_from_file=False, profile='cold_
 
         height = START_HEIGHT
 
-        pyautogui.countdown(countdown)
+        if not DEBUG_MODE:
+            pyautogui.countdown(countdown)
 
         for i_page_y in range(n_pages_y + 1):
             for i_page_x in range(n_pages_x + 1):

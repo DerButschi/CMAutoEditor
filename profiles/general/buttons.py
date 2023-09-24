@@ -29,3 +29,8 @@ DIRECTION_1 = pyautogui.Point(248,17)
 DIRECTION_2 = pyautogui.Point(278,17)
 DIRECTION_3 = pyautogui.Point(308,17)
 DIRECTION_4 = pyautogui.Point(338,17)
+
+BRUSH_1 = pyautogui.Point(411, 20)
+BRUSH_3 = pyautogui.Point(441, 20)
+BRUSH_7 = pyautogui.Point(471, 20)
+BRUSH_15 = pyautogui.Point(503, 20)
