@@ -11,7 +11,7 @@ a_cmautoeditor = Analysis(
     binaries=[],
     datas=[],
     hiddenimports=["profiles", "profiles.cold_war", "profiles.cold_war.menu", "profiles.fortress_italy", "profiles.fortress_italy.menu", "profiles.shock_force_2", "profiles.shock_force_2.menu",
-                   "profiles.black_sea", "profiles.black_sea.menu],
+                   "profiles.black_sea", "profiles.black_sea.menu"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
