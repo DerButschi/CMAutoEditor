@@ -13,7 +13,8 @@
         "process": [
             "type_random_individual"
         ],
-        "priority": -999
+        "priority": -999,
+        "active": false
     },
 
     "default_foliage": {
@@ -46,7 +47,8 @@
         "process": [
             "type_random_individual"
         ],
-        "priority": -999
+        "priority": -999,
+        "active": false
     },
 	"road": {
         "tags": [

@@ -508,7 +508,7 @@ class OSMProcessor:
 
         duplicate_indices = self.df[self.df.duplicated(subset=['xidx', 'yidx'])].index
         indices_to_drop = []
-        for idx in duplicate_indices:
+        for idx in tqdm(duplicate_indices, 'Postprocessing OSM Data'):
             xidx = self.df.loc[idx].xidx
             yidx = self.df.loc[idx].yidx
 
