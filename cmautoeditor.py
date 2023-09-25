@@ -32,7 +32,7 @@ from profiles.general.constants import *
 
 DEBUG_MODE = False
 
-pyautogui.PAUSE = 0.05  # 0.12 almost!! works
+pyautogui.PAUSE = 0.05
 
 def set_height(current_height, target_height):
     if current_height == target_height:
@@ -128,6 +128,7 @@ def display_gui():
         [sg.Input(), sg.FileBrowse(key='filepath', file_types=(('CSV files', '*.csv'),))],
         [sg.Text('Countdown: '), sg.InputCombo(key='countdown',values=[5, 10, 15, 20, 25, 30], default_value=10)],
         [sg.Checkbox('Take start size from file (only for continueing a map!)', key='start_size_from_file', enable_events=True, default=False)],
+        [sg.Text('Min. time between clicks [s]: '), sg.InputCombo(key='min_time',values=[0.05, 0.1, 0.15, 0.2], default_value=0.05), sg.Text(' Only increase if CMAutoEditor skips items.')],
         [sg.Text(text='', key='error_text')],
         [sg.Push(), sg.Button('Start CMAutoEditor', key='start'), sg.Exit(), sg.Push()]]
 
@@ -153,7 +154,7 @@ def display_gui():
     window.close()
     # Start editor with UI inputs
     if start and values['filepath'] != '' and values['filepath'] != None:
-        start_editor(values['filepath'], values['countdown'], values['start_size_from_file'], available_profiles[values['cm_profile']])
+        start_editor(values['filepath'], values['countdown'], values['start_size_from_file'], values['min_time'], available_profiles[values['cm_profile']])
             
 
 def set_ground(df, map_df):
@@ -227,9 +228,10 @@ def set_ground(df, map_df):
             map_df.loc[row_idx, 'done'] = 1
 
     
-def start_editor(filepath, countdown, start_size_from_file=False, profile='cold_war'):
+def start_editor(filepath, countdown, start_size_from_file=False, min_time=0.05, profile='cold_war'):
     global MENU_DICT
     MENU_DICT = importlib.import_module('profiles.{}.menu'.format(profile)).MENU_DICT
+    pyautogui.PAUSE = min_time
     map_df = pandas.read_csv(filepath)
     map_df.z = map_df.z.round().astype(int)
 
@@ -334,6 +336,7 @@ if __name__ == '__main__':
         arg_parser.add_argument('-c', '--countdown', required=False, type=int, help='Countdown until CMAutoEditor starts clicking in CM.', default=5)
         arg_parser.add_argument('--start-size-from-file', required=False, action='store_true', help='If true take starting map size from file. Useful when continueing map creation.', default=False)
         arg_parser.add_argument('-p', '--profile', required=False, default='cold_war', type=str)
+        arg_parser.add_argument('-t', '--min-time', required=False, default=0.05, type=float)
         args = arg_parser.parse_args()
     
         return_val = sg.popup_ok_cancel('CMAutoEditor is about to run on {}.'.format(args.input),
@@ -345,4 +348,4 @@ if __name__ == '__main__':
         if return_val == 'Cancel' or return_val is None:
             exit()
         
-        start_editor(args.input, args.countdown, args.start_size_from_file, args.profile)
+        start_editor(args.input, args.countdown, args.start_size_from_file, args.min_time, args.profile)

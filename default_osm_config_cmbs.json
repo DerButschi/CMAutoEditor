@@ -14,7 +14,7 @@
             "type_random_individual"
         ],
         "priority": -999,
-        "active": false
+        "active": true
     },
 
     "default_foliage": {
@@ -48,7 +48,7 @@
             "type_random_individual"
         ],
         "priority": -999,
-        "active": false
+        "active": true
     },
 	"road": {
         "tags": [

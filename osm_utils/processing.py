@@ -600,6 +600,7 @@ def assign_type_at_linear_feature(osm_processor, config, name, tqdm_string):
         return
     
     sub_df = osm_processor._get_sub_df(cell_indices)
+    sub_df.name = name
 
     sum_of_weights = sum([cm_type['weight'] if 'weight' in cm_type else 1.0 for cm_type in cm_types])
     probabilities = [cm_type['weight'] / sum_of_weights if 'weight' in cm_type else 1.0 / sum_of_weights for cm_type in cm_types]
