@@ -41,6 +41,18 @@ road_direction_dict = {
     (-1, -1): 'dl',
 }
 
+opposite_road_direction_dict = {
+    'u': 'd',
+    'd': 'u',
+    'r': 'l',
+    'l': 'r',
+
+    'ur': 'dl',
+    'ul': 'dr',
+    'dr': 'ul',
+    'dl': 'ur'
+}
+
 direction_dict = dict((v,k) for k,v in road_direction_dict.items())
 
 def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, source, target, current_path, dist):
@@ -163,6 +175,8 @@ def search_path(osm_processor, config, name, tqdm_string):
     elif 'fence_tiles' in config[name]['process']:
         tiles = fence_tiles
 
+    if not 'line_graph' in osm_processor.network_graphs[name]:
+        return
     line_graph = osm_processor.network_graphs[name]['line_graph']
     grid_gdf = osm_processor.gdf
     df = osm_processor.df 
@@ -699,3 +713,186 @@ def get_matched_cm_type(config, element_entry):
             break
 
     return matched_cm_type
+
+def search_path3(osm_processor, config, name, tqdm_string):
+    logger = logging.getLogger('osm2cm')
+
+    if 'road_tiles' in config[name]['process']:
+        tiles = road_tiles
+    elif 'stream_tiles' in config[name]['process']:
+        tiles = stream_tiles
+    elif 'rail_tiles' in config[name]['process']:
+        tiles = rail_tiles
+    elif 'fence_tiles' in config[name]['process']:
+        tiles = fence_tiles
+
+    if not 'line_graph' in osm_processor.network_graphs[name]:
+        return
+    line_graph = osm_processor.network_graphs[name]['line_graph']
+    grid_gdf = osm_processor.gdf
+    df = osm_processor.df 
+
+    square_graph = nx.MultiGraph()
+
+    # TODO: Check what happens if point can't be placed.
+    # create grid graph
+    xmax = grid_gdf.xidx.max()
+    ymax = grid_gdf.yidx.max()
+
+    tile_connection_dict = {}
+    for i_name, i_tile in tiles.iterrows():
+        for j_name, j_tile in tiles.iterrows():
+            # if i_name == j_name:
+            #     continue
+            for direction in opposite_road_direction_dict.keys():
+                if direction in i_tile and i_tile[direction] is not None and \
+                    opposite_road_direction_dict[direction] in j_tile and j_tile[opposite_road_direction_dict[direction]] is not None and \
+                    i_tile[direction] == j_tile[opposite_road_direction_dict[direction]]:
+
+                    if i_name not in tile_connection_dict:
+                        tile_connection_dict[i_name] = {}
+                    if direction_dict[direction] not in tile_connection_dict[i_name]:
+                        tile_connection_dict[i_name][direction_dict[direction]] = []
+                    
+                    tile_connection_dict[i_name][direction_dict[direction]].append(j_name)
+
+    if osm_processor.grid_graph is None:
+        logger.info('Intializing graph')
+        # grid_graph = nx.create_empty_copy(nx.grid_graph(dim=(xmax, ymax, len(tiles))))
+
+        # edges = []
+        # for xidx in range(xmax):
+        #     for yidx in range(ymax):
+        #         for tile_idx in range(len(tiles)):
+        #             grid_graph.add_edge((xidx, yidx, 'start/end'), (xidx, yidx, tile_idx), weight=1.0)
+        #             for dx in [-1, 0, 1]:
+        #                 for dy in [-1, 0, 1]:
+        #                     if 0 <= xidx + dx <= xmax and 0 <= yidx <= ymax:
+        #                         if (dx, dy) in tile_connection_dict[tile_idx]:
+        #                             for connected_tile_idx in tile_connection_dict[tile_idx][(dx, dy)]: 
+        #                                 grid_graph.add_edge((xidx, yidx, tile_idx), (xidx+dx, yidx+dy, connected_tile_idx), weight=tiles.loc[tile_idx, 'cost'] + tiles.loc[connected_tile_idx, 'cost'])
+
+        # osm_processor.grid_graph = grid_graph
+    else:
+        grid_graph = osm_processor.grid_graph
+
+    edge_list = list(line_graph.edges)
+    # sort edge list by position in tags
+    enhanced_edge_list = []
+    for edge in edge_list:
+        element_idx = line_graph.get_edge_data(*edge)['element_idx']
+        element_entry = osm_processor.matched_elements[element_idx]
+        matched_cm_type = get_matched_cm_type(config, element_entry)
+        cm_type_idx = config[name]['cm_types'].index(matched_cm_type)
+        enhanced_edge_list.append((edge, cm_type_idx))
+    
+    enhanced_edge_list = sorted(enhanced_edge_list, key=lambda x: -x[1])
+    edge_list = [entry[0] for entry in enhanced_edge_list]
+
+    square_graph = nx.Graph()
+    plt.figure()
+    plt.axis('equal')
+    for edge in edge_list:
+        closest_node_to_start = _get_closest_node_in_gdf(grid_gdf, edge[0])
+        closest_node_to_end = _get_closest_node_in_gdf(grid_gdf, edge[1])
+
+        ls = line_graph.get_edge_data(*edge)['ls']
+        # global ls_nodes
+        ls_nodes = LineString([_get_closest_node_in_gdf(grid_gdf, coord) for coord in ls.coords])
+        # nodes_list = [n for n in grid_graph.nodes() if (tiles.loc[n[2], 'n_connections'] == 2) and Point(*n).distance(ls_nodes) <= 1]
+        # grid_corridor = nx.subgraph(grid_graph, nodes_list)
+        corridor_graph = _create_corridor_graph(grid_gdf, closest_node_to_start, closest_node_to_end, 2, 2, ls, tiles, tile_connection_dict)
+
+        def weight(n1, n2, d):
+            print('weight')
+            weight = d['weight'] if Point(*n2[0:2]).distance(ls_nodes) <= 1 else None
+            plt.plot([n1[0], n2[0]], [n1[1], n2[1]], '-k' if weight is not None else ':k')
+            return weight
+        def heuristic(n1, n2):
+            print('heuristic')
+            plt.plot([n1[0], n2[0]], [n1[1], n2[1]], ':g')
+            return (np.abs(n1[0] - n2[0]) + np.abs(n1[1] - n2[1])) * 2
+            # return Point(*n1[0:2]).distance(Point(*n2[0:2]))
+
+        shortest_path = None
+        plt.plot(*ls_nodes.xy, '-r')
+        try:
+            shortest_path = nx.astar_path(grid_graph, (*closest_node_to_start, 'start/end'), (*closest_node_to_end, 'start/end'), heuristic=heuristic, weight=weight)
+            plt.plot([p[0] for p in shortest_path], [p[1] for p in shortest_path], '-bo')
+        except:
+            a = 1
+        # shortest_path = None
+        # shortest_path_length = np.inf
+        # for start_tile_idx in range(len(tiles)):
+        #     if (*closest_node_to_start, start_tile_idx) not in grid_graph:
+        #         continue
+        #     for end_tile_idx in range(len(tiles)):
+        #         if (*closest_node_to_end, end_tile_idx) not in grid_graph:
+        #             continue
+        #         if nx.has_path(grid_graph, (*closest_node_to_start, start_tile_idx), (*closest_node_to_end, end_tile_idx)):
+        #             path = nx.shortest_path(grid_graph, (*closest_node_to_start, start_tile_idx), (*closest_node_to_end, end_tile_idx))
+        #             path_length = nx.shortest_path_length(grid_graph, (*closest_node_to_start, start_tile_idx), (*closest_node_to_end, end_tile_idx))
+        #             if path_length < shortest_path_length:
+        #                 shortest_path = path
+        #                 shortest_path_length = path_length
+
+        if shortest_path is None:
+            a = 1
+
+        a = 1
+
+    plt.show()
+    a = 1
+
+def _create_corridor_graph(gdf, start_node, end_node, start_degree, end_degree, ls, tiles, tile_connection_dict):
+    corridor_graph = nx.Graph()
+    corridor_subgdf = gdf[gdf.buffer(1).intersects(ls)]
+
+
+    connections = {}
+    for _, row in corridor_subgdf.iterrows():
+        this_node = (row.xidx, row.yidx)
+        if this_node not in connections:
+            connections[this_node] = [this_node]
+        nodes = corridor_subgdf.loc[corridor_subgdf.xidx.isin([row.xidx-1, row.xidx, row.xidx+1]) & (corridor_subgdf.yidx.isin([row.yidx-1, row.yidx, row.yidx+1])), ('xidx', 'yidx')].values
+        for node in nodes:
+            if this_node == tuple(node):
+                continue
+            if tuple(node) in connections and this_node in connections[tuple(node)]:
+                continue
+            else:
+                connections[this_node].append(tuple(node))
+
+    edges = []
+    for node in connections.keys():
+        if node not in [start_node, end_node]:
+            valid_tiles = tiles[tiles.n_connections == 2]
+        elif node == start_node:
+            valid_tiles = tiles[tiles.n_connections == start_degree]
+        else:
+            valid_tiles = tiles[tiles.n_connections == end_degree]
+        for other_node in connections[node]:
+            if other_node == node:
+                for tidx in valid_tiles.index:
+                    edges.append(((*node, -1), (*node, tidx), 1.0))
+            else:
+                direction = (other_node[0] - node[0], other_node[1] - node[1])
+                for tile_idx in valid_tiles.index:
+                    if direction not in tile_connection_dict[tile_idx]:
+                        continue
+                    for other_tile_idx in tile_connection_dict[tile_idx][direction]:
+                        weight = tiles.loc[tile_idx, 'cost'] + tiles.loc[other_tile_idx, 'cost']
+                        edges.append(((*node, tile_idx), (*other_node, other_tile_idx), weight))
+            # edges.append(((xidx, yidx, 'start/end'), (xidx, yidx, tile_idx), 1.0))
+            # for dx in [-1, 0, 1]:
+            #     for dy in [-1, 0, 1]:
+            #         if dx == 0 and dy == 0:
+            #             continue
+            #         if len(corridor_subgdf[(corridor_subgdf.xidx == xidx + dx) & (corridor_subgdf.yidx == yidx + dy)]) > 0:
+            #             if (dx, dy) in tile_connection_dict[tile_idx]:
+            #                 for connected_tile_idx in tile_connection_dict[tile_idx][(dx, dy)]:
+            #                     # tiles.loc[tile_idx, 'cost'] + tiles.loc[connected_tile_idx, 'cost'] 
+            #                     edges.append(((xidx, yidx, tile_idx), (xidx+dx, yidx+dy, connected_tile_idx), 2.0))
+    
+    corridor_graph.add_weighted_edges_from(edges)
+    return corridor_graph

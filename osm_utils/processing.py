@@ -37,7 +37,7 @@ from profiles import get_building_cat2, get_building_tiles
 from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
 
 from .path_search import (_get_closest_node_in_gdf, _remove_nodes_from_gdf,
-                          search_path)
+                          search_path, search_path3)
 
 DRAW_DEBUG_PLOTS = False
 
@@ -294,12 +294,16 @@ def assign_type_from_tag(osm_processor, config, element_entry):
 
 def create_line_graph(osm_processor, config, name, tqdm_string):
     logger = logging.getLogger('osm2cm')
+    if not 'lines' in osm_processor.network_graphs[name]:
+        return
     lines = osm_processor.network_graphs[name]['lines']
 
     line_graph = nx.MultiGraph()
     lines_intersecting_dict = {}
 
     for key in osm_processor.network_graphs.keys():
+        if not 'lines' in osm_processor.network_graphs[key]:
+            continue
         if not (key == name or 1 <= config[key]['priority'] <= config[name]['priority']):
             continue
         other_lines = osm_processor.network_graphs[key]['lines']
@@ -714,6 +718,9 @@ def assign_fence_tiles_to_network(osm_processor, config, name, tqdm_string):
 
 def assign_tiles_to_network(osm_processor, config, name, tile_df, tqdm_string):
     logger = logging.getLogger('osm2cm')
+    if 'square_graph' not in osm_processor.network_graphs[name]:
+        return
+    
     square_graph = osm_processor.network_graphs[name]['square_graph']
     edge_graphs = {}
     for edge in square_graph.edges:
@@ -964,7 +971,7 @@ def collect_network_data(osm_processor, config, element_entry):
         
 def create_square_graph_path_search(osm_processor, config, name, tqdm_string):
     # search_path(osm_processor.network_graphs[name]['line_graph'], osm_processor.gdf, osm_processor.df)
-    search_path(osm_processor, config, name, tqdm_string)
+    search_path3(osm_processor, config, name, tqdm_string)
 
 def collect_building_outlines(osm_processor, config, element_entry):
     logger = logging.getLogger('osm2cm')
