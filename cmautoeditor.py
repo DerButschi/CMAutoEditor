@@ -158,6 +158,7 @@ def display_gui():
             
 
 def set_ground(df, map_df):
+    max_y = -np.inf
     for group_info, group in df.groupby(by=['menu', 'cat1', 'cat2', 'direction']):
         if group_info[0] not in MENU_DICT:
             continue
@@ -176,13 +177,13 @@ def set_ground(df, map_df):
                 pyautogui.click(MENU_DICT[group_info[3]])
 
         if group_info[0].startswith('Ground') or group_info[0].startswith('Brush'): 
-            xmin, ymin = group.loc[:,['x','y']].min()
-            xmax, ymax = group.loc[:,['x','y']].max()
+            xmin, ymin = group.loc[:,['x','y']].min().astype(int)
+            xmax, ymax = group.loc[:,['x','y']].max().astype(int)
 
             xy_mat = np.full((xmax-xmin+1, ymax-ymin+1), -1, dtype=int)
             
             for _, row in group.iterrows():
-                xy_mat[row.x - xmin, row.y - ymin] = row.name
+                xy_mat[int(row.x) - xmin, int(row.y) - ymin] = row.name
 
             group1 = pandas.DataFrame(columns=group.columns)
             group3 = pandas.DataFrame(columns=group.columns)
@@ -222,11 +223,14 @@ def set_ground(df, map_df):
             for row_idx, row in brush_group.iterrows():
                 x_pos = int(row.x * SQUARE_SIZE_X + UPPER_LEFT_SQUARE.x)
                 y_pos = int(LOWER_RIGHT_SQUARE.y - row.y * SQUARE_SIZE_Y)
+                if y_pos > max_y:
+                    max_y = y_pos
                 if not DEBUG_MODE:
                     pyautogui.click(x=x_pos, y=y_pos)
 
             map_df.loc[row_idx, 'done'] = 1
 
+    print(max_y)
     
 def start_editor(filepath, countdown, start_size_from_file=False, min_time=0.05, profile='cold_war'):
     global MENU_DICT
