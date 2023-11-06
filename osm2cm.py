@@ -329,6 +329,16 @@ class OSMProcessor:
             epsg_code = self.gdf.crs.to_epsg()
             bbox_from_data = False
         elif self.bbox is not None:
+            # (1,4) --- (3,4)
+            #   |         |
+            # (1,2) --- (3,2)
+            if len(self.bbox) == 5:
+                self.bbox = [self.bbox[0], 
+                        self.bbox[1], self.bbox[2], 
+                        self.bbox[3], self.bbox[2], 
+                        self.bbox[3], self.bbox[4], 
+                        self.bbox[1], self.bbox[4],
+                        ]
             bbox_crs = CRS.from_epsg(self.bbox[0])
             bbox_polygon = Polygon([(self.bbox[i-1], self.bbox[i]) for i in range(2, len(self.bbox), 2)])
             epsg_code = self._get_epsg_code_from_bbox(bbox_crs=bbox_crs, bbox=bbox_polygon)
