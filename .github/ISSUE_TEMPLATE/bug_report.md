@@ -8,7 +8,7 @@ assignees: ''
 ---
 
 **Describe the bug**
-Please provide clear and concise description of what the bug is.
+Please provide clear and concise description of what the bug is with as much detail as possible.
 
 **To Reproduce**
 I can only fix something I can reproduce. So, please give me a precise list of steps that led to the bug or crash. E.g.
@@ -22,7 +22,7 @@ I can only fix something I can reproduce. So, please give me a precise list of s
  - CMAutoEditor version: [e.g. 2.0.1, manually installed from source]
 
 **Screenshot**
-Please provide a screenshot if possible. (Drag and drop to "Attach files by dragging & dropping ..." at the bottom of this issue text field)
+Please provide a screenshot if at all possible! (Drag and drop to "Attach files by dragging & dropping ..." at the bottom of this issue text field)
 If the .exe files crashed before giving an error message, start it by going to the command prompt (cmd, PowerShell, etc.) and start the file from there (cd to the folder holding the file and type e.g. .\dgm2cm.exe) instead of clicking on it.
 
 **Additional context**
