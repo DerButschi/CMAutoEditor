@@ -17,6 +17,7 @@ import argparse
 import os
 import sys
 from time import sleep
+import traceback
 
 import keyboard
 import numpy as np
@@ -176,13 +177,15 @@ def set_ground(df, map_df):
                 pyautogui.click(MENU_DICT[group_info[3]])
 
         if group_info[0].startswith('Ground') or group_info[0].startswith('Brush'): 
-            xmin, ymin = group.loc[:,['x','y']].min()
-            xmax, ymax = group.loc[:,['x','y']].max()
+            # x/y can be floats! converting to int should work here because 
+            # ground and brush elements should always be integer coordinates.
+            xmin, ymin = group.loc[:,['x','y']].min().astype(int)
+            xmax, ymax = group.loc[:,['x','y']].max().astype(int)
 
             xy_mat = np.full((xmax-xmin+1, ymax-ymin+1), -1, dtype=int)
             
             for _, row in group.iterrows():
-                xy_mat[row.x - xmin, row.y - ymin] = row.name
+                xy_mat[int(row.x) - xmin, int(row.y) - ymin] = row.name
 
             group1 = pandas.DataFrame(columns=group.columns)
             group3 = pandas.DataFrame(columns=group.columns)
@@ -329,7 +332,12 @@ if __name__ == '__main__':
 
     #Run the gui if no arguments are inputted
     if len(sys.argv) == 1:
-        display_gui()
+        try:
+            display_gui()
+        except:
+            sg.popup_scrolled('CMAutoEditor stopped with an error. Please copy the whole message and file a bug report here:'
+                            '\nhttps://github.com/DerButschi/CMAutoEditor/issues/new/choose\n\n{}'.format(traceback.format_exc()), title='CMAutoEditor')
+            raise
     else:
         arg_parser = argparse.ArgumentParser()
         arg_parser.add_argument('-i', '--input', required=True, help='File containing input data in csv-Format. Data is coded in x, y and z columns.')
