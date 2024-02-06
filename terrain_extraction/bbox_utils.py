@@ -128,9 +128,9 @@ class BoundingBox:
     def get_buffer(self, crs: CRS = CRS.from_epsg(4326), buffer_size: float = 100.0):
         return transform_polygon(self.get_box(self.crs_projected).buffer(buffer_size), self.crs_projected.to_epsg(), crs.to_epsg())
 
-
-        
-
+    def cycle_origin(self):
+        self.box_utm = permute_polygon_to_idx(self.box_utm, 1)
+        self.box_wgs84 = permute_polygon_to_idx(self.box_wgs84, 1)
 
 
     

@@ -7,7 +7,7 @@ import PIL
 import numpy as np
 import pandas
 import shapely
-from shapely import Point
+from shapely import Point, Polygon
 from pyproj.crs import CRS
 from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
 
@@ -21,73 +21,8 @@ from terrain_extraction.elevation_map import cut_out_bounding_box
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
 data_sources = [HessenDataSource(), NRWDataSource(), FranceDataSource()]
 
-
-if 'alos_coordinates' not in st.session_state:
-    st.session_state['alos_coordinates'] = None
-
-if 'alos_images_loaded' not in st.session_state:
-    st.session_state['alos_images_loaded'] = []
-
-def get_alos_image_array(lon, lat):
-    download_dir = 'C:\\Users\\der_b\\Downloads\\alos'
-
-    alos_str = '{}{}{}{}_{}{}{}{}'.format(
-        'N' if lat >= 0 else 'S',
-        str(int(lat / 5) * 5).zfill(3),
-        'E' if lon >= 0 else 'W', 
-        str(int(lon / 5) * 5).zfill(3),
-        'N' if lat >= 0 else 'S',
-        str(int(lat / 5 + 1) * 5).zfill(3),
-        'E' if lon >= 0 else 'W', 
-        str(int(lon / 5 + 1) * 5).zfill(3),
-    )
-    alos_file_str = 'ALPSMLC30_{}{}{}{}_DSM'.format(
-        'N' if lat >= 0 else 'S',
-        str(int(lat)).zfill(3),
-        'E' if lon >= 0 else 'W', 
-        str(int(lon)).zfill(3),
-    )
-    img = None
-    if os.path.isfile(os.path.join(download_dir, alos_str, alos_file_str + '.tif')):
-        # with PIL.Image.open(os.path.join(download_dir, alos_str, alos_file_str)) as im:
-        #     img_array = np.array(im)
-        if not os.path.isfile(os.path.join(download_dir, alos_str, alos_file_str + '.png')):
-            with PIL.Image.open(os.path.join(download_dir, alos_str, alos_file_str + '.tif')) as im:
-                im.convert("RGB").save(os.path.join(download_dir, alos_str, alos_file_str + '.png'))
-        print('file://{}'.format(os.path.join(download_dir, alos_str, alos_file_str + '.png')).replace('\\', '/'))
-        img = folium.raster_layers.ImageOverlay(
-            name='ALOS',
-            image='{}'.format(os.path.join(download_dir, alos_str, alos_file_str + '.png')).replace('\\', '/'),
-            bounds=[[int(lat), int(lon)], [int(lat)+1, int(lon)+1]],
-            interactive=True,
-            cross_origin=False,
-            zindex=1,
-        )
-
-    return img
-
 def update_bounding_box(points):
     polygon = shapely.Polygon(points)
-    
-    # projected_epsg_code = get_epsg_code_from_bbox(polygon.envelope)
-
-    # projected_polygon = transform_polygon(polygon, 4326, projected_epsg_code)
-    # projected_box = projected_polygon.minimum_rotated_rectangle
-    # projected_box = make_polygon_counter_clockwise(projected_box)
-    # projected_origin_idx = find_idx_closest_polygon_node(projected_box, transform_point(Point(points[0]), 4326, projected_epsg_code))
-    # projected_box = permute_polygon_to_idx(projected_box, projected_origin_idx)
-
-    # box = transform_polygon(projected_box, projected_epsg_code, 4326)
-    # box = make_polygon_counter_clockwise(box)
-
-    # origin_idx = find_idx_closest_polygon_node(box, Point(points[0]))
-    # box = permute_polygon_to_idx(box, origin_idx)
-
-    # df = pandas.DataFrame({
-    #         'longitude': [coord[0] for coord in box.exterior.coords][:-1],
-    #         'latitude': [coord[1] for coord in box.exterior.coords][:-1],
-    #         'origin': [True, False, False, False]
-    # })
 
     bounding_box = BoundingBox(polygon)
 
@@ -97,16 +32,16 @@ def update_bounding_box(points):
     st.session_state['bbox'] = bounding_box.get_coordinates(xy=False)
     st.session_state['bbox_object'] = bounding_box
     st.session_state['projected_bbox_object'] = bounding_box.get_box(bounding_box.crs_projected)
-    st.session_state['len_x'] = np.round(bounding_box.get_length_xaxis())
-    st.session_state['len_y'] = np.round(bounding_box.get_length_yaxis())
+    st.session_state['len_x'] = bounding_box.get_length_xaxis()
+    st.session_state['len_y'] = bounding_box.get_length_yaxis()
     st.session_state['bbox_origin'] = 0
 
-    return bounding_box.get_dataframe()
+    st.rerun()
+    # return bounding_box.get_dataframe()
 
 def find_data_sources_in_bbox():
     available_data_sources = []
     for data_source in data_sources:
-        # projected_bbox = transform_polygon(st.session_state['bbox_object'], 4326, data_source.epsg_code)
         if data_source.intersects_bounding_box(st.session_state['bbox_object']):
             available_data_sources.append(data_source)
 
@@ -122,7 +57,6 @@ def dataframe2csv(df: pandas.DataFrame):
 def extract_data_in_bbox():
     data_source = st.session_state['selected_data_source']
     bounding_box = st.session_state['bbox_object']
-    # projected_bbox = transform_polygon(st.session_state['bbox_object'], 4326, data_source.epsg_code)
 
     os.makedirs('C:\\Users\\der_b\\Downloads\\cm_terrain_extraction', exist_ok=True)
     with st.status('Extracting elevation data', expanded=True) as status:
@@ -131,158 +65,109 @@ def extract_data_in_bbox():
         path_to_png = data_source.get_png(bounding_box, 'C:\\Users\\der_b\\Downloads\\cm_terrain_extraction')
         status.update(label="Elevation data extracted!", state="complete", expanded=False)
 
-def draw_sidebar(df):
-    with st.sidebar:
-        edited_df = st.data_editor(
-            df,
-            column_config = {
-                "x": st.column_config.NumberColumn(
-                    "Longitude [°]",
-                    min_value=-180.0,
-                    max_value=180.0
-                ),
-                "y": st.column_config.NumberColumn(
-                    "Latitude [°]",
-                    min_value=-90.0,
-                    max_value=90.0
-                )
-            },
-            on_change=bbox_on_change,
-            args=[df]
-        )
+def permute_bbox():
+    bounding_box = st.session_state['bbox_object']
+    bounding_box.cycle_origin()
+    st.session_state['bbox'] = bounding_box.get_coordinates(xy=False)
+    st.session_state['projected_bbox_object'] = bounding_box.get_box(bounding_box.crs_projected)
+    st.session_state['len_x'] = bounding_box.get_length_xaxis()
+    st.session_state['len_y'] = bounding_box.get_length_yaxis()
 
-        if 'len_x' in st.session_state:
-            area = np.round(st.session_state['len_x'] * st.session_state['len_y'] / 1e6, decimals=1)
-            delta = np.round(st.session_state['len_x'] * st.session_state['len_y'] / 1e6 - 16, decimals=1)
-            if delta > 0:
-                st.metric(label="Selected Area", value='{} km²'.format(area), delta='{} km²'.format(delta), delta_color="inverse")
-                st.session_state['selected_area_valid'] = False
-            else:
-                st.metric(label="Selected Area", value='{} km²'.format(area))
-                st.session_state['selected_area_valid'] = True
-        else:
+def update_bbox_from_df():
+    df = st.session_state['edited_df'].copy()
+    del st.session_state['edited_df']
+    if (~df.isnull().any()).all():
+        update_bounding_box(list(zip(df.x.values, df.y.values)))
+
+def draw_sidebar():
+    max_len_x_axis = 4160 # m
+    max_len_y_axis = 4160 # m
+    max_area = 18000000 # km2
+    len_x_axis = None
+    len_y_axis = None
+    delta_len_x = None
+    delta_len_y = None
+    area = None
+    delta_area = None
+    if 'len_x' in st.session_state:
+        len_x_axis = st.session_state['len_x']
+        len_y_axis = st.session_state['len_y']
+        area = len_x_axis * len_y_axis
+        delta_len_x = len_x_axis - max_len_x_axis
+        delta_len_y = len_y_axis - max_len_y_axis
+        delta_area = area - max_area
+        # area = np.round(st.session_state['len_x'] * st.session_state['len_y'] / 1e6, decimals=1)
+        # delta = np.round(st.session_state['len_x'] * st.session_state['len_y'] / 1e6 - 16, decimals=1)
+        if delta_len_x > 0 or delta_len_y > 0 or delta_area > 0:
             st.session_state['selected_area_valid'] = False
+        else:
+            st.session_state['selected_area_valid'] = True
+    else:
+        st.session_state['selected_area_valid'] = False
 
-        st.button('Find available data sources', disabled=not st.session_state['selected_area_valid'], on_click=find_data_sources_in_bbox)
+    with st.sidebar:
+        with st.container(border=True):
+            if 'bbox_object' in st.session_state:
+                df = st.session_state['bbox_object'].get_dataframe()
+            else:
+                df = pandas.DataFrame({
+                    'x': [None, None, None, None],
+                    'y': [None, None, None, None]
+                })
 
-        # data_sources_labels = []
-        # if 'data_sources' in st.session_state:
-        #     for data_source in st.session_state['data_sources']:
-        #         data_sources_labels.append(
-        #             '{} - {}, {}'.format(data_source.name, data_source.model_type, data_source.resolution)
-        #         )
-        
-        selected_data_source = st.selectbox('Data sources', st.session_state['data_sources'] if 'data_sources' in st.session_state else [], format_func=get_data_source_label)
+            st.session_state['edited_df'] = st.data_editor(
+                df,
+                column_config = {
+                    "x": st.column_config.NumberColumn(
+                        "Longitude [°]",
+                        min_value=-180.0,
+                        max_value=180.0
+                    ),
+                    "y": st.column_config.NumberColumn(
+                        "Latitude [°]",
+                        min_value=-90.0,
+                        max_value=90.0
+                    )
+                },
+            )
+            st.button('Cycle bounding box origin', disabled=not st.session_state['selected_area_valid'], on_click=permute_bbox)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if len_x_axis is not None and delta_len_x <= 0:
+                    st.metric(label='Length W\u2194E', value='{} m'.format(np.round(len_x_axis).astype(int)))
+                elif len_x_axis is not None and delta_len_x > 0:
+                    st.metric(label='Length W\u2194E', value='{} m'.format(np.round(len_x_axis).astype(int)), delta='{} m'.format(np.round(delta_len_x).astype(int)), delta_color="inverse")
+                else:
+                    st.metric(label='Length W\u2194E', value='-')    
+            with col2:
+                if len_y_axis is not None and delta_len_y <= 0:
+                    st.metric(label='Length S\u2194N', value='{} m'.format(np.round(len_y_axis).astype(int)))
+                elif len_y_axis is not None and delta_len_y > 0:
+                    st.metric(label='Length S\u2194N', value='{} m'.format(np.round(len_y_axis).astype(int)), delta='{} m'.format(np.round(delta_len_y).astype(int)), delta_color="inverse")
+                else:
+                    st.metric(label='Length S\u2194N', value='-')    
+            with col3:
+                if area is not None and delta_area <= 0:
+                    st.metric(label='Selected Area', value='{} km²'.format(np.round(area / 1e6, decimals=1)))
+                elif area is not None and delta_area > 0:
+                    st.metric(label='Selected Area', value='{} km²'.format(np.round(area / 1e6, decimals=1)), delta='{} km²'.format(np.round(delta_area / 1e6, decimals=1)), delta_color="inverse")
+                else:
+                    st.metric(label='Selected Area', value='-')    
+
+        with st.container(border=True):
+            st.button('Find available data sources', disabled=not st.session_state['selected_area_valid'], on_click=find_data_sources_in_bbox)
+            selected_data_source = st.selectbox('Data sources', st.session_state['data_sources'] if 'data_sources' in st.session_state else [], format_func=get_data_source_label)
+
         st.session_state['selected_data_source'] = selected_data_source
         st.button('Extract elevation data', disabled=selected_data_source is None, on_click=extract_data_in_bbox)
 
         if 'elevation_in_bbox' in st.session_state:
             st.download_button('Download elevation data', dataframe2csv(st.session_state['elevation_in_bbox']), file_name='elevation_data.csv')
-
-    
-    return edited_df
-
-def bbox_on_change(bbox):
-    a = 1
-# img = folium.raster_layers.ImageOverlay(
-#     name="Mercator projection SW",
-#     image="C:/Users/der_b/Downloads/alos/N050E005_N055E010/ALPSMLC30_N050E007_DSM.png",
-#     bounds=[[-82, -180], [82, 180]],
-#     opacity=0.6,
-#     interactive=True,
-#     cross_origin=False,
-#     zindex=1,
-# ).add_to(map)
-
-# folium.WmsTileLayer(
-#     url="https://www.wms.nrw.de/geobasis/wms_nw_dhm-uebersicht",
-#     name="test",
-#     fmt="image/png",
-#     layers="nw_dhm-uebersicht_planung_2019-2022",
-#     attr=u"dgm1",
-#     transparent=True,
-#     overlay=True,
-#     control=True,
-# ).add_to(map)
-
-
-# folium.LayerControl().add_to(map)
-# with PIL.Image.open('C:\\Users\\der_b\\Downloads\\alos\\N050E005_N055E010\\ALPSMLC30_N050E007_DSM.tif') as im:
-#     img_array = np.array(im)
-
-#     img = folium.raster_layers.ImageOverlay(
-#         name='alos',
-#         image=img_array,
-#         bounds=[[50, 7], [51, 8]],
-#         # mercator_project=True,
-#         # opacity=0.6,
-#         interactive=True,
-#         cross_origin=False,
-#         zindex=1,
-#     )
-#     img.add_to(map)
-
-# folium.LayerControl().add_to(map)
-
-fg1 = folium.FeatureGroup(name="Alos")
-download_dir = 'C:\\Users\\der_b\\Downloads\\alos'
-#         os.makedirs(download_dir, exist_ok=True)
-#         # with tempfile.TemporaryDirectory() as tempdirname:
-if 'alos_coordinates' in st.session_state and st.session_state['alos_coordinates'] is not None:
-    lon, lat = st.session_state['alos_coordinates']
-    alos_str = '{}{}{}{}_{}{}{}{}'.format(
-        'N' if lat >= 0 else 'S',
-        str(int(lat / 5) * 5).zfill(3),
-        'E' if lon >= 0 else 'W', 
-        str(int(lon / 5) * 5).zfill(3),
-        'N' if lat >= 0 else 'S',
-        str(int(lat / 5 + 1) * 5).zfill(3),
-        'E' if lon >= 0 else 'W', 
-        str(int(lon / 5 + 1) * 5).zfill(3),
-    )
-#         if not os.path.isfile(os.path.join(download_dir, alos_str + '.zip')):
-#             ftp = FTP('ftp.eorc.jaxa.jp')
-#             ftp.login()
-#             ftp.cwd('pub/ALOS/ext1/AW3D30/release_v2012_single_format/')
-#             with open(os.path.join(download_dir, alos_str + '.zip'), 'wb') as alos_zip_handle:
-#                 print('Downloading file {} to {}.'.format(alos_str + '.zip', download_dir))
-#                 ftp.retrbinary('RETR {}'.format(alos_str + '.zip'), alos_zip_handle.write)
-            
-#             with zipfile.ZipFile(os.path.join(download_dir, alos_str + '.zip'), 'r') as zip_ref:
-#                 zip_ref.extractall(download_dir)
-
-    image_array = get_alos_image_array(lon, lat)        
-    # img = folium.raster_layers.ImageOverlay(
-    #     name='ALOS',
-    #     image=image_array,
-    #     bounds=[[int(lat), int(lon)], [int(lat)+1, int(lon)+1]],
-    #     # mercator_project=True,
-    #     # opacity=0.6,
-    #     # interactive=True,
-    #     # cross_origin=False,
-    #     # zindex=1,
-    # )
-    if image_array is not None:
-        fg1.add_child(image_array)
-    #     a = 1
-    # a = 1
-
-# if st_data['last_active_drawing'] is not None:
-#     if st_data['last_active_drawing']['geometry']['type'] == 'Point':
-#         # os.makedirs(download_dir, exist_ok=True)
-#         # # with tempfile.TemporaryDirectory() as tempdirname:
-#         lon, lat = st_data['last_active_drawing']['geometry']['coordinates']
-#         if 'alos_coordinates' in st.session_state and st.session_state is not None:
-#             st.session_state['alos_coordinates'] = (lon, lat)
-
-# # st.write(st_data)
-# to_delete = []
-# if st_data['all_drawings'] is not None:
-#     if st_data['all_drawings'][0]['geometry']['type'] == 'Point':
-#         st_data['all_drawings'] = None
-
+   
 
 if __name__ == '__main__':
+    st.set_page_config(layout="wide", menu_items={'Report a bug': "https://github.com/DerButschi/CMAutoEditor/issues/new/choose"})    
+
     if 'center' not in st.session_state:
         st.session_state['center'] = {'lat': 0, 'lon': 0}
     if 'zoom' not in st.session_state:
@@ -292,7 +177,8 @@ if __name__ == '__main__':
                      attr=(
                             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
                             'contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
-                     ))
+                     ),
+                     )
     
     bbox_fg = folium.FeatureGroup('bbox')
     draw = Draw(draw_options={
@@ -303,7 +189,7 @@ if __name__ == '__main__':
 
     })
     draw.add_to(map)
-    folium.plugins.Geocoder().add_to(map)
+    folium.plugins.Geocoder(postion='bottomleft').add_to(map)
     folium.plugins.MeasureControl().add_to(map)
     folium.plugins.Fullscreen().add_to(map)
 
@@ -344,20 +230,35 @@ if __name__ == '__main__':
         center=st.session_state['center'],
         zoom=st.session_state['zoom'],
         feature_group_to_add=bbox_fg,
+        width=1200
     )
 
-    df = pandas.DataFrame({
-        'longitude': [None, None, None, None],
-        'latitude': [None, None, None, None],
-        'origin': [False, False, False, False]
+    draw_sidebar()
 
-    })
     if st_data['last_active_drawing'] is not None:
-        coordinates = st_data['last_active_drawing']['geometry']['coordinates']
-        df = update_bounding_box(coordinates[0])
-    
-    draw_sidebar(df)
+        coordinates = np.array(st_data['last_active_drawing']['geometry']['coordinates'])
+        if 'drawn_coordinates' not in st.session_state or \
+            not (st.session_state['drawn_coordinates'].shape == coordinates.shape) or \
+            not (st.session_state['drawn_coordinates'] == coordinates).all():
+            st.session_state['drawn_coordinates'] = coordinates
+            update_bounding_box(coordinates[0])
 
-    st.write(st.session_state)         
+        # del st_data['last_active_drawing']
+        # if not('bbox_object' in st.session_state and BoundingBox(Polygon(coordinates[0])).equals(st.session_state['bbox_object'])):
+        #     update_bounding_box(coordinates[0])
+    
+    if 'edited_df' in st.session_state:
+        if 'bbox_object' in st.session_state:
+            df1 = st.session_state['edited_df']
+            df2 = st.session_state['bbox_object'].get_dataframe()
+            if not (df1 == df2).all().all():
+                update_bbox_from_df()
+        else:
+            update_bbox_from_df()
+        
+        a = 1
+
+
+    # st.write(st.session_state)         
 
 a = 1
