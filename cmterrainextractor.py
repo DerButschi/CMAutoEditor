@@ -158,11 +158,16 @@ def draw_sidebar():
             st.button('Find available data sources', disabled=not st.session_state['selected_area_valid'], on_click=find_data_sources_in_bbox)
             selected_data_source = st.selectbox('Data sources', st.session_state['data_sources'] if 'data_sources' in st.session_state else [], format_func=get_data_source_label)
 
-        st.session_state['selected_data_source'] = selected_data_source
-        st.button('Extract elevation data', disabled=selected_data_source is None, on_click=extract_data_in_bbox)
+            st.session_state['selected_data_source'] = selected_data_source
+            st.button('Extract elevation data', disabled=selected_data_source is None, on_click=extract_data_in_bbox)
 
-        if 'elevation_in_bbox' in st.session_state:
-            st.download_button('Download elevation data', dataframe2csv(st.session_state['elevation_in_bbox']), file_name='elevation_data.csv')
+        with st.container(border=True):
+            st.download_button(
+                'Download elevation .csv-file', 
+                dataframe2csv(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
+                file_name='elevation_data.csv',
+                disabled=not ('elevation_in_bbox' in st.session_state)
+            )
    
 
 if __name__ == '__main__':
@@ -213,8 +218,8 @@ if __name__ == '__main__':
         line2 = folium.vector_layers.PolyLine([bbox[1], bbox[2]], color='red')
         line3 = folium.vector_layers.PolyLine([bbox[2], bbox[3]], color='red')
         line4 = folium.vector_layers.PolyLine([bbox[0], bbox[3]], color='red')
-        line1_text = folium.plugins.PolyLineTextPath(line1, "CM W<->E axis, {}m".format(st.session_state['len_x']), center=True, offset=20, color='red', attributes={'font-size': 18, 'fill': 'red'})
-        line4_text = folium.plugins.PolyLineTextPath(line4, "CM N<->S axis, {}m".format(st.session_state['len_y']), center=True, offset=-7, color='red', attributes={'font-size': 18, 'fill': 'red'})
+        line1_text = folium.plugins.PolyLineTextPath(line1, "CM W\u2194E axis", center=True, offset=20, color='red', attributes={'font-size': 16, 'fill': 'red'})
+        line4_text = folium.plugins.PolyLineTextPath(line4, "CM S\u2194N axis", center=True, offset=-7, color='red', attributes={'font-size': 16, 'fill': 'red'})
         bbox_fg.add_child(line1)
         bbox_fg.add_child(line2)
         bbox_fg.add_child(line3)
