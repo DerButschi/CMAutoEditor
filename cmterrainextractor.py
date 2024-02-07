@@ -16,10 +16,12 @@ from terrain_extraction.bbox_utils import BoundingBox
 from terrain_extraction.data_sources.hessen_dgm1.data_source import HessenDataSource
 from terrain_extraction.data_sources.aw3d30.data_source import AW3D30DataSource
 from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
+from terrain_extraction.data_sources.netherlands_dtm05.data_source import NetherlandsDataSource
 from terrain_extraction.elevation_map import cut_out_bounding_box
 
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
-data_sources = [HessenDataSource(), NRWDataSource(), FranceDataSource()]
+data_sources = [HessenDataSource(), NRWDataSource(), FranceDataSource(), NetherlandsDataSource()]
+# data_sources = [NetherlandsDataSource()]
 
 def update_bounding_box(points):
     polygon = shapely.Polygon(points)
@@ -173,10 +175,21 @@ def draw_sidebar():
 if __name__ == '__main__':
     st.set_page_config(layout="wide", menu_items={'Report a bug': "https://github.com/DerButschi/CMAutoEditor/issues/new/choose"})    
 
-    if 'center' not in st.session_state:
-        st.session_state['center'] = {'lat': 0, 'lon': 0}
-    if 'zoom' not in st.session_state:
-        st.session_state['zoom'] = 1
+
+    START_LOCATION = [0,0]
+    START_ZOOM = 2
+
+    if "map_center" not in st.session_state:
+        st.session_state["map_center"] = START_LOCATION
+    if "map_zoom" not in st.session_state:
+        st.session_state["map_zoom"] = START_ZOOM
+    if "map_key" not in st.session_state:
+        st.session_state["map_key"] = 0
+
+    # if 'center' not in st.session_state:
+    #     st.session_state['center'] = {'lat': 0, 'lon': 0}
+    # if 'zoom' not in st.session_state:
+    #     st.session_state['zoom'] = 1
 
     map = folium.Map(tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", 
                      attr=(
@@ -199,15 +212,22 @@ if __name__ == '__main__':
     folium.plugins.Fullscreen().add_to(map)
 
     if 'elevation_in_bbox' in st.session_state:
+        if 'height_map_layer' not in st.session_state:
+        # if 'zoom_cache' in st.session_state:
+            st.session_state['map_zoom'] = st.session_state['zoom_cache']
+            st.session_state['map_center'] = st.session_state['center_cache']
+            st.session_state['map_key'] += 1
+            st.session_state['height_map_layer'] = True
+
         bbox_fg.add_child(
             folium.raster_layers.ImageOverlay(
                 name='Elevation data',
                 image='C:\\Users\\der_b\\Downloads\\cm_terrain_extraction\\current_height_map.png',
                 bounds=st.session_state['bbox'],
-                interactive=False,
-                cross_origin=False,
+                # interactive=False,
+                # cross_origin=False,
                 opacity=0.9,
-                zindex=1,
+                # zindex=1,
             )
         )
     # bbox_fg.add_child(folium.GeoJson(geopandas.GeoDataFrame.from_file("terrain_extraction/data_sources/hessen.geojson")))
@@ -232,10 +252,11 @@ if __name__ == '__main__':
 
     st_data = st_folium(
         map,
-        center=st.session_state['center'],
-        zoom=st.session_state['zoom'],
+        center=st.session_state['map_center'],
+        zoom=st.session_state['map_zoom'],
         feature_group_to_add=bbox_fg,
-        width=1200
+        width=1200,
+        key=st.session_state['map_key']
     )
 
     draw_sidebar()
@@ -248,6 +269,10 @@ if __name__ == '__main__':
             st.session_state['drawn_coordinates'] = coordinates
             update_bounding_box(coordinates[0])
 
+    if 'zoom' in st_data:
+        st.session_state['zoom_cache'] = st_data['zoom']
+    if 'center' in st_data:
+        st.session_state['center_cache'] = st_data['center']
         # del st_data['last_active_drawing']
         # if not('bbox_object' in st.session_state and BoundingBox(Polygon(coordinates[0])).equals(st.session_state['bbox_object'])):
         #     update_bounding_box(coordinates[0])
@@ -264,6 +289,6 @@ if __name__ == '__main__':
         a = 1
 
 
-    # st.write(st.session_state)         
+    st.write(st_data)
 
 a = 1

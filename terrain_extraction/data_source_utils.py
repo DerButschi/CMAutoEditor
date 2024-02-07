@@ -4,6 +4,7 @@ from shapely import Polygon, Point
 import pandas
 from rasterio.enums import Resampling
 from rasterio import open as rasterio_open
+from rasterio.fill import fillnodata
 import numpy as np
 from rasterio.merge import merge
 import os
@@ -107,7 +108,7 @@ def dataframe_in_bbox_to_png(df: pandas.DataFrame, bounding_box: BoundingBox, fi
         df, 
         geometry=geopandas.points_from_xy(df.x, df.y)
     )
-    gdf.loc[~gdf.index.isin(gdf.sindex.query(bounding_box.get_box(bounding_box.crs_projected), predicate='contains')), 'z'] = 0
+    gdf.loc[~gdf.index.isin(gdf.sindex.query(bounding_box.get_box(bounding_box.crs_projected), predicate='contains')), 'z'] = -9999
     gdf = clip_dataframe_to_bounding_box(gdf, bounding_box.get_bounds(bounding_box.crs_projected))
 
     height_map = dataframe2ndarray(gdf)
@@ -185,7 +186,7 @@ class DataSource(ABC):
         return height_map_df
     
     def get_png(self, bounding_box: BoundingBox, cache_dir: str):
-        if self.cached_data is not None and self.cached_data_bounding_box.equals(bounding_box):
+        if self.cached_data is None or not self.cached_data_bounding_box.equals(bounding_box):
             self.get_data(bounding_box, cache_dir)
 
         df = self.cached_data
@@ -204,10 +205,17 @@ class GeoTiffDataSource(DataSource):
         # merge(image_files, dst_path=self.current_merged_image_path, res=(1.0,1.0), resampling=Resampling.bilinear)
         bounds = bounding_box.get_buffer(self.crs).bounds
         merge(image_files, dst_path=self.current_merged_image_path, bounds=bounds, resampling=Resampling.bilinear)
+
+            
         
     def get_merged_dataframe(self, bounding_box: BoundingBox) -> pandas.DataFrame:
         with rasterio_open(self.current_merged_image_path) as src:
             data = src.read(1)
+
+            while len(data[data == src.nodata]) > 0:
+                mask = np.full(data.shape, 255)
+                mask[data == src.nodata] = 0
+                data = fillnodata(data, mask)
 
             reprojected_data = reproject_array(
                 data,
