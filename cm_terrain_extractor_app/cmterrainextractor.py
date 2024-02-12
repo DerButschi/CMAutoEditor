@@ -21,6 +21,7 @@ from terrain_extraction.elevation_map import cut_out_bounding_box
 
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
 data_sources = [HessenDataSource(), NRWDataSource(), FranceDataSource(), NetherlandsDataSource(), AW3D30DataSource()]
+st.session_state['selectable_data_sources'] = [ds for ds in data_sources]
 # data_sources = [NetherlandsDataSource()]
 
 def update_bounding_box(points):
@@ -49,7 +50,7 @@ def find_data_sources_in_bbox(status_update_area):
     with status_update_area.container(border=True):
         with st.spinner('Searching for data sources in the selected area...'):
             available_data_sources = []
-            for data_source in data_sources:
+            for data_source in st.session_state['selectable_data_sources']:
                 if data_source.intersects_bounding_box(st.session_state['bbox_object']):
                     available_data_sources.append(data_source)
 
@@ -63,7 +64,7 @@ def get_data_source_label(data_source):
 def dataframe2csv(df: pandas.DataFrame):
     return df.to_csv().encode('utf-8')
 
-def extract_data_in_bbox(status_update_are):
+def extract_data_in_bbox(status_update_area):
     with status_update_area.container():
         data_source = st.session_state['selected_data_source']
         bounding_box = st.session_state['bbox_object']
@@ -180,14 +181,12 @@ def draw_sidebar(status_update_area):
                 file_name='elevation_data.csv',
                 disabled=not ('elevation_in_bbox' in st.session_state)
             )
-   
 
-if __name__ == '__main__':
-    st.set_page_config(
-        page_title='CM Terrain Extractor',
-        layout="wide", 
-        menu_items={'Report a bug': "https://github.com/DerButschi/CMAutoEditor/issues/new/choose"})    
-
+def elevations_tab():
+    st.header('Extraction of Elevation Data')
+    st.markdown(
+        "Select an area for which to extract elevation data."
+    )
 
     START_LOCATION = [0,0]
     START_ZOOM = 2
@@ -299,6 +298,39 @@ if __name__ == '__main__':
                 update_bbox_from_df()
         else:
             update_bbox_from_df()
+
+def options_tab():
+    data_source_dict = st.data_editor(
+        {
+            'Name': [ds.name for ds in data_sources],
+            'Type': [ds.model_type for ds in data_sources],
+            'Resolution': [ds.resolution for ds in data_sources],
+            'Format': [ds.data_type for ds in data_sources],
+            'Include in Search': [ds in st.session_state['selectable_data_sources'] for ds in data_sources]
+        },
+        column_order=['Name', 'Type', 'Resolution', 'Format', 'Include in Search'],
+        disabled=['Name', 'Type', 'Resolution', 'Format']
+    )
+    selected_data_source_names = []
+    for didx, ds_selected in enumerate(data_source_dict['Include in Search']):
+        if ds_selected:
+            selected_data_source_names.append(data_source_dict['Name'][didx])
+
+    st.session_state['selectable_data_sources'] = [ds for ds in data_sources if ds.name in selected_data_source_names]
+
+if __name__ == '__main__':
+    st.set_page_config(
+        page_title='CM Terrain Extractor',
+        layout="wide", 
+        menu_items={'Report a bug': "https://github.com/DerButschi/CMAutoEditor/issues/new/choose"})    
+
+    tab1, tab2 = st.tabs(['Elevations', 'Options'])
+
+    with tab1:
+        elevations_tab()
+
+    with tab2:
+        options_tab()
         
     # st.write(st_data)
 
