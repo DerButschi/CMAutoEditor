@@ -35,6 +35,7 @@ class AW3D30DataSource(GeoTiffDataSource):
         self.data_type = 'geotiff'
         self.model_type = 'DSM'
         self.resolution = '1 arcsec (~30 m)'
+        self.country = 'Global'
         self.crs = CRS.from_epsg(4326)
         self.gdf = None
         self.outline: MultiPolygon = None

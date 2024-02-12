@@ -22,6 +22,7 @@ class NetherlandsDataSource(GeoTiffDataSource):
         self.data_type = 'geotiff'
         self.model_type = 'DTM'
         self.resolution = '0.5 m'
+        self.country = 'Netherlands'
         self.crs = CRS.from_epsg(28992)
         self.gdf = None
         self.outline: MultiPolygon = None

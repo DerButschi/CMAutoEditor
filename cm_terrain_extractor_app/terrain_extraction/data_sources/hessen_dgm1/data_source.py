@@ -22,6 +22,7 @@ class HessenDataSource(GeoTiffDataSource):
         self.data_type = 'geotiff'
         self.model_type = 'DTM'
         self.resolution = '1 m'
+        self.country = 'Germany/Hessen'
         self.crs = CRS.from_epsg(25832)
         self.gdf = None
         self.outline: MultiPolygon = None

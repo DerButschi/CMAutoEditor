@@ -300,15 +300,19 @@ def elevations_tab():
             update_bbox_from_df()
 
 def options_tab():
+    st.markdown(
+        "Select which data sources should be queried for available elevation data."
+    )
     data_source_dict = st.data_editor(
         {
             'Name': [ds.name for ds in data_sources],
+            'Country/Region': [ds.country for ds in data_sources],
             'Type': [ds.model_type for ds in data_sources],
             'Resolution': [ds.resolution for ds in data_sources],
             'Format': [ds.data_type for ds in data_sources],
             'Include in Search': [ds in st.session_state['selectable_data_sources'] for ds in data_sources]
         },
-        column_order=['Name', 'Type', 'Resolution', 'Format', 'Include in Search'],
+        column_order=['Name', 'Country/Region', 'Type', 'Resolution', 'Format', 'Include in Search'],
         disabled=['Name', 'Type', 'Resolution', 'Format']
     )
     selected_data_source_names = []

@@ -24,6 +24,7 @@ class FranceDataSource(ASCDataSource, GeoTiffDataSource):
         self.data_type = 'asc'
         self.model_type = 'DTM'
         self.resolution = '5 m'
+        self.country = 'France'
         self.crs = CRS.from_epsg(2154)
         self.gdf = None
         self.outline: MultiPolygon = None

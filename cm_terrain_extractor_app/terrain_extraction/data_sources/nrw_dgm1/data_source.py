@@ -23,6 +23,7 @@ class NRWDataSource(XYZDataSource):
         self.data_type = 'xyz'
         self.model_type = 'DTM'
         self.resolution = '1 m'
+        self.country = 'Germany/North Rhine-Westphalia'
         self.crs = CRS.from_epsg(25832)
         self.gdf = None
         self.outline: MultiPolygon = None
