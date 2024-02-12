@@ -38,7 +38,7 @@ def transform_point(point: Point, from_epsg, to_epsg) -> Point:
     transformer = Transformer.from_crs('epsg:{}'.format(from_epsg), 'epsg:{}'.format(to_epsg), always_xy=True)
     return Point(transformer.transform(point.x, point.y))
 
-def reproject_array(arr: np.ndarray, source_bounds: Tuple[float], source_crs: CRS, destination_crs: CRS, destination_resolution: Tuple[float], resampling=Resampling.nearest) -> np.ndarray:
+def reproject_array(arr: np.ndarray, source_bounds: Tuple[float], source_crs: CRS, destination_crs: CRS, destination_resolution: Tuple[float], resampling=Resampling.bilinear) -> np.ndarray:
     affine_transform = from_bounds(*source_bounds, arr.shape[1], arr.shape[0])
     trf=calculate_default_transform(
         source_crs, 
@@ -59,7 +59,7 @@ def reproject_array(arr: np.ndarray, source_bounds: Tuple[float], source_crs: CR
         dst_transform=trf[0], 
         src_crs=source_crs,
         dst_crs=destination_crs, 
-        resampling=Resampling.nearest
+        resampling=resampling
     )
 
     return reprojected_arr
