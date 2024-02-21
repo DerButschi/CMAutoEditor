@@ -3,21 +3,17 @@ from streamlit_folium import st_folium
 import folium
 from folium.plugins import Draw
 import os
-import PIL
 import numpy as np
 import pandas
 import shapely
-from shapely import Point, Polygon
-from pyproj.crs import CRS
+
 from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
 
-from terrain_extraction.projection_utils import transform_polygon
 from terrain_extraction.bbox_utils import BoundingBox
 from terrain_extraction.data_sources.hessen_dgm1.data_source import HessenDataSource
 from terrain_extraction.data_sources.aw3d30.data_source import AW3D30DataSource
 from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
 from terrain_extraction.data_sources.netherlands_dtm05.data_source import NetherlandsDataSource
-from terrain_extraction.elevation_map import cut_out_bounding_box
 
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
 data_sources = [HessenDataSource(), NRWDataSource(), FranceDataSource(), NetherlandsDataSource(), AW3D30DataSource()]
@@ -69,11 +65,11 @@ def extract_data_in_bbox(status_update_area):
         data_source = st.session_state['selected_data_source']
         bounding_box = st.session_state['bbox_object']
 
-        os.makedirs('C:\\Users\\der_b\\Downloads\\cm_terrain_extraction', exist_ok=True)
+        os.makedirs('data_cache', exist_ok=True)
         with st.status('Extracting elevation data', expanded=True) as status:
-            elevation_data = data_source.get_data(bounding_box, 'C:\\Users\\der_b\\Downloads\\cm_terrain_extraction')
+            elevation_data = data_source.get_data(bounding_box, 'data_cache')
             st.session_state['elevation_in_bbox'] = elevation_data
-            path_to_png = data_source.get_png(bounding_box, 'C:\\Users\\der_b\\Downloads\\cm_terrain_extraction')
+            path_to_png = data_source.get_png(bounding_box, 'data_cache')
             status.update(label="Elevation data extracted!", state="complete", expanded=False)
 
     status_update_area.empty()
@@ -234,7 +230,7 @@ def elevations_tab():
         bbox_fg.add_child(
             folium.raster_layers.ImageOverlay(
                 name='Elevation data',
-                image='C:\\Users\\der_b\\Downloads\\cm_terrain_extraction\\current_height_map.png',
+                image='data_cache/current_height_map.png',
                 bounds=st.session_state['bbox'],
                 # interactive=False,
                 # cross_origin=False,
