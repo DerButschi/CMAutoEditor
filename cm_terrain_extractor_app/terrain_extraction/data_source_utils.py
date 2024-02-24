@@ -155,8 +155,6 @@ class DataSource(ABC):
 
     def get_gdf(self) -> geopandas.GeoDataFrame:
         if self.gdf is None:
-            print(self.gdf_geojson_path)
-            print(os.listdir(os.path.dirname(self.gdf_geojson_path)))
             self.gdf = geopandas.GeoDataFrame.from_file(self.gdf_geojson_path)
 
         return self.gdf

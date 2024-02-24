@@ -6,6 +6,7 @@ import os
 import numpy as np
 import pandas
 import shapely
+import sys
 
 from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
 
@@ -14,11 +15,17 @@ from terrain_extraction.data_sources.hessen_dgm1.data_source import HessenDataSo
 from terrain_extraction.data_sources.aw3d30.data_source import AW3D30DataSource
 from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
 from terrain_extraction.data_sources.netherlands_dtm05.data_source import NetherlandsDataSource
+from terrain_extraction.data_sources.bavaria_dgm1.data_source import BavariaDataSource
 
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
-data_sources = [HessenDataSource(), NRWDataSource(), FranceDataSource(), NetherlandsDataSource(), AW3D30DataSource()]
+data_sources = [HessenDataSource(), NRWDataSource(), FranceDataSource(), NetherlandsDataSource(), BavariaDataSource(), AW3D30DataSource()]
 st.session_state['selectable_data_sources'] = [ds for ds in data_sources]
 # data_sources = [NetherlandsDataSource()]
+
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    data_cache_path = os.path.join(os.path.dirname(sys.executable), 'data_cache')
+else:
+    data_cache_path = 'data_cache'
 
 def update_bounding_box(points):
     polygon = shapely.Polygon(points)
@@ -65,11 +72,11 @@ def extract_data_in_bbox(status_update_area):
         data_source = st.session_state['selected_data_source']
         bounding_box = st.session_state['bbox_object']
 
-        os.makedirs('data_cache', exist_ok=True)
+        os.makedirs(data_cache_path, exist_ok=True)
         with st.status('Extracting elevation data', expanded=True) as status:
-            elevation_data = data_source.get_data(bounding_box, 'data_cache')
+            elevation_data = data_source.get_data(bounding_box, data_cache_path)
             st.session_state['elevation_in_bbox'] = elevation_data
-            path_to_png = data_source.get_png(bounding_box, 'data_cache')
+            path_to_png = data_source.get_png(bounding_box, data_cache_path)
             status.update(label="Elevation data extracted!", state="complete", expanded=False)
 
     status_update_area.empty()
@@ -230,7 +237,7 @@ def elevations_tab():
         bbox_fg.add_child(
             folium.raster_layers.ImageOverlay(
                 name='Elevation data',
-                image='data_cache/current_height_map.png',
+                image=os.path.join(data_cache_path, 'current_height_map.png'),
                 bounds=st.session_state['bbox'],
                 # interactive=False,
                 # cross_origin=False,

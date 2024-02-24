@@ -18,7 +18,6 @@ if __name__ == "__main__":
                 path.append(p)
     path_str = os.pathsep.join(path)
     os.environ['PATH'] = path_str
-    print('PATH variable: {}'.format(os.environ['PATH']))
 
     flag_options = {
         "server.port": 8501,
