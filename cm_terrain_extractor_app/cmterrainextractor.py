@@ -16,9 +16,17 @@ from terrain_extraction.data_sources.aw3d30.data_source import AW3D30DataSource
 from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
 from terrain_extraction.data_sources.netherlands_dtm05.data_source import NetherlandsDataSource
 from terrain_extraction.data_sources.bavaria_dgm1.data_source import BavariaDataSource
+from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
 
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
-data_sources = [HessenDataSource(), NRWDataSource(), FranceDataSource(), NetherlandsDataSource(), BavariaDataSource(), AW3D30DataSource()]
+data_sources = [HessenDataSource(), 
+                NRWDataSource(), 
+                FranceDataSource(), 
+                NetherlandsDataSource(), 
+                BavariaDataSource(), 
+                ThuringiaDataSource(),
+                AW3D30DataSource()]
+
 st.session_state['selectable_data_sources'] = [ds for ds in data_sources]
 # data_sources = [NetherlandsDataSource()]
 

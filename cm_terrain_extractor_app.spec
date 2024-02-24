@@ -25,6 +25,7 @@ a = Analysis(
                    'rasterio._features', 'rasterio.fill', 'rasterio.merge', "skimage.measure", "skimage.transform", 'rasterio.warp', 
                    'terrain_extraction.projection_utils', 'terrain_extraction.bbox_utils', 'terrain_extraction.data_sources.hessen_dgm1.data_source', 
                    'terrain_extraction.data_sources.aw3d30.data_source', 'terrain_extraction.data_sources.nrw_dgm1.data_source', 'terrain_extraction.data_sources.netherlands_dtm05.data_source',
+                   'terrain_extraction.data_sources.bavaria_dgm1.data_source', 'terrain_extraction.data_sources.thuringia_dgm1.data_source',
                    'terrain_extraction.elevation_map', 'terrain_extraction.data_sources.rge_alti.data_source', 'fiona._shim', 'rasterio._shim'],
 
     hookspath=['./hooks'],
