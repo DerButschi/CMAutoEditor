@@ -79,6 +79,10 @@ def extract_data_in_bbox(status_update_area):
     with status_update_area.container():
         data_source = st.session_state['selected_data_source']
         bounding_box = st.session_state['bbox_object']
+        st.session_state['currently_processing_data'] = (
+            'Extracting data from {}'.format(data_source.name),
+            data_source.name
+        )
 
         os.makedirs(data_cache_path, exist_ok=True)
         with st.status('Extracting elevation data', expanded=True) as status:
@@ -87,6 +91,7 @@ def extract_data_in_bbox(status_update_area):
             path_to_png = data_source.get_png(bounding_box, data_cache_path)
             status.update(label="Elevation data extracted!", state="complete", expanded=False)
 
+        del st.session_state['currently_processing_data']
     status_update_area.empty()
 
 def permute_bbox():
@@ -333,11 +338,30 @@ def options_tab():
 
     st.session_state['selectable_data_sources'] = [ds for ds in data_sources if ds.name in selected_data_source_names]
 
+    file_sizes = 0
+    for dir_path, dir_name, file_names in os.walk(data_cache_path):
+        for fname in file_names:
+            file_sizes += os.path.getsize(os.path.join(dir_path, fname))
+
+    sizes = ['KB', 'MB', 'GB', 'TB']
+    size_str = ''
+    factor = 1
+    for sz in sizes:
+        factor *= 1024
+        size_str = sz
+        if file_sizes / factor < 1024:
+            break
+    
+    st.button('Clear Cache ({} {})'.format(np.round(file_sizes / factor, decimals=2), size_str))
+    a = 1
+
 if __name__ == '__main__':
     st.set_page_config(
         page_title='CM Terrain Extractor',
         layout="wide", 
         menu_items={'Report a bug': "https://github.com/DerButschi/CMAutoEditor/issues/new/choose"})    
+
+
 
     tab1, tab2 = st.tabs(['Elevations', 'Options'])
 
@@ -346,6 +370,12 @@ if __name__ == '__main__':
 
     with tab2:
         options_tab()
-        
+
+    if 'currently_processing_data' in st.session_state:
+        st.warning('{} was interrupted before it was finished. This may lead to corrupt data. If you encounter issues with the data, go to the options tab and clear the {} cache'.format(
+            *st.session_state['currently_processing_data']
+        ))
+        del st.session_state['currently_processing_data']
+
     # st.write(st_data)
 

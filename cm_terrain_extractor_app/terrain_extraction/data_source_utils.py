@@ -14,6 +14,7 @@ from PIL import Image
 import matplotlib as mpl
 import geopandas
 import zipfile
+import gzip
 
 from terrain_extraction.projection_utils import reproject_array, transform_point
 from terrain_extraction.bbox_utils import get_rectangle_rotation_angle, get_polygon_node_points, BoundingBox
@@ -150,6 +151,21 @@ def check_zip_file(file_path):
         return False
     
     return True
+
+def check_gzip_file(file_path):
+    try: 
+        with gzip.open(file_path, 'rb') as f:
+            while f.read(10000000) != b'':
+                pass
+    
+    except EOFError:
+        return False
+        
+    except gzip.BadGzipFile:
+        return False
+    
+    return True
+
 
 class DataSource(ABC):
     def __init__(self) -> None:

@@ -13,7 +13,7 @@ import gzip
 import shutil
 
 from rasterio.transform import xy as transform_xy
-from terrain_extraction.data_source_utils import XYZDataSource
+from terrain_extraction.data_source_utils import XYZDataSource, check_gzip_file
 from terrain_extraction.bbox_utils import BoundingBox
 
 
@@ -50,13 +50,11 @@ class NRWDataSource(XYZDataSource):
             relative_location = os.path.join(self.data_folder, entry['url'].split('/')[-1])
             if not os.path.isfile(os.path.join(data_storage_folder, relative_location)):
                 missing_files.append(entry['url'])
+            else:
+                if not check_gzip_file(os.path.join(data_storage_folder, relative_location)):
+                    missing_files.append(entry['url'])
 
         return missing_files
-    
-
-
-
-
 
     def get_images_in_bounding_box(self, bounding_box: BoundingBox, outdir):
         image_files = []
