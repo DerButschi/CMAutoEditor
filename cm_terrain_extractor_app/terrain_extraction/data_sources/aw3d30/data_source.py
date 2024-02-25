@@ -7,7 +7,7 @@ import zipfile
 from pyproj.crs import CRS
 import pandas
 
-from terrain_extraction.data_source_utils import GeoTiffDataSource
+from terrain_extraction.data_source_utils import GeoTiffDataSource, check_zip_file
 from terrain_extraction.bbox_utils import BoundingBox
 from ftplib import FTP
 
@@ -67,6 +67,9 @@ class AW3D30DataSource(GeoTiffDataSource):
             relative_location = os.path.join(self.data_folder, entry['folder'], entry['file_name'])
             if not os.path.isfile(os.path.join(data_storage_folder, relative_location)):
                 missing_files.append((entry['folder'], entry['file_name']))
+            else:
+                if not check_zip_file(os.path.join(data_storage_folder, relative_location)):
+                    missing_files.append((entry['folder'], entry['file_name']))
 
         return missing_files
     

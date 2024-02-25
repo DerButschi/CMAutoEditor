@@ -12,7 +12,7 @@ from pyproj.crs import CRS
 import pandas
 
 from rasterio.transform import xy as transform_xy
-from terrain_extraction.data_source_utils import GeoTiffDataSource
+from terrain_extraction.data_source_utils import GeoTiffDataSource, check_zip_file
 from terrain_extraction.bbox_utils import BoundingBox
 
 
@@ -53,6 +53,9 @@ class HessenDataSource(GeoTiffDataSource):
             relative_location = os.path.join(self.data_folder, entry['folder'], entry['file_name'] + '.zip')
             if not os.path.isfile(os.path.join(data_storage_folder, relative_location)):
                 missing_files.append((entry['folder'], entry['file_name']))
+            else:
+                if not check_zip_file(os.path.join(data_storage_folder, relative_location)):
+                    missing_files.append((entry['folder'], entry['file_name']))
 
         return missing_files
     

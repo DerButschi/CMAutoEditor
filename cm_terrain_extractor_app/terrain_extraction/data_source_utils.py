@@ -13,6 +13,7 @@ import skimage
 from PIL import Image
 import matplotlib as mpl
 import geopandas
+import zipfile
 
 from terrain_extraction.projection_utils import reproject_array, transform_point
 from terrain_extraction.bbox_utils import get_rectangle_rotation_angle, get_polygon_node_points, BoundingBox
@@ -139,7 +140,16 @@ def reproject_dataframe(df: pandas.DataFrame, source_crs: CRS, target_crs: CRS, 
     reprojected_df = ndarray2dataframe(reprojected_df_arr, x_offset=offset_point.x, y_offset=offset_point.y, origin_bottom=False)
     return reprojected_df
 
-
+def check_zip_file(file_path):
+    try:
+        with zipfile.ZipFile(file_path, 'r') as zip_ref:
+            bad_file = zip_ref.testzip()
+            if bad_file is not None:
+                return False
+    except zipfile.BadZipFile:
+        return False
+    
+    return True
 
 class DataSource(ABC):
     def __init__(self) -> None:

@@ -14,7 +14,7 @@ from zipfile import BadZipFile
 import shutil
 
 from rasterio.transform import xy as transform_xy
-from terrain_extraction.data_source_utils import XYZDataSource
+from terrain_extraction.data_source_utils import XYZDataSource, check_zip_file
 from terrain_extraction.bbox_utils import BoundingBox
 
 
@@ -51,6 +51,9 @@ class ThuringiaDataSource(XYZDataSource):
             relative_location = os.path.join(self.data_folder, entry['url'].split('/')[-1].rstrip('?'))
             if not os.path.isfile(os.path.join(data_storage_folder, relative_location)):
                 missing_files.append(entry['url'])
+            else:
+                if not check_zip_file(os.path.join(data_storage_folder, relative_location)):
+                    missing_files.append(entry['url'])
 
         return missing_files
 
