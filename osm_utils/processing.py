@@ -1015,7 +1015,12 @@ def collect_building_geometries(osm_processor, geometry, element_entry):
     else:
         is_diagonal = True
 
-    osm_processor.building_outlines[element_entry['name']][element_entry['idx']] = (geometry, is_diagonal)
+    if 'building:levels' in 'building:levels' in element_entry['element']['properties'] and int(element_entry['element']['properties']['building:levels']) > 0:
+        building_levels = int(element_entry['element']['properties']['building:levels'])
+    else:
+        building_levels = None
+
+    osm_processor.building_outlines[element_entry['name']][element_entry['idx']] = (geometry, is_diagonal, building_levels)
 
     # if np.abs(base_angle) < np.pi / 8:
     #     is_diagonal = False
@@ -1158,10 +1163,13 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
             building_candidates = buildings[condition & (buildings.width == mt[0][1]) & (buildings.height == mt[0][0])].copy()
             if len(building_candidates) == 0:
                 continue
-            building_candidates.loc[building_candidates.stories == 1, 'weight'] *= 0.3
-            building_candidates.loc[building_candidates.stories == 3, 'weight'] *= 0.1
-            building_candidates.loc[building_candidates.stories == 2, 'weight'] *= 0.6
-            building = building_candidates.sample(n=1, weights=building_candidates.weight)
+            if outline_entry[2] is not None and len(building_candidates[building_candidates.stories == outline_entry[2]]) > 0:
+                building = building_candidates[building_candidates.stories == outline_entry[2]].sample(n=1)
+            else:
+                building_candidates.loc[building_candidates.stories == 1, 'weight'] *= 0.3
+                building_candidates.loc[building_candidates.stories == 3, 'weight'] *= 0.1
+                building_candidates.loc[building_candidates.stories == 2, 'weight'] *= 0.6
+                building = building_candidates.sample(n=1, weights=building_candidates.weight)
             matched_buildings.append(building)
 
         ############
