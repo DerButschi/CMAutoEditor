@@ -7,10 +7,12 @@ import numpy as np
 import pandas
 import shapely
 import sys
+import osmnx
 
 from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
-
 from terrain_extraction.bbox_utils import BoundingBox
+from terrain_extraction.osm_utils.io import read_file, read_file_object, get_bounding_box, get_bounding_box_from_file_object
+from terrain_extraction.osm_processor import OSMProcessor
 from terrain_extraction.data_sources.hessen_dgm1.data_source import HessenDataSource
 from terrain_extraction.data_sources.aw3d30.data_source import AW3D30DataSource
 from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
@@ -28,12 +30,15 @@ data_sources = [HessenDataSource(),
                 AW3D30DataSource()]
 
 st.session_state['selectable_data_sources'] = [ds for ds in data_sources]
+
 # data_sources = [NetherlandsDataSource()]
 
 if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    executable_path = os.path.dirname(sys.executable)
     data_cache_path = os.path.join(os.path.dirname(sys.executable), 'data_cache')
 else:
     data_cache_path = 'data_cache'
+    executable_path = '.'
 
 def update_bounding_box(points):
     polygon = shapely.Polygon(points)
@@ -136,69 +141,171 @@ def draw_sidebar(status_update_area):
 
     with st.sidebar:
         with st.container(border=True):
-            if 'bbox_object' in st.session_state:
-                df = st.session_state['bbox_object'].get_dataframe()
-            else:
-                df = pandas.DataFrame({
-                    'x': [None, None, None, None],
-                    'y': [None, None, None, None]
-                })
-
-            st.session_state['edited_df'] = st.data_editor(
-                df,
-                column_config = {
-                    "x": st.column_config.NumberColumn(
-                        "Longitude [°]",
-                        min_value=-180.0,
-                        max_value=180.0
-                    ),
-                    "y": st.column_config.NumberColumn(
-                        "Latitude [°]",
-                        min_value=-90.0,
-                        max_value=90.0
-                    )
-                },
+            map_mode = st.radio(
+                "",
+                ["Bounding Box Selection", "Elevations", "OpenStreetMap"],
+                captions=[
+                    "Select the outline of the Combat Mission map.",
+                    "Extract elevation data.",
+                    "Extract map content from OpenStreetMap."
+                ],
+                label_visibility="collapsed"
             )
-            st.button('Cycle bounding box origin', disabled=not st.session_state['selected_area_valid'], on_click=permute_bbox)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if len_x_axis is not None and delta_len_x <= 0:
-                    st.metric(label='Length W\u2194E', value='{} m'.format(np.round(len_x_axis).astype(int)))
-                elif len_x_axis is not None and delta_len_x > 0:
-                    st.metric(label='Length W\u2194E', value='{} m'.format(np.round(len_x_axis).astype(int)), delta='{} m'.format(np.round(delta_len_x).astype(int)), delta_color="inverse")
+            if map_mode != st.session_state['map_mode']:
+                st.session_state['map_mode'] = map_mode
+                # st.rerun()
+
+        if st.session_state['map_mode'] == 'Bounding Box Selection':
+            with st.container(border=True):
+                if 'bbox_object' in st.session_state:
+                    df = st.session_state['bbox_object'].get_dataframe()
                 else:
-                    st.metric(label='Length W\u2194E', value='-')    
-            with col2:
-                if len_y_axis is not None and delta_len_y <= 0:
-                    st.metric(label='Length S\u2194N', value='{} m'.format(np.round(len_y_axis).astype(int)))
-                elif len_y_axis is not None and delta_len_y > 0:
-                    st.metric(label='Length S\u2194N', value='{} m'.format(np.round(len_y_axis).astype(int)), delta='{} m'.format(np.round(delta_len_y).astype(int)), delta_color="inverse")
-                else:
-                    st.metric(label='Length S\u2194N', value='-')    
-            with col3:
-                if area is not None and delta_area <= 0:
-                    st.metric(label='Selected Area', value='{} km²'.format(np.round(area / 1e6, decimals=1)))
-                elif area is not None and delta_area > 0:
-                    st.metric(label='Selected Area', value='{} km²'.format(np.round(area / 1e6, decimals=1)), delta='{} km²'.format(np.round(delta_area / 1e6, decimals=1)), delta_color="inverse")
-                else:
-                    st.metric(label='Selected Area', value='-')    
+                    df = pandas.DataFrame({
+                        'x': [None, None, None, None],
+                        'y': [None, None, None, None]
+                    })
 
-        with st.container(border=True):
-            st.button('Find available data sources', disabled=not st.session_state['selected_area_valid'], on_click=find_data_sources_in_bbox, args=[status_update_area])
-            selected_data_source = st.selectbox('Data sources', st.session_state['data_sources'] if 'data_sources' in st.session_state else [], format_func=get_data_source_label)
+                st.session_state['edited_df'] = st.data_editor(
+                    df,
+                    column_config = {
+                        "x": st.column_config.NumberColumn(
+                            "Longitude [°]",
+                            min_value=-180.0,
+                            max_value=180.0
+                        ),
+                        "y": st.column_config.NumberColumn(
+                            "Latitude [°]",
+                            min_value=-90.0,
+                            max_value=90.0
+                        )
+                    },
+                )
+                st.button('Cycle bounding box origin', disabled=not st.session_state['selected_area_valid'], on_click=permute_bbox)
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if len_x_axis is not None and delta_len_x <= 0:
+                        st.metric(label='Length W\u2194E', value='{} m'.format(np.round(len_x_axis).astype(int)))
+                    elif len_x_axis is not None and delta_len_x > 0:
+                        st.metric(label='Length W\u2194E', value='{} m'.format(np.round(len_x_axis).astype(int)), delta='{} m'.format(np.round(delta_len_x).astype(int)), delta_color="inverse")
+                    else:
+                        st.metric(label='Length W\u2194E', value='-')    
+                with col2:
+                    if len_y_axis is not None and delta_len_y <= 0:
+                        st.metric(label='Length S\u2194N', value='{} m'.format(np.round(len_y_axis).astype(int)))
+                    elif len_y_axis is not None and delta_len_y > 0:
+                        st.metric(label='Length S\u2194N', value='{} m'.format(np.round(len_y_axis).astype(int)), delta='{} m'.format(np.round(delta_len_y).astype(int)), delta_color="inverse")
+                    else:
+                        st.metric(label='Length S\u2194N', value='-')    
+                with col3:
+                    if area is not None and delta_area <= 0:
+                        st.metric(label='Selected Area', value='{} km²'.format(np.round(area / 1e6, decimals=1)))
+                    elif area is not None and delta_area > 0:
+                        st.metric(label='Selected Area', value='{} km²'.format(np.round(area / 1e6, decimals=1)), delta='{} km²'.format(np.round(delta_area / 1e6, decimals=1)), delta_color="inverse")
+                    else:
+                        st.metric(label='Selected Area', value='-')    
 
-            st.session_state['selected_data_source'] = selected_data_source
-            st.button('Extract elevation data', disabled=selected_data_source is None, on_click=extract_data_in_bbox, args=[status_update_area])
+        if st.session_state['map_mode'] == 'Elevations':
+            with st.container(border=True):
+                if not st.session_state['selected_area_valid']:
+                    st.markdown(":red[Please select a valid bounding box first.]")
+                st.button('Find available data sources', disabled=not st.session_state['selected_area_valid'], on_click=find_data_sources_in_bbox, args=[status_update_area])
+                selected_data_source = st.selectbox('Data sources', st.session_state['data_sources'] if 'data_sources' in st.session_state else [], format_func=get_data_source_label)
 
-        with st.container(border=True):
-            st.download_button(
-                'Download elevation .csv-file', 
-                dataframe2csv(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
-                file_name='elevation_data.csv',
-                disabled=not ('elevation_in_bbox' in st.session_state)
-            )
+                st.session_state['selected_data_source'] = selected_data_source
+                st.button('Extract elevation data', disabled=selected_data_source is None, on_click=extract_data_in_bbox, args=[status_update_area])
 
-def elevations_tab():
+            with st.container(border=True):
+                st.download_button(
+                    'Download elevation .csv-file', 
+                    dataframe2csv(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
+                    file_name='elevation_data.csv',
+                    disabled=not ('elevation_in_bbox' in st.session_state)
+                )
+        if st.session_state['map_mode'] == 'OpenStreetMap':
+            title_dict = {
+                'black_sea': 'Black Sea',
+                'cold_war': 'Cold War',
+                'fortress_italy': 'Fortress Italy',
+                'shock_force_2': 'Shock Force 2'
+            }
+            with st.container(border=True):
+                profile_str = st.selectbox(
+                    "Select Combat Mission Title",
+                    options=['black_sea', 'cold_war', 'fortress_italy', 'shock_force_2'],
+                    format_func=lambda x: title_dict[x]
+                )
+                config_files = [f for f in os.listdir(executable_path) if os.path.isfile(f) and f.endswith('.json')]
+                default_config_files = {
+                    'black_sea': 'default_osm_config_cmbs.json',
+                    'cold_war': 'default_osm_config.json',
+                    'fortress_italy': 'default_osm_config_cmfi.json',
+                    'shock_force_2': 'default_osm_config_cmsf2.json',
+                }
+                config_file = st.selectbox(
+                    "Select configuration file",
+                    options=config_files,
+                    index=config_files.index(default_config_files[profile_str]) if default_config_files[profile_str] in config_files else 0
+                )
+                st.session_state['osm_config_file'] = config_file
+                st.session_state['osm_profile_str'] = profile_str
+
+
+            with st.container(border=True):
+                with st.container(border=True):
+                    if not st.session_state['selected_area_valid']:
+                        st.markdown(":red[Please select a valid bounding box first.]")
+                    st.button('Download OpenStreeMap data', disabled=not st.session_state['selected_area_valid'], on_click=get_osm_data, args=[status_update_area])
+                st.markdown('-OR-')
+                with st.container(border=True):
+                    osm_file = st.file_uploader('Import OpenStreetMap file', type='geojson')
+                    if osm_file is not None:
+                        bbox = get_bounding_box_from_file_object(osm_file)
+                        st.session_state['osm_bbox_object'] = bbox
+                        st.session_state['osm_file'] = osm_file
+                with st.container(border=True):
+                    processing_enabled = True
+                    if not st.session_state['selected_area_valid']:
+                        st.markdown(":red[Please select a valid bounding box first.]")
+                        processing_enabled = False
+                    if not 'osm_file' in st.session_state:
+                        st.markdown(":red[Please import or download OpenStreetMap data first.]")
+                        processing_enabled = False
+                    st.button('Process OpenStreeMap data', disabled=not processing_enabled, on_click=process_osm_data, args=[status_update_area])
+            with st.container(border=True):
+                st.download_button(
+                    'Download OpenStreetMap .csv-file', 
+                    dataframe2csv(st.session_state['osm_output']) if 'osm_output' in st.session_state else 'dummy', 
+                    file_name='osm_data.csv',
+                    disabled=not ('osm_output' in st.session_state)
+                )
+
+
+def process_osm_data(status_update_area):
+    osm_data = read_file_object(st.session_state['osm_file'])
+    osm_processor = OSMProcessor(
+        path_to_config=st.session_state['osm_config_file'], bbox=st.session_state['bbox_object'], profile=st.session_state['osm_profile_str'])
+
+    with status_update_area.container():
+        with st.status('Processing OpenStreetMap data...'):
+            st.write('Preprocessing data...')
+            osm_processor.preprocess_osm_data(osm_data=osm_data)
+            st.write('Running processors...')
+            osm_processor.run_processors()
+            st.write('Doing postprocessing...')
+            osm_processor.post_process()
+            st.session_state['osm_output'] = osm_processor.get_output()
+    status_update_area.empty()
+    # osm_processor.write_to_file(args.output_file)
+
+    a = 1
+
+def get_osm_data(status_update_area):
+    bounding_box: BoundingBox = st.session_state['bbox_object']
+    osm_data = osmnx.features_from_polygon(bounding_box.box_wgs84,
+                                           {'highway': ['primary', 'secondary']})
+    a = 1
+
+def map_view_tab():
     st.header('Extraction of Elevation Data')
     st.markdown(
         "Select an area for which to extract elevation data."
@@ -227,14 +334,16 @@ def elevations_tab():
                      )
     
     bbox_fg = folium.FeatureGroup('bbox')
-    draw = Draw(draw_options={
-        'polyline': False,
-        'circle': False,
-        'marker': False,
-        'circlemarker': False
 
-    })
-    draw.add_to(map)
+    if st.session_state['map_mode'] == 'Bounding Box Selection':
+        draw = Draw(draw_options={
+            'polyline': False,
+            'circle': False,
+            'marker': False,
+            'circlemarker': False,
+        })
+        draw.add_to(map)
+
     folium.plugins.Geocoder(postion='bottomleft').add_to(map)
     folium.plugins.MeasureControl().add_to(map)
     folium.plugins.Fullscreen().add_to(map)
@@ -276,6 +385,20 @@ def elevations_tab():
         bbox_fg.add_child(line4_text)
         bbox_fg.add_child(folium.vector_layers.CircleMarker(st.session_state['bbox'][0], color='red', radius=5))
 
+    if 'osm_bbox_object' in st.session_state:
+        bbox = st.session_state['osm_bbox_object'].get_coordinates(xy=False)
+        line1 = folium.vector_layers.PolyLine([bbox[0], bbox[1]], color='red', dash_array='6')
+        line2 = folium.vector_layers.PolyLine([bbox[1], bbox[2]], color='red', dash_array='6')
+        line3 = folium.vector_layers.PolyLine([bbox[2], bbox[3]], color='red', dash_array='6')
+        line4 = folium.vector_layers.PolyLine([bbox[0], bbox[3]], color='red', dash_array='6')
+        line1_text = folium.plugins.PolyLineTextPath(line1, "OSM data", center=True, offset=20, color='red', attributes={'font-size': 16, 'fill': 'red'})
+        bbox_fg.add_child(line1)
+        bbox_fg.add_child(line2)
+        bbox_fg.add_child(line3)
+        bbox_fg.add_child(line4)
+        bbox_fg.add_child(line1_text)
+
+
     # folium.LayerControl().add_to(map)
 
     st_data = st_folium(
@@ -286,11 +409,8 @@ def elevations_tab():
         width=1200,
         key=st.session_state['map_key']
     )
-    status_update_area = st.empty()
 
-    draw_sidebar(status_update_area)
-
-    if st_data['last_active_drawing'] is not None:
+    if st_data['last_active_drawing'] is not None and st.session_state['map_mode'] == 'Bounding Box Selection':
         coordinates = np.array(st_data['last_active_drawing']['geometry']['coordinates'])
         if 'drawn_coordinates' not in st.session_state or \
             not (st.session_state['drawn_coordinates'].shape == coordinates.shape) or \
@@ -314,6 +434,8 @@ def elevations_tab():
                 update_bbox_from_df()
         else:
             update_bbox_from_df()
+
+    st.write(st_data)
 
 def options_tab():
     st.markdown(
@@ -361,12 +483,18 @@ if __name__ == '__main__':
         layout="wide", 
         menu_items={'Report a bug': "https://github.com/DerButschi/CMAutoEditor/issues/new/choose"})    
 
+    # set map mode to default if no other is already specified
+    if 'map_mode' not in st.session_state:
+        st.session_state['map_mode'] = 'bounding_box'
+
+    status_update_area = st.empty()
+    draw_sidebar(status_update_area)
 
 
-    tab1, tab2 = st.tabs(['Elevations', 'Options'])
+    tab1, tab2 = st.tabs(['Map View', 'Options'])
 
     with tab1:
-        elevations_tab()
+        map_view_tab()
 
     with tab2:
         options_tab()

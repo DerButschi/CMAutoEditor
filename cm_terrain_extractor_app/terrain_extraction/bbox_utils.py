@@ -132,5 +132,19 @@ class BoundingBox:
         self.box_utm = permute_polygon_to_idx(self.box_utm, 1)
         self.box_wgs84 = permute_polygon_to_idx(self.box_wgs84, 1)
 
+    def get_rotation_angle(self):
+        box_points = get_polygon_node_points(self.box_utm)
+        return get_rectangle_rotation_angle(self.box_utm, box_points[0])
+    
+    def get_origin_point(self, crs: CRS = CRS.from_epsg(4326)):
+        box_points = get_polygon_node_points(self.get_box(crs))
+        return box_points[0]
+    
+    def get_reference_points(self, crs: CRS = CRS.from_epsg(4326)):
+        box_points = get_polygon_node_points(self.get_box(crs))
+        return box_points[0], box_points[1], box_points[3]
+        
+
+
 
     
