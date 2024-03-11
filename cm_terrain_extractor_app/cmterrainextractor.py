@@ -1,3 +1,4 @@
+import json
 import streamlit as st
 from streamlit_folium import st_folium
 import folium
@@ -8,6 +9,7 @@ import pandas
 import shapely
 import sys
 import osmnx
+import geojson
 
 from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
 from terrain_extraction.bbox_utils import BoundingBox
@@ -261,13 +263,15 @@ def draw_sidebar(status_update_area):
                     if osm_file is not None:
                         bbox = get_bounding_box_from_file_object(osm_file)
                         st.session_state['osm_bbox_object'] = bbox
-                        st.session_state['osm_file'] = osm_file
+                        # st.session_state['osm_file'] = osm_file
+                        st.session_state['osm_data'] = read_file_object(osm_file)
                 with st.container(border=True):
                     processing_enabled = True
                     if not st.session_state['selected_area_valid']:
                         st.markdown(":red[Please select a valid bounding box first.]")
                         processing_enabled = False
-                    if not 'osm_file' in st.session_state:
+                    # if not 'osm_file' in st.session_state:
+                    if not 'osm_data' in st.session_state:
                         st.markdown(":red[Please import or download OpenStreetMap data first.]")
                         processing_enabled = False
                     st.button('Process OpenStreeMap data', disabled=not processing_enabled, on_click=process_osm_data, args=[status_update_area])
@@ -281,7 +285,7 @@ def draw_sidebar(status_update_area):
 
 
 def process_osm_data(status_update_area):
-    osm_data = read_file_object(st.session_state['osm_file'])
+    osm_data = st.session_state['osm_data']
     osm_processor = OSMProcessor(
         path_to_config=st.session_state['osm_config_file'], bbox=st.session_state['bbox_object'], profile=st.session_state['osm_profile_str'])
 
@@ -301,9 +305,23 @@ def process_osm_data(status_update_area):
 
 def get_osm_data(status_update_area):
     bounding_box: BoundingBox = st.session_state['bbox_object']
-    osm_data = osmnx.features_from_polygon(bounding_box.box_wgs84,
-                                           {'highway': ['primary', 'secondary']})
-    a = 1
+    config = json.load(open(st.session_state['osm_config_file'],'r'))
+    tag_dict = {}
+    for key in config:
+        for tag_entry in ['tags', 'exclude_tags', 'required_tags']:
+            if tag_entry in config[key]: # actually, should be but...
+                for k, v in config[key][tag_entry]:
+                    if k not in tag_dict:
+                        tag_dict[k] = []
+                    tag_dict[k].append(v)
+
+    osm_data = osmnx.features_from_polygon(bounding_box.box_wgs84, tag_dict)
+    if 'ways' in osm_data.columns:
+        osm_data = osm_data.drop(columns=['ways'])
+    if 'nodes' in osm_data.columns:
+        osm_data.drop(columns=['nodes'])
+
+    st.session_state['osm_data'] = geojson.loads(osm_data.to_json())
 
 def map_view_tab():
     st.header('Extraction of Elevation Data')

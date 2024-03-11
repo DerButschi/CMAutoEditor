@@ -201,9 +201,9 @@ class OSMProcessor:
 
             progress_bar.progress(eidx / len(osm_data['features']), 'Preprocessing OSM Data')
 
-        unprocessed_tags_df = pandas.DataFrame(unprocessed_tags)
-        unprocessed_tags_df = unprocessed_tags_df.drop_duplicates()
-        unprocessed_tags_df.to_csv('unprocessed_tags.csv')
+        # unprocessed_tags_df = pandas.DataFrame(unprocessed_tags)
+        # unprocessed_tags_df = unprocessed_tags_df.drop_duplicates()
+        # unprocessed_tags_df.to_csv('unprocessed_tags.csv')
             
         self._init_grid(self.bbox)
 
