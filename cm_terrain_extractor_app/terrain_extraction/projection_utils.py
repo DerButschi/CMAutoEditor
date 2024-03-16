@@ -1,5 +1,5 @@
 from typing import Tuple
-from shapely import Polygon, Point
+from shapely import Polygon, Point, LineString
 from pyproj import Transformer
 from pyproj.aoi import AreaOfInterest
 from pyproj.database import query_utm_crs_info
@@ -37,6 +37,9 @@ def transform_polygon(polygon: Polygon, from_epsg, to_epsg) -> Polygon:
 def transform_point(point: Point, from_epsg, to_epsg) -> Point:
     transformer = Transformer.from_crs('epsg:{}'.format(from_epsg), 'epsg:{}'.format(to_epsg), always_xy=True)
     return Point(transformer.transform(point.x, point.y))
+
+def transform_linestring(ls: LineString, from_epsg, to_epsg) -> LineString:
+    return LineString([transform_point(Point(coord[0], coord[1]), from_epsg, to_epsg) for coord in ls.coords])
 
 def reproject_array(arr: np.ndarray, source_bounds: Tuple[float], source_crs: CRS, destination_crs: CRS, destination_resolution: Tuple[float], resampling=Resampling.bilinear) -> np.ndarray:
     affine_transform = from_bounds(*source_bounds, arr.shape[1], arr.shape[0])

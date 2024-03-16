@@ -21,6 +21,7 @@ from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
 from terrain_extraction.data_sources.netherlands_dtm05.data_source import NetherlandsDataSource
 from terrain_extraction.data_sources.bavaria_dgm1.data_source import BavariaDataSource
 from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
+from terrain_extraction.visualization_utils import shapely2folium
 
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
 data_sources = [HessenDataSource(), 
@@ -298,6 +299,7 @@ def process_osm_data(status_update_area):
             st.write('Doing postprocessing...')
             osm_processor.post_process()
             st.session_state['osm_output'] = osm_processor.get_output()
+            st.session_state['osm_geometries'] = osm_processor.get_geometries()
     status_update_area.empty()
     # osm_processor.write_to_file(args.output_file)
 
@@ -415,6 +417,15 @@ def map_view_tab():
         bbox_fg.add_child(line3)
         bbox_fg.add_child(line4)
         bbox_fg.add_child(line1_text)
+
+    if 'osm_geometries' in st.session_state:
+        osm_geometries = st.session_state['osm_geometries']
+        if osm_geometries is not None:
+            for key in osm_geometries:
+                for geom in osm_geometries[key]:
+                    folium_geom = shapely2folium(geom)
+                    if folium_geom is not None:
+                        bbox_fg.add_child(folium_geom)
 
 
     # folium.LayerControl().add_to(map)

@@ -6,11 +6,12 @@ from terrain_extraction.osm_utils.grid import get_all_grids
 import terrain_extraction.osm_utils.processing
 import geopandas
 import numpy as np
-from shapely import MultiPolygon, transform
+from shapely import MultiPolygon, transform, union_all
 from shapely.geometry import shape
 import streamlit as st
 import json
 import pandas
+from pyproj.crs import CRS
 
 class OSMProcessor:
     def __init__(self, profile: str, bbox: BoundingBox, path_to_config: str = "default_osm_config.json"):
@@ -102,6 +103,10 @@ class OSMProcessor:
         self.gdf = grid_gdf
         self.sub_square_grid_diagonal_gdf = diagonal_grid_gdf
         self.sub_square_grid_gdf = sub_square_grid_gdf
+
+        self.gdf = self.gdf.set_crs(epsg=bbox.crs_projected.to_epsg())
+        self.sub_square_grid_gdf = self.sub_square_grid_gdf.set_crs(epsg=bbox.crs_projected.to_epsg())
+        self.sub_square_grid_diagonal_gdf = self.sub_square_grid_diagonal_gdf.set_crs(epsg=bbox.crs_projected.to_epsg())
 
         grid_polygons = MultiPolygon(self.gdf.geometry.values)
         self.effective_bbox_polygon = grid_polygons.buffer(0)
@@ -363,15 +368,15 @@ class OSMProcessor:
         sub_df = self._get_sub_df((self.gdf.xidx == xmax) & (self.gdf.yidx == ymax))
         sub_df.x = xmax
         sub_df.y = ymax
-        self.df = pandas.concat((self.df, sub_df), ignore_index=True)
-        self.df = self.df.rename(columns={"xidx": "x", "yidx": "y"})
-        self.df = self.df.loc[
-            (self.df.x.between(self.idx_bbox[0], self.idx_bbox[2])) &
-            (self.df.y.between(self.idx_bbox[1], self.idx_bbox[3]))
+        out_df = pandas.concat((self.df, sub_df), ignore_index=True)
+        out_df = out_df.rename(columns={"xidx": "x", "yidx": "y"})
+        out_df = out_df.loc[
+            (out_df.x.between(self.idx_bbox[0], self.idx_bbox[2])) &
+            (out_df.y.between(self.idx_bbox[1], self.idx_bbox[3]))
         ]
-        self.df.x = self.df.x - self.idx_bbox[0]
-        self.df.y = self.df.y - self.idx_bbox[1]
-        self.df.to_csv(output_file_name)
+        out_df.x = out_df.x - self.idx_bbox[0]
+        out_df.y = out_df.y - self.idx_bbox[1]
+        out_df.to_csv(output_file_name)
 
     def get_output(self):
         xmax = self.idx_bbox[2]
@@ -379,14 +384,49 @@ class OSMProcessor:
         sub_df = self._get_sub_df((self.gdf.xidx == xmax) & (self.gdf.yidx == ymax))
         sub_df.x = xmax
         sub_df.y = ymax
-        self.df = pandas.concat((self.df, sub_df), ignore_index=True)
-        self.df = self.df.rename(columns={"xidx": "x", "yidx": "y"})
-        self.df = self.df.loc[
-            (self.df.x.between(self.idx_bbox[0], self.idx_bbox[2])) &
-            (self.df.y.between(self.idx_bbox[1], self.idx_bbox[3]))
+        out_df = pandas.concat((self.df, sub_df), ignore_index=True)
+        out_df = out_df.rename(columns={"xidx": "x", "yidx": "y"})
+        out_df = out_df.loc[
+            (out_df.x.between(self.idx_bbox[0], self.idx_bbox[2])) &
+            (out_df.y.between(self.idx_bbox[1], self.idx_bbox[3]))
         ]
-        self.df.x = self.df.x - self.idx_bbox[0]
-        self.df.y = self.df.y - self.idx_bbox[1]
+        out_df.x = out_df.x - self.idx_bbox[0]
+        out_df.y = out_df.y - self.idx_bbox[1]
 
-        return self.df
+        return out_df
+    
+    def get_geometries(self, crs: CRS = CRS.from_epsg(4326)):
+        gdf = self.gdf.to_crs(epsg=crs.to_epsg())
+
+        geometry_dict = {}
+        for name in self.df.name.unique():
+            if name in ['default_ground', 'default_foliage']:
+                continue
+            geometry_dict[name] = []
+            is_linear = False
+            is_building = False
+            for process in self.config[name]['process']:
+                if process in ['stream_tiles', 'road_tiles', 'fence_tiles']:
+                    is_linear = True
+                    break
+                elif process.endswith('outline'):
+                    is_building = True
+                    break
+            
+            if not is_building or is_linear:
+                df = self.df[self.df.name == name].merge(gdf, on=['xidx', 'yidx'])
+                if len(df) == 0:
+                    continue
+                geometry = union_all(df.geometry)
+                if geometry.geom_type == 'MultiPolygon':
+                    geometry_dict[name].extend(list(geometry.geoms))
+                elif geometry.geom_type == 'Polygon':
+                    geometry_dict[name].append(geometry)
+                
+        return geometry_dict
+
+
+
+
+
 
