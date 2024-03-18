@@ -23,6 +23,9 @@ from terrain_extraction.data_sources.bavaria_dgm1.data_source import BavariaData
 from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
 from terrain_extraction.visualization_utils import shapely2folium
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
 data_sources = [HessenDataSource(), 
                 NRWDataSource(), 
@@ -42,6 +45,26 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
 else:
     data_cache_path = 'data_cache'
     executable_path = '.'
+
+DEBUG_MODE = 'OSM_PROCESSOR'
+if DEBUG_MODE == 'OSM_PROCESSOR' and 'osm_output' not in st.session_state:
+    import pickle
+    with open(os.path.join('test_objects', 'osm_processor.pkl'), 'rb') as pkl_file:
+        osm_processor: OSMProcessor = pickle.load(pkl_file)
+        st.session_state['osm_output'] = osm_processor.get_output()
+        st.session_state['osm_geometries'] = osm_processor.get_geometries()
+        st.session_state['osm_config_file'] = 'default_osm_config.json'
+        with open(st.session_state['osm_config_file'], 'r') as config_file_handle:
+            st.session_state['osm_config'] = json.load(config_file_handle)
+
+        st.session_state['osm_profile_str'] = osm_processor.profile
+        bounding_box = osm_processor.bbox
+        st.session_state['bbox'] = bounding_box.get_coordinates(xy=False)
+        st.session_state['bbox_object'] = bounding_box
+        st.session_state['projected_bbox_object'] = bounding_box.get_box(bounding_box.crs_projected)
+        st.session_state['len_x'] = bounding_box.get_length_xaxis()
+        st.session_state['len_y'] = bounding_box.get_length_yaxis()
+        st.session_state['bbox_origin'] = 0
 
 def update_bounding_box(points):
     polygon = shapely.Polygon(points)
@@ -251,7 +274,8 @@ def draw_sidebar(status_update_area):
                 )
                 st.session_state['osm_config_file'] = config_file
                 st.session_state['osm_profile_str'] = profile_str
-
+                with open(config_file, 'r') as config_file_handle:
+                    st.session_state['osm_config'] = json.load(config_file_handle)
 
             with st.container(border=True):
                 with st.container(border=True):
@@ -421,12 +445,32 @@ def map_view_tab():
     if 'osm_geometries' in st.session_state:
         osm_geometries = st.session_state['osm_geometries']
         if osm_geometries is not None:
+            folium_geometries = {}
             for key in osm_geometries:
+                visualization_dict = None
+                priority = -999
+                if 'osm_config' in st.session_state and key in st.session_state['osm_config']:
+                    if 'visualization' in st.session_state['osm_config'][key]:
+                        visualization_dict = st.session_state['osm_config'][key]['visualization']
+                    if 'priority' in st.session_state['osm_config'][key]:
+                        priority = int(st.session_state['osm_config'][key]['priority'])
+                if priority not in folium_geometries:
+                    folium_geometries[priority] = []
                 for geom in osm_geometries[key]:
-                    folium_geom = shapely2folium(geom)
+                    folium_geom = shapely2folium(geom, visualization_dict, key)
                     if folium_geom is not None:
-                        bbox_fg.add_child(folium_geom)
+                        folium_geometries[priority].append(folium_geom)
+            
+            priorities = sorted(list(folium_geometries.keys()), key=lambda x: -x)
+            for priority in priorities:
+                for folium_geom in folium_geometries[priority]:
+                    bbox_fg.add_child(folium_geom)
 
+    # tags = []
+    # if st.session_state['map_mode'] == 'OpenStreetMap' and 'osm_config' in st.session_state:
+    #     tags = list(st.session_state['osm_config'].keys())
+    # if len(tags) > 0:
+    #     folium.plugins.TagFilterButton(tags[0:2]).add_to(map)
 
     # folium.LayerControl().add_to(map)
 

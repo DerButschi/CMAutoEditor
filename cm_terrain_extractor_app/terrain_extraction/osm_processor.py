@@ -6,15 +6,17 @@ from terrain_extraction.osm_utils.grid import get_all_grids
 import terrain_extraction.osm_utils.processing
 import geopandas
 import numpy as np
-from shapely import MultiPolygon, transform, union_all
+from shapely import MultiPolygon, Polygon, transform, union_all, affinity
 from shapely.geometry import shape
 import streamlit as st
 import json
 import pandas
 from pyproj.crs import CRS
+from profiles import get_building_tiles, get_building_cat2, process_to_building_type
 
 class OSMProcessor:
     def __init__(self, profile: str, bbox: BoundingBox, path_to_config: str = "default_osm_config.json"):
+        self.path_to_congih = path_to_config
         self.config = json.load(open(path_to_config, 'r'))
         self.profile = profile
         self.bbox = bbox
@@ -397,6 +399,8 @@ class OSMProcessor:
     
     def get_geometries(self, crs: CRS = CRS.from_epsg(4326)):
         gdf = self.gdf.to_crs(epsg=crs.to_epsg())
+        sgdf = self.sub_square_grid_gdf
+
 
         geometry_dict = {}
         for name in self.df.name.unique():
@@ -422,6 +426,42 @@ class OSMProcessor:
                     geometry_dict[name].extend(list(geometry.geoms))
                 elif geometry.geom_type == 'Polygon':
                     geometry_dict[name].append(geometry)
+            elif is_building:
+                process = [p for p in self.config[name]['process'] if p.endswith('outline')][0]
+                if process in process_to_building_type:
+                    building_type = process_to_building_type[process]
+                else:
+                    continue
+                try:
+                    building_tiles = get_building_tiles(building_type, 'cold_war')
+                    building_geometries = []
+                    for _, row in building_tiles.iterrows():
+                        p0 = np.array([0,0])
+                        if row['is_diagonal']:
+                            p1 = p0 + np.array([0.5, -0.5]) * 8 * row['width']
+                            p2 = p1 + np.array([0.5, 0.5]) * 8 * row['height']
+                            p3 = p2 + np.array([-0.5, 0.5]) * 8 * row['width']
+                        else:
+                            p1 = p0 + np.array([0.5, 0]) * 8 * row['width']
+                            p2 = p1 + np.array([0, 0.5]) * 8 * row['height']
+                            p3 = p2 + np.array([-0.5, 0]) * 8 * row['width']
+                        
+                        building_geometries.append(affinity.rotate(Polygon([p0, p1, p2, p3]), self.bbox.get_rotation_angle(), origin=(0,0)))
+                    building_tiles = building_tiles.assign(building_geometry=building_geometries)
+                    building_tiles = building_tiles.assign(cat2_x=[get_building_cat2(building_type, row['row'], row['col'], 'cold_war') for _, row in building_tiles.iterrows()])
+                    df = self.df[self.df.name == name].merge(sgdf, on=['xidx', 'yidx'])
+                    df = df.merge(building_tiles, on=['cat2_x'])
+                    df.geometry = df.geometry.apply(lambda x: x.centroid)
+                    df.geometry = df.apply(lambda x: affinity.translate(x.building_geometry, xoff=x.geometry.x, yoff=x.geometry.y), axis=1)
+                    df = geopandas.GeoDataFrame(df).set_crs(self.bbox.crs_projected).to_crs(epsg=crs.to_epsg())
+                    geometry = union_all(df.geometry)
+                    if geometry.geom_type == 'MultiPolygon':
+                        geometry_dict[name].extend(list(geometry.geoms))
+                    elif geometry.geom_type == 'Polygon':
+                        geometry_dict[name].append(geometry)
+                except:
+                    a = 1
+
                 
         return geometry_dict
 

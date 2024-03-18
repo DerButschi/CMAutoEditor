@@ -42,7 +42,7 @@ def permute_polygon_to_idx(polygon: Polygon, node_idx: int) -> Polygon:
     permutated_polygon_points = permute_list_to_idx(polygon_points, node_idx)
     return Polygon(permutated_polygon_points)
 
-def get_rectangle_rotation_angle(rectangle: Polygon, origin_point: Point):
+def get_rectangle_rotation_angle(rectangle: Polygon, origin_point: Point, degrees=True):
     # get rotation angle of x-axis, assumed to be defined by (x0, y0) -> (x1, y1)
     # since the last point in a polygon is always identical to the first point and np.argmin returns the first match,
     # there should always be min_idx + 1 within the array
@@ -52,7 +52,10 @@ def get_rectangle_rotation_angle(rectangle: Polygon, origin_point: Point):
     p0 = rectangle_points[0]
     p1 = rectangle_points[1]
 
-    return np.arctan2(p1.y - p0.y, p1.x - p0.x) * 180.0 / np.pi        
+    angle = np.arctan2(p1.y - p0.y, p1.x - p0.x)
+    if degrees:
+        angle = angle * 180.0 / np.pi   
+    return angle       
 
 
 
