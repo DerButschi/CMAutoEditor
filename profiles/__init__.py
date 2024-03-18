@@ -13,6 +13,12 @@ available_profiles = OrderedDict([
     ('Shock Force 2', 'shock_force_2')
 ])
 
+process_to_building_type = {
+    'type_from_residential_building_outline': 'residential_buildings',
+    'type_from_church_outline': 'churches',
+    'type_from_barn_outlines': 'barns'
+}
+
 def get_building_tiles(building_type, profile='cold_war'):
     if profile == 'cold_war':
         return cold_war.get_building_tiles(building_type)

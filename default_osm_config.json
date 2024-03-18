@@ -129,7 +129,10 @@
             "type_from_tag"
         ],
         "priority": 1,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "blue"
+        }
     },
 
     "river2": {
@@ -146,7 +149,10 @@
             "type_from_tag"
         ],
         "priority": 1,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "blue"
+        }
     },
 
     "stream": {
@@ -183,7 +189,10 @@
             "linear_name": "stream"
         },
         "priority": -1,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "brown"
+        }
     },
 
     "wetland": {
@@ -203,7 +212,10 @@
             "type_from_tag"
         ],
         "priority": 2,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#096b3b"
+        }
     },
 
     "garden": {
@@ -266,7 +278,11 @@
             "type_random_individual"
         ],
         "priority": -1,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#144006",
+            "opacity": 0.5
+        }
     },
 
     "broadleaved_forest": {
@@ -302,7 +318,11 @@
             "type_random_individual"
         ],
         "priority": -1,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#144006",
+            "opacity": 0.5
+        }
     },
 
     "needleleaved_forest": {
@@ -326,7 +346,12 @@
             "type_random_individual"
         ],
         "priority": -1,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#144006",
+            "opacity": 0.5
+        }
+
     },
 
 
@@ -343,7 +368,12 @@
             "type_random_individual"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#402c06",
+            "opacity": 0.5
+        }
+
     },
 
 
@@ -366,7 +396,10 @@
             "type_random_individual"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#293806"
+        }
     },
 
     "bushland_ground": {
@@ -405,7 +438,10 @@
             "is_core": true
         },
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "yellow"
+        }
     },
 
     "orchard": {
@@ -420,7 +456,11 @@
             "type_random_area"
         ],
         "priority": -1,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#144006",
+            "opacity": 0.5
+        }
     },
 
     "plant_nursery": {
@@ -435,7 +475,11 @@
             "type_random_individual"
         ],
         "priority": -1,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#144006",
+            "opacity": 0.5
+        }
     },
 
     "orchard_ground": {
@@ -450,7 +494,10 @@
             "type_from_tag"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#694c04"
+        }
     },
 
 
@@ -470,7 +517,10 @@
             "type_random_individual"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#3d7d0c"
+        }
     },
 
     "meadow": {
@@ -486,7 +536,10 @@
             "type_random_individual"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#12a612"
+        }
     },
 
     "construction_site": {
@@ -514,7 +567,10 @@
             "type_from_tag"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#b3561d"
+        }
     },
 
     "gravel_beach": {
@@ -531,7 +587,10 @@
             "type_from_tag"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#948c87"
+        }
     },
 
     "playground": {
@@ -545,7 +604,10 @@
             "type_from_tag"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#e0d253"
+        }
     },
 
     
@@ -560,7 +622,10 @@
             "type_from_tag"
         ],
         "priority": 0,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#6b6b6b"
+        }
     },
 
     "single_trees": {
@@ -766,7 +831,10 @@
             "type_from_residential_building_outline"
         ],
         "priority": 5,
-        "active": true
+        "active": true,
+        "visualization": {
+            "color": "#fc6060"
+        }
     },
 
     "churches": {
