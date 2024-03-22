@@ -5,6 +5,7 @@ from . import shock_force_2
 from . import black_sea
 import numpy as np
 from skimage.draw import polygon2mask
+from shapely import Polygon
 
 available_profiles = OrderedDict([
     ('Black Sea', 'black_sea'),
@@ -38,6 +39,40 @@ def get_building_cat2(building_type, row, col, profile='cold_war'):
         return shock_force_2.get_building_cat2(building_type, row, col)
     elif profile == 'black_sea':
         return black_sea.get_building_cat2(building_type, row, col)
+    
+def get_building_outline_by_df_entry(building_type, menu, cat1, cat2, direction, profile='cold_war'):
+    building_tiles = get_building_tiles(building_type, profile)
+    if profile == 'cold_war':
+        row, col = cold_war.get_rowcol_from_cat2(building_type, cat2)
+    elif profile == 'fortress_italy':
+        row, col = fortress_italy.get_rowcol_from_cat2(building_type, cat2)
+    elif profile == 'shock_force_2':
+        row, col = shock_force_2.get_rowcol_from_cat2(building_type, cat2)
+    elif profile == 'black_sea':
+        row, col = black_sea.get_rowcol_from_cat2(building_type, cat2)
+
+    dir_idx = int(direction.split(' ')[1]) - 1
+    tile = building_tiles[
+        (building_tiles.menu == menu) & 
+        (building_tiles.cat1 == cat1) & 
+        (building_tiles.direction == dir_idx) & 
+        (building_tiles.row == row) & 
+        (building_tiles.col == col)
+    ]
+    if len(tile) == 0:
+        return None
+    else:
+        tile = tile.iloc[0]
+    p0 = np.array([0,0])
+    if tile['is_diagonal']:
+        p1 = p0 + np.array([0.5, -0.5]) * 8 * tile['width']
+        p2 = p1 + np.array([0.5, 0.5]) * 8 * tile['height']
+        p3 = p2 + np.array([-0.5, 0.5]) * 8 * tile['width']
+    else:
+        p1 = p0 + np.array([0.5, 0]) * 8 * tile['width']
+        p2 = p1 + np.array([0, 0.5]) * 8 * tile['height']
+        p3 = p2 + np.array([-0.5, 0]) * 8 * tile['width']
+    return Polygon([p0, p1, p2, p3]), tile['is_diagonal']
 
 def get_building_tokens(building_type, profile='cold_war'):
     building_tiles = get_building_tiles(building_type, profile)

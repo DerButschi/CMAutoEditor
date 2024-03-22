@@ -1,4 +1,5 @@
 import pandas
+import numpy as np
 from .residential_buildings import residential_buildings
 from .churches import churches
 from .barns import barns
@@ -30,3 +31,16 @@ def get_building_cat2(building_type, row, col):
         return 'Barn {}'.format(row * 3 + col + 1)
     else:
         return 'Building {}'.format(row * 4 + col + 1)
+
+def _building_num_to_rowcol(num, ncols):
+    return np.divmod(num - 1, ncols)
+
+def get_rowcol_from_cat2(building_type, cat2):
+    building_num = int(cat2.split(' ')[1])
+    if building_type == 'churches':
+        return _building_num_to_rowcol(building_num, 3)
+    elif building_type == 'barns':
+        return _building_num_to_rowcol(building_num, 3)
+    else:
+        return _building_num_to_rowcol(building_num, 4)
+
