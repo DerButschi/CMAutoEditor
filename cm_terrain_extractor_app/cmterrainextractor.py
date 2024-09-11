@@ -46,10 +46,11 @@ else:
     data_cache_path = 'data_cache'
     executable_path = '.'
 
-DEBUG_MODE = 'OSM_PROCESSOR'
+# DEBUG_MODE = 'OSM_PROCESSOR'
+DEBUG_MODE = None
 if DEBUG_MODE == 'OSM_PROCESSOR' and 'osm_output' not in st.session_state:
     import pickle
-    with open(os.path.join('test_objects', 'osm_processor.pkl'), 'rb') as pkl_file:
+    with open(os.path.join('test_objects', 'osm_processor_20240322.pkl'), 'rb') as pkl_file:
         osm_processor: OSMProcessor = pickle.load(pkl_file)
         st.session_state['osm_output'] = osm_processor.get_output()
         st.session_state['osm_geometries'] = osm_processor.get_geometries()

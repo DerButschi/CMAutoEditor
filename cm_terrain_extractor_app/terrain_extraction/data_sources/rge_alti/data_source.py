@@ -86,19 +86,25 @@ class FranceDataSource(ASCDataSource, GeoTiffDataSource):
     def download_overlapping_data(self, missing_files: List[str], out_dir: str):
         for url in missing_files:
             file_name = url.split('/')[-1]
-            r_head = requests.head(url)
-            content_length = r_head.headers['content-length']
+            total_size = None
             r = requests.get(url, stream=True)
+            if 'content-length' in r.headers.keys():
+                total_size = float(r.headers['content-length'])
             os.makedirs(os.path.join(out_dir, self.data_folder), exist_ok=True)
             size_downloaded = 0
-            total_size = float(content_length)
             progressbar = st.progress(0, "Downloading missing file {}...".format(file_name))
             with open(os.path.join(os.path.join(out_dir, self.data_folder, file_name)), 'wb') as fd:
                 for chunk in r.iter_content(chunk_size=4096):
                     fd.write(chunk)
                     size_downloaded += 4096
-                    progress = min(int(size_downloaded / total_size * 100), 100)
-                    progressbar.progress(progress, text='Downloading missing file {}... {} of {} MB'.format(file_name, int(size_downloaded / 1024 / 1024), int(total_size / 1024 / 1024)))
+                    if total_size is not None:
+                        progress = min(int(size_downloaded / total_size * 100), 100)
+                        text = 'Downloading missing file {}... {} of {} MB'.format(file_name, int(size_downloaded / 1024 / 1024), int(total_size / 1024 / 1024))
+                    else:
+                        progress = int(size_downloaded / 1024 / 1024)
+                        text = 'Downloading missing file {}... {} MB'.format(file_name, int(size_downloaded / 1024 / 1024))
+
+                    progressbar.progress(progress, text=text)
 
     def get_data(self, bounding_box: BoundingBox, cache_dir: str):
         if self.cached_data is not None and self.cached_data_bounding_box.equals(bounding_box):

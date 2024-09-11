@@ -84,15 +84,19 @@ class HessenDataSource(GeoTiffDataSource):
     
     def download_overlapping_data(self, missing_files: List[str], out_dir: str):
         for dir_name, file_name in missing_files:
-            date_str = '{}{}{}'.format(datetime.now().year, str(datetime.now().month).zfill(2), str(datetime.now().day).zfill(2))
-            url = 'https://gds.hessen.de/downloadcenter/{}/3D-Daten/Digitales Geländemodell (DGM1)/{}/{} - DGM1.zip'.format(
-                date_str,
-                dir_name,
-                file_name 
-            )
-            r_head = requests.head(url)
-            content_length = r_head.headers['content-length']
-            r = requests.get(url, stream=True)
+            r = None
+            # hacky fix for weird day assignment on server
+            for day_offset in [0, 1, -1]:
+                date_str = '{}{}{}'.format(datetime.now().year, str(datetime.now().month).zfill(2), str(datetime.now().day + day_offset).zfill(2))
+                url = 'https://gds.hessen.de/downloadcenter/{}/3D-Daten/Digitales Geländemodell (DGM1)/{}/{} - DGM1.zip'.format(
+                    date_str,
+                    dir_name,
+                    file_name 
+                )
+                r = requests.get(url, stream=True)
+                if r.status_code == 200:
+                    break
+            content_length = r.headers['content-length']
             os.makedirs(os.path.join(out_dir, self.data_folder, dir_name), exist_ok=True)
             size_downloaded = 0
             total_size = float(content_length)

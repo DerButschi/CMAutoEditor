@@ -9,19 +9,19 @@ from shapely import Polygon, MultiPolygon, union_all
 
 def download_product_page():
     r = requests.get('https://geoservices.ign.fr/rgealti', stream=True)
-    with open(os.path.join('terrain_extraction', 'raw_data_indices', 'rgealti.html'), 'wb') as fd:
+    with open(os.path.join('cm_terrain_extractor_app', 'terrain_extraction', 'raw_data_indices', 'rgealti.html'), 'wb') as fd:
         for chunk in r.iter_content(chunk_size=4096):
             fd.write(chunk)
 
 def get_urls():
-    with open(os.path.join('terrain_extraction', 'raw_data_indices', 'rgealti.html')) as fp:
+    with open(os.path.join('cm_terrain_extractor_app', 'terrain_extraction', 'raw_data_indices', 'rgealti.html')) as fp:
         soup = BeautifulSoup(fp, 'html.parser')
         urls = [t.string for t in soup.find_all(href=re.compile('RGEALTI_2-0_5M'))]
 
     return urls
 
 def match_url_to_geometry(urls):
-    departements_gdf = geopandas.GeoDataFrame.from_file("terrain_extraction\\raw_data_indices\\departements.geojson")
+    departements_gdf = geopandas.GeoDataFrame.from_file("cm_terrain_extractor_app\\terrain_extraction\\raw_data_indices\\departements.geojson")
     gdf_dict = {
         'url': [],
         'geometry': []
@@ -67,7 +67,7 @@ if __name__ == '__main__':
     urls = get_urls()
     gdf = match_url_to_geometry(urls)
     gdf.set_crs(epsg=2154)
-    gdf.to_file(os.path.join("terrain_extraction\\data_sources\\rge_alti", 'rge_alti.geojson'), driver="GeoJSON")
+    gdf.to_file(os.path.join("cm_terrain_extractor_app\\terrain_extraction\\data_sources\\rge_alti", 'rge_alti.geojson'), driver="GeoJSON")
     print([coord for coord in union_all(gdf.geometry).envelope.exterior.coords])
 
     a = 1
