@@ -13,14 +13,14 @@ import gzip
 import shutil
 
 from rasterio.transform import xy as transform_xy
-from terrain_extraction.data_source_utils import XYZDataSource, check_gzip_file
+from terrain_extraction.data_source_utils import GeoTiffDataSource, check_gzip_file
 from terrain_extraction.bbox_utils import BoundingBox
 
 
-class NRWDataSource(XYZDataSource):
+class NRWDataSource(GeoTiffDataSource):
     def __init__(self):
         self.name = 'NRW DGM1'
-        self.data_type = 'xyz'
+        self.data_type = 'geotiff'
         self.model_type = 'DTM'
         self.resolution = '1 m'
         self.country = 'Germany/North Rhine-Westphalia'
@@ -50,9 +50,6 @@ class NRWDataSource(XYZDataSource):
             relative_location = os.path.join(self.data_folder, entry['url'].split('/')[-1])
             if not os.path.isfile(os.path.join(data_storage_folder, relative_location)):
                 missing_files.append(entry['url'])
-            else:
-                if not check_gzip_file(os.path.join(data_storage_folder, relative_location)):
-                    missing_files.append(entry['url'])
 
         return missing_files
 
@@ -60,7 +57,7 @@ class NRWDataSource(XYZDataSource):
         image_files = []
         for dir_path, dir_names, file_names in os.walk(os.path.join(outdir, self.data_folder)):
             for file_name in file_names:
-                if file_name.endswith('.gz'):
+                if file_name.endswith('.tif'):
                     x, y = file_name.split('_')[2:4]
                     x = float(x) * 1000
                     y = float(y) * 1000
@@ -69,12 +66,13 @@ class NRWDataSource(XYZDataSource):
                     ])
                     image_name = '.'.join(file_name.split('.')[:-1])
                     if image_bounds.intersects(bounding_box.get_box(self.crs)):
-                        image_files.append(os.path.join(dir_path, file_name.split('.')[0], image_name))
-                        if not os.path.isfile(os.path.join(dir_path, file_name.split('.')[0], image_name)):
-                            with gzip.open(os.path.join(dir_path, file_name), 'rb') as f_in:
-                                os.makedirs(os.path.join(dir_path, file_name.split('.')[0]), exist_ok=True)
-                                with open(os.path.join(dir_path, file_name.split('.')[0], image_name), 'wb') as f_out:
-                                    shutil.copyfileobj(f_in, f_out)
+                        image_files.append(os.path.join(dir_path, file_name))
+                        # image_files.append(os.path.join(dir_path, file_name.split('.')[0], image_name))
+                        # if not os.path.isfile(os.path.join(dir_path, file_name.split('.')[0], image_name)):
+                        #     with gzip.open(os.path.join(dir_path, file_name), 'rb') as f_in:
+                        #         os.makedirs(os.path.join(dir_path, file_name.split('.')[0]), exist_ok=True)
+                        #         with open(os.path.join(dir_path, file_name.split('.')[0], image_name), 'wb') as f_out:
+                        #             shutil.copyfileobj(f_in, f_out)
 
         return image_files
     
@@ -82,9 +80,9 @@ class NRWDataSource(XYZDataSource):
     def download_overlapping_data(self, missing_files: List[str], out_dir: str):
         for url in missing_files:
             file_name = url.split('/')[-1]
-            r_head = requests.head(url)
-            content_length = r_head.headers['content-length']
             r = requests.get(url, stream=True)
+            content_length = r.headers['content-length']
+            print('length: {}'.format(content_length))
             os.makedirs(os.path.join(out_dir, self.data_folder), exist_ok=True)
             size_downloaded = 0
             total_size = float(content_length)
@@ -103,16 +101,17 @@ class NRWDataSource(XYZDataSource):
             st.write("Checking data cache...")
             missing_files = self.get_missing_files(bounding_box, cache_dir)
             self.download_overlapping_data(missing_files, cache_dir)
-            st.write("Unpacking xyz-files intersecting with bounding box...")
-            data_files = self.get_images_in_bounding_box(bounding_box, cache_dir)
-            # st.write("Merging geotiffs...")
-            # self.merge_image_files(image_files, cache_dir)
-            st.write('Reading elevation data from xyz...')
-            df = self.get_merged_dataframe(bounding_box, data_files)
+            st.write("Unpacking geotiffs intersecting with bounding box...")
+            image_files = self.get_images_in_bounding_box(bounding_box, cache_dir)
+            st.write("Merging geotiffs...")
+            self.merge_image_files(image_files, cache_dir, bounding_box)
+            st.write('Reading elevation data from geotiff...')
+            df = self.get_merged_dataframe(bounding_box)
             self.cached_data = df
             self.cached_data_bounding_box = bounding_box
 
         st.write('Cutting out data in selected area...')
         df = self.cut_out_bounding_box(df, bounding_box)
+
 
         return df
