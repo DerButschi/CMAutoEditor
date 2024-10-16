@@ -261,10 +261,10 @@ def draw_sidebar(status_update_area):
                     options=['black_sea', 'cold_war', 'fortress_italy', 'shock_force_2'],
                     format_func=lambda x: title_dict[x]
                 )
-                config_files = [f for f in os.listdir(executable_path) if os.path.isfile(f) and f.endswith('.json')]
+                config_files = [f for f in os.listdir(executable_path) if os.path.isfile(os.path.join(executable_path, f)) and f.endswith('.json')]
                 default_config_files = {
                     'black_sea': 'default_osm_config_cmbs.json',
-                    'cold_war': 'default_osm_config.json',
+                    'cold_war': 'default_osm_config_cmcw.json',
                     'fortress_italy': 'default_osm_config_cmfi.json',
                     'shock_force_2': 'default_osm_config_cmsf2.json',
                 }
@@ -275,7 +275,7 @@ def draw_sidebar(status_update_area):
                 )
                 st.session_state['osm_config_file'] = config_file
                 st.session_state['osm_profile_str'] = profile_str
-                with open(config_file, 'r') as config_file_handle:
+                with open(os.path.join(executable_path, config_file), 'r') as config_file_handle:
                     st.session_state['osm_config'] = json.load(config_file_handle)
 
             with st.container(border=True):
