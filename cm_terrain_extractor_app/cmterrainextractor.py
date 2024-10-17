@@ -313,7 +313,7 @@ def draw_sidebar(status_update_area):
 def process_osm_data(status_update_area):
     osm_data = st.session_state['osm_data']
     osm_processor = OSMProcessor(
-        path_to_config=st.session_state['osm_config_file'], bbox=st.session_state['bbox_object'], profile=st.session_state['osm_profile_str'])
+        path_to_config=os.path.join(executable_path, st.session_state['osm_config_file']), bbox=st.session_state['bbox_object'], profile=st.session_state['osm_profile_str'])
 
     with status_update_area.container():
         with st.status('Processing OpenStreetMap data...'):
@@ -332,7 +332,7 @@ def process_osm_data(status_update_area):
 
 def get_osm_data(status_update_area):
     bounding_box: BoundingBox = st.session_state['bbox_object']
-    config = json.load(open(st.session_state['osm_config_file'],'r'))
+    config = json.load(open(os.path.join(executable_path, st.session_state['osm_config_file']),'r'))
     tag_dict = {}
     for key in config:
         for tag_entry in ['tags', 'exclude_tags', 'required_tags']:
