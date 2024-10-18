@@ -1052,16 +1052,16 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
 
     buildings = get_building_tiles(building_type, osm_processor.profile)
 
-    plt.figure()
-    plt.axis('equal')
+    # plt.figure()
+    # plt.axis('equal')
     ax = plt.gca()
     grid_collection = PolyCollection(grid_vertices, closed=False, edgecolor='k')
     occupancy_collection = PolyCollection(occupancy_vertices, closed=False, edgecolor='g', facecolor='g')
     ax.add_collection(grid_collection)
     ax.add_collection(occupancy_collection)
     for element_idx, outline_entry in raw_outlines.items():
-        plt.plot(*outline_entry[0].exterior.xy, '-m')
-        plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
+        # plt.plot(*outline_entry[0].exterior.xy, '-m')
+        # plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
         matched_tiles_candidates = []
 
         for is_diagonal, min_square_overlap in itertools.product([True, False], [0, 0.5, 1.0]):
@@ -1130,8 +1130,8 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
 
         matched_tiles = matched_tiles_candidates[0]
         
-        for g in matched_tiles[3].geometry:
-            plt.plot(*g.exterior.xy, '-k')
+        # for g in matched_tiles[3].geometry:
+        #     plt.plot(*g.exterior.xy, '-k')
         
         is_diagonal = matched_tiles[0]
 
@@ -1172,7 +1172,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
         for square in matched_tiles[4]:
             occupancy_entry = geopandas.GeoDataFrame({'geometry': [square], 'priority': [config[name]['priority']], 'name': name})
             osm_processor.occupancy_gdf = pandas.concat((osm_processor.occupancy_gdf, occupancy_entry), ignore_index=True)
-            plt.plot(*square.exterior.xy, '-r')
+            # plt.plot(*square.exterior.xy, '-r')
 
         if len(matched_buildings) == 0:
             logger.debug('No matching CM building was found for building {}.'.format(element_idx))
@@ -1197,7 +1197,7 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
             
             osm_processor._append_to_df(sub_df)
     
-    plt.savefig('debug/buildings_{}.svg'.format(name))
+    # plt.savefig('debug/buildings_{}.svg'.format(name))
 
 def _get_matched_squares(osm_processor, priority, geometry, diagonal, min_square_overlap=0):
     if diagonal:

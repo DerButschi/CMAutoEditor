@@ -199,8 +199,8 @@ def search_path(osm_processor, config, name, tqdm_string):
 
     edges_to_process = list(range(len(edge_list)))
     path_dict = {}
-    plt.figure()
-    plt.axis('equal')
+    # plt.figure()
+    # plt.axis('equal')
     # for g in grid_gdf.geometry.values:
     #     plt.plot(g.exterior.xy[0], g.exterior.xy[1], '-k', linewidth=0.1)
 
@@ -248,7 +248,7 @@ def search_path(osm_processor, config, name, tqdm_string):
 
         if path is None or len(path) == 0:
             logger.debug('No path found from {} to {}.'.format(edge[0], edge[1]))
-            plt.plot(ls.xy[0], ls.xy[1], '-ro')
+            # plt.plot(ls.xy[0], ls.xy[1], '-ro')
             continue
 
 
@@ -305,18 +305,18 @@ def search_path(osm_processor, config, name, tqdm_string):
             plt.plot(ls.xy[0], ls.xy[1], ':go')
             plt.plot(xy[0][0], xy[0][1], 'go')
             continue
-        plt.plot(ls.xy[0], ls.xy[1], ':ko')
-        plt.text(ls.interpolate(0.5, normalized=True).x, ls.interpolate(0.5, normalized=True).y, str(edge_idx))
+        # plt.plot(ls.xy[0], ls.xy[1], ':ko')
+        # plt.text(ls.interpolate(0.5, normalized=True).x, ls.interpolate(0.5, normalized=True).y, str(edge_idx))
         # square_geom = [grid_gdf[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1])].geometry.values[0] for p in path]
         ls_xy = LineString(xy)
-        plt.plot([xy[i][0] for i in range(len(xy))], [xy[i][1] for i in range(len(xy))], '-b')
-        plt.plot(xy[0][0], xy[0][1], 'bo')
-        plt.plot(xy[-1][0], xy[-1][1], 'bD')
-        plt.text(ls_xy.interpolate(0.5, normalized=True).x, ls_xy.interpolate(0.5, normalized=True).y, str(edge_idx), color='b')
+        # plt.plot([xy[i][0] for i in range(len(xy))], [xy[i][1] for i in range(len(xy))], '-b')
+        # plt.plot(xy[0][0], xy[0][1], 'bo')
+        # plt.plot(xy[-1][0], xy[-1][1], 'bD')
+        # plt.text(ls_xy.interpolate(0.5, normalized=True).x, ls_xy.interpolate(0.5, normalized=True).y, str(edge_idx), color='b')
 
         path_dict[edge_idx] = [path, edge_data['element_idx']]
 
-    plt.savefig('debug/path_search_{}.svg'.format(name))
+    # plt.savefig('debug/path_search_{}.svg'.format(name))
 
     # create square graph from paths
     for edge_idx in path_dict.keys():
