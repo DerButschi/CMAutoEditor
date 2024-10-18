@@ -93,7 +93,7 @@ class OSMProcessor:
         p0, p1, p2 = bbox.get_reference_points(bbox.crs_projected)
 
         n_bins_x = np.floor((p0.distance(p1)) / 8).astype(int)
-        n_bins_y = np.floor((p1.distance(p2)) / 8).astype(int)
+        n_bins_y = np.floor((p0.distance(p2)) / 8).astype(int)
 
         xmin, ymin = p0.x, p0.y
         xmax = xmin + n_bins_x * 8
