@@ -351,9 +351,19 @@ def get_osm_data(status_update_area):
     st.session_state['osm_data'] = geojson.loads(osm_data.to_json())
 
 def map_view_tab():
-    st.header('Extraction of Elevation Data')
+    if st.session_state['map_mode'] == 'Bounding Box Selection':
+        header = 'Bounding Box Selection'
+        sub_header = 'Select the outline of the Combat Mission map by drawing a rectangle or polygon.'
+    elif st.session_state['map_mode'] == 'Elevations':
+        header = 'Extraction of Elevation Data'
+        sub_header = 'Check which data sources are available for your selected outline and extract the data.'
+    else:
+        header = 'Extraction of OpenStreetMap Data'
+        sub_header = 'Extract map content from OpenStreetMap for your selected outline.'
+
+    st.header(header)
     st.markdown(
-        "Select an area for which to extract elevation data."
+        sub_header
     )
 
     START_LOCATION = [0,0]
@@ -509,7 +519,7 @@ def map_view_tab():
         else:
             update_bbox_from_df()
 
-    st.write(st_data)
+    # st.write(st_data)
 
 def options_tab():
     st.markdown(
