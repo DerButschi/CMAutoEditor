@@ -21,6 +21,7 @@ from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
 from terrain_extraction.data_sources.netherlands_dtm05.data_source import NetherlandsDataSource
 from terrain_extraction.data_sources.bavaria_dgm1.data_source import BavariaDataSource
 from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
+from terrain_extraction.data_sources.lower_saxony_dgm1.data_source import LowerSaxonyDataSource
 from terrain_extraction.visualization_utils import shapely2folium
 
 import warnings
@@ -33,7 +34,9 @@ data_sources = [HessenDataSource(),
                 NetherlandsDataSource(), 
                 BavariaDataSource(), 
                 ThuringiaDataSource(),
-                AW3D30DataSource()]
+                AW3D30DataSource(),
+                LowerSaxonyDataSource(),
+                ]
 
 st.session_state['selectable_data_sources'] = [ds for ds in data_sources]
 

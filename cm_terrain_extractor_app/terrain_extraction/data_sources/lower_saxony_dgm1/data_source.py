@@ -1,38 +1,30 @@
-import json
-from geopandas import GeoDataFrame
 from shapely import MultiPolygon, Polygon, union_all
 import streamlit as st
 from typing import List
 import os
 import requests
-from datetime import datetime
-import matplotlib.pyplot as plt
 from pyproj.crs import CRS
 import pandas
-import gzip
-import shutil
 
-from rasterio.transform import xy as transform_xy
-from terrain_extraction.data_source_utils import GeoTiffDataSource, check_gzip_file
+from terrain_extraction.data_source_utils import GeoTiffDataSource
 from terrain_extraction.bbox_utils import BoundingBox
 
-
-class NRWDataSource(GeoTiffDataSource):
+class LowerSaxonyDataSource(GeoTiffDataSource):
     def __init__(self):
-        self.name = 'NRW DGM1'
+        self.name = 'Lower Saxony DGM1'
         self.data_type = 'geotiff'
         self.model_type = 'DTM'
         self.resolution = '1 m'
-        self.country = 'Germany/North Rhine-Westphalia'
+        self.country = 'Germany/Lower Saxony'
         self.crs = CRS.from_epsg(25832)
         self.gdf = None
         self.outline: MultiPolygon = None
-        self.data_folder = 'nrw_dgm1'
+        self.data_folder = 'lower_saxony_dgm1'
         self.current_merged_image_path = None,
         self.cached_data: pandas.DataFrame = None
         self.cached_data_bounding_box: BoundingBox = None
-        self.envelope = Polygon([(279999.5, 5575999.5), (531999.5, 5575999.5), (531999.5, 5821999.5), (279999.5, 5821999.5), (279999.5, 5575999.5)])
-        self.gdf_geojson_path = os.path.join('cm_terrain_extractor_app','terrain_extraction', 'data_sources', 'nrw_dgm1', 'nrw_dgm1.geojson')
+        self.envelope = Polygon([(341000.0, 5682000.0), (675000.0, 5682000.0), (675000.0, 5972000.0), (341000.0, 5972000.0), (341000.0, 5682000.0)])
+        self.gdf_geojson_path = os.path.join('cm_terrain_extractor_app','terrain_extraction', 'data_sources', 'lower_saxony_dgm1', 'lower_saxony_dgm1.geojson')
         self.data_delimiter = r"\s+"
 
     def get_outline(self):
@@ -64,15 +56,8 @@ class NRWDataSource(GeoTiffDataSource):
                     image_bounds = Polygon([
                         (x - 0.5, y - 0.5), (x + 1000 - 0.5, y - 0.5), (x + 1000 - 0.5, y + 1000 - 0.5), (x - 0.5, y + 1000 - 0.5)
                     ])
-                    image_name = '.'.join(file_name.split('.')[:-1])
                     if image_bounds.intersects(bounding_box.get_box(self.crs)):
                         image_files.append(os.path.join(dir_path, file_name))
-                        # image_files.append(os.path.join(dir_path, file_name.split('.')[0], image_name))
-                        # if not os.path.isfile(os.path.join(dir_path, file_name.split('.')[0], image_name)):
-                        #     with gzip.open(os.path.join(dir_path, file_name), 'rb') as f_in:
-                        #         os.makedirs(os.path.join(dir_path, file_name.split('.')[0]), exist_ok=True)
-                        #         with open(os.path.join(dir_path, file_name.split('.')[0], image_name), 'wb') as f_out:
-                        #             shutil.copyfileobj(f_in, f_out)
 
         return image_files
     

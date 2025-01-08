@@ -419,7 +419,7 @@ class OSMProcessor:
                     break
             
             if not (is_building or is_linear):
-                df = self.df[self.df.name == name].merge(gdf, on=['xidx', 'yidx'])
+                df = self.df[self.df.name == name].merge(gdf.loc[:, ['xidx', 'yidx', 'geometry']], on=['xidx', 'yidx'])
                 if len(df) == 0:
                     continue
                 geometry = union_all(df.geometry)
