@@ -55,7 +55,8 @@ def rotate_height_map(height_map: np.ndarray,
                       size_y: float,
                       res_x: float,
                       res_y: float) -> np.ndarray:
-    height_map = skimage.transform.rotate(height_map, -rotation_angle, resize=True, cval=-1, preserve_range=True, clip=True, center=center)
+
+    height_map = skimage.transform.rotate(height_map, -rotation_angle, resize=True, mode='edge', preserve_range=True, clip=True, center=center)
 
     # center must be recalculated because img is resized!
     center_rotated = (height_map.shape[0] / 2 - 0.5, height_map.shape[1] / 2 - 0.5)
@@ -204,7 +205,8 @@ class DataSource(ABC):
         size_x = p0.distance(p1)
         size_y = p1.distance(p2)
 
-        height_map = rotate_height_map(height_map, rotation_angle, center, size_x, size_y, 1.0, 1.0)
+        height_map = rotate_height_map(height_map, rotation_angle, None, size_x, size_y, 1.0, 1.0)
+
         height_map_reduced = rescale_height_map(height_map)
 
         height_map_df = ndarray2dataframe(height_map_reduced)
