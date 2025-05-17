@@ -10,9 +10,11 @@ import shapely
 import sys
 import osmnx
 import geojson
+import io
 
 from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
 from terrain_extraction.bbox_utils import BoundingBox
+from terrain_extraction.data_source_utils import dataframe2ndarray
 from terrain_extraction.osm_utils.io import read_file, read_file_object, get_bounding_box, get_bounding_box_from_file_object
 from terrain_extraction.osm_processor import OSMProcessor
 from terrain_extraction.data_sources.hessen_dgm1.data_source import HessenDataSource
@@ -50,7 +52,7 @@ else:
     executable_path = '.'
 
 # DEBUG_MODE = 'OSM_PROCESSOR'
-DEBUG_MODE = None
+DEBUG_MODE = 'PRESET_BOUNDING_BOX'
 if DEBUG_MODE == 'OSM_PROCESSOR' and 'osm_output' not in st.session_state:
     import pickle
     with open(os.path.join('test_objects', 'osm_processor_20240322.pkl'), 'rb') as pkl_file:
@@ -69,6 +71,22 @@ if DEBUG_MODE == 'OSM_PROCESSOR' and 'osm_output' not in st.session_state:
         st.session_state['len_x'] = bounding_box.get_length_xaxis()
         st.session_state['len_y'] = bounding_box.get_length_yaxis()
         st.session_state['bbox_origin'] = 0
+elif DEBUG_MODE == 'PRESET_BOUNDING_BOX':
+    from shapely import Polygon
+    from pyproj import CRS
+    # bounding_box = BoundingBox(Polygon([[6.282861, 50.769203], [6.332458, 50.768958], [6.283221, 50.796127], [6.332729, 50.795871]]), CRS.from_epsg(4326))
+    # bounding_box = BoundingBox(Polygon([[6.338900, 50.674261], [6.338900, 50.696929], [6.395622, 50.696929], [6.395622, 50.674261]]), CRS.from_epsg(4326))
+    bounding_box = BoundingBox(Polygon([[7.117368801891561, 50.61290765446361], [7.680817, 50.794477999999984], [7.470654265842595, 51.05774603550387], [6.904907, 50.875138]]), CRS.from_epsg(4326))
+
+    st.session_state['bbox'] = bounding_box.get_coordinates(xy=False)
+    st.session_state['bbox_object'] = bounding_box
+    st.session_state['projected_bbox_object'] = bounding_box.get_box(bounding_box.crs_projected)
+    st.session_state['len_x'] = bounding_box.get_length_xaxis()
+    st.session_state['len_y'] = bounding_box.get_length_yaxis()
+    st.session_state['bbox_origin'] = 0
+
+FLAVOUR = 'SG'
+
 
 def update_bounding_box(points):
     polygon = shapely.Polygon(points)
@@ -110,6 +128,14 @@ def get_data_source_label(data_source):
 def dataframe2csv(df: pandas.DataFrame):
     return df.to_csv().encode('utf-8')
 
+@st.cache_data
+def dataframe2raw(df: pandas.DataFrame):
+    imarray = dataframe2ndarray(df)
+
+    imarray = imarray.astype('float16')
+    imarray = (imarray - imarray.min()) / (imarray.max() - imarray.min())
+    return imarray.tobytes(order="C")
+
 def extract_data_in_bbox(status_update_area):
     with status_update_area.container():
         data_source = st.session_state['selected_data_source']
@@ -121,7 +147,10 @@ def extract_data_in_bbox(status_update_area):
 
         os.makedirs(data_cache_path, exist_ok=True)
         with st.status('Extracting elevation data', expanded=True) as status:
-            elevation_data = data_source.get_data(bounding_box, data_cache_path)
+            if FLAVOUR == 'SG':
+                elevation_data = data_source.get_data(bounding_box, data_cache_path, calculation_resolution=(30.0, 30.0), output_resolution=(30.0, 30.0))
+            else:
+                elevation_data = data_source.get_data(bounding_box, data_cache_path)
             st.session_state['elevation_in_bbox'] = elevation_data
             path_to_png = data_source.get_png(bounding_box, data_cache_path)
             status.update(label="Elevation data extracted!", state="complete", expanded=False)
@@ -144,9 +173,15 @@ def update_bbox_from_df():
         update_bounding_box(list(zip(df.x.values, df.y.values)))
 
 def draw_sidebar(status_update_area):
-    max_len_x_axis = 4160 # m
-    max_len_y_axis = 4160 # m
-    max_area = 18000000 # km2
+    if FLAVOUR == 'CM':
+        max_len_x_axis = 4160 # m
+        max_len_y_axis = 4160 # m
+        max_area = 18000000 # km2
+    elif FLAVOUR == 'SG':
+        max_len_x_axis = np.inf
+        max_len_y_axis = np.inf
+        max_area = np.inf
+
     len_x_axis = None
     len_y_axis = None
     delta_len_x = None
@@ -245,12 +280,20 @@ def draw_sidebar(status_update_area):
                 st.button('Extract elevation data', disabled=selected_data_source is None, on_click=extract_data_in_bbox, args=[status_update_area])
 
             with st.container(border=True):
-                st.download_button(
-                    'Download elevation .csv-file', 
-                    dataframe2csv(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
-                    file_name='elevation_data.csv',
-                    disabled=not ('elevation_in_bbox' in st.session_state)
-                )
+                if FLAVOUR == 'SG':
+                    st.download_button(
+                        'Download heightmap raw image', 
+                        dataframe2raw(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
+                        file_name='elevation_data.raw',
+                        disabled=not ('elevation_in_bbox' in st.session_state)
+                    )
+                else:
+                    st.download_button(
+                        'Download elevation .csv-file', 
+                        dataframe2csv(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
+                        file_name='elevation_data.csv',
+                        disabled=not ('elevation_in_bbox' in st.session_state)
+                    )
         if st.session_state['map_mode'] == 'OpenStreetMap':
             title_dict = {
                 'black_sea': 'Black Sea',

@@ -1,7 +1,7 @@
 from geopandas import GeoDataFrame
 from shapely import MultiPolygon, union_all, Polygon
 import streamlit as st
-from typing import List
+from typing import List, Tuple
 import os
 import zipfile
 from pyproj.crs import CRS
@@ -108,7 +108,7 @@ class AW3D30DataSource(GeoTiffDataSource):
             ftp.cwd('..')
         ftp.close()
 
-    def get_data(self, bounding_box: BoundingBox, cache_dir: str):
+    def get_data(self, bounding_box: BoundingBox, cache_dir: str, calculation_resolution: Tuple = (1.0, 1.0), output_resolution: Tuple = (8.0, 8.0)):
         if self.cached_data is not None and self.cached_data_bounding_box.equals(bounding_box):
             df = self.cached_data
         else:
@@ -120,11 +120,11 @@ class AW3D30DataSource(GeoTiffDataSource):
             st.write("Merging geotiffs...")
             self.merge_image_files(image_files, cache_dir, bounding_box)
             st.write('Reading elevation data from geotiff...')
-            df = self.get_merged_dataframe(bounding_box)
+            df = self.get_merged_dataframe(bounding_box, calculation_resolution)
             self.cached_data = df
             self.cached_data_bounding_box = bounding_box
 
         st.write('Cutting out data in selected area...')
-        df = self.cut_out_bounding_box(df, bounding_box)
+        df = self.cut_out_bounding_box(df, bounding_box, calculation_resolution, output_resolution)
 
         return df

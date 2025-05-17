@@ -24,14 +24,17 @@ def clip_dataframe_to_bounding_box(df: pandas.DataFrame, bounds: Tuple[float]) -
     df_clip = df[df.x.between(xmin_request, xmax_request, inclusive='left') & df.y.between(ymin_request, ymax_request, inclusive='left')]    
     return df_clip
 
-def dataframe2ndarray(df: pandas.DataFrame, origin_bottom: bool = True) -> np.ndarray:
+def dataframe2ndarray(df: pandas.DataFrame, origin_bottom: bool = True, resolution: Tuple = (1.0, 1.0)) -> np.ndarray:
     x_offset = df.x.min()
     y_offset = df.y.min()
 
-    arr = np.zeros((int(df.x.max() - x_offset) + 1, int(df.y.max() - y_offset) + 1))
+    arr_shape0 = int((df.x.max() - x_offset) / resolution[0]) + 1
+    arr_shape1 = int((df.y.max() - y_offset) / resolution[1]) + 1
 
-    x = np.array(df.x.values - x_offset, dtype=int)
-    y = np.array(df.y.values - y_offset, dtype=int)
+    arr = np.zeros((arr_shape0, arr_shape1))
+
+    x = np.array((df.x.values - x_offset) / resolution[0], dtype=int)
+    y = np.array((df.y.values - y_offset) / resolution[1], dtype=int)
     z = df.z.values
 
     arr[x, y] = z
@@ -44,9 +47,16 @@ def dataframe2ndarray(df: pandas.DataFrame, origin_bottom: bool = True) -> np.nd
 def get_map_center(df: pandas.DataFrame) -> Tuple[float]:
     return (np.round((df.x.max()) / 2).astype(int), np.round(df.y.max() / 2).astype(int))
 
-def rescale_height_map(height_map: np.ndarray) -> np.ndarray:
+def rescale_height_map(height_map: np.ndarray, calculation_resolution: Tuple = (1.0, 1.0), output_resolution: Tuple = (8.0, 8.0)) -> np.ndarray:
     # NOTE: assuming height map has 1m resolution!
-    return skimage.transform.rescale(height_map, (1.0 / 8, 1.0 / 8), cval=1, preserve_range=True, clip=True, anti_aliasing=True)
+    return skimage.transform.rescale(
+        height_map, 
+        (calculation_resolution[0] / output_resolution[0], calculation_resolution[1] / output_resolution[1]), 
+        cval=1, 
+        preserve_range=True, 
+        clip=True, 
+        anti_aliasing=True
+    )
 
 def rotate_height_map(height_map: np.ndarray, 
                       rotation_angle: float, 
@@ -54,7 +64,10 @@ def rotate_height_map(height_map: np.ndarray,
                       size_x: float,
                       size_y: float,
                       res_x: float,
-                      res_y: float) -> np.ndarray:
+                      res_y: float,
+                      out_res_x: float = 8.0,
+                      out_res_y: float = 8.0
+                     ) -> np.ndarray:
 
     height_map = skimage.transform.rotate(height_map, -rotation_angle, resize=True, mode='edge', preserve_range=True, clip=True, center=center)
 
@@ -66,8 +79,8 @@ def rotate_height_map(height_map: np.ndarray,
     lower_left = (np.round(lower_left[0]).astype(int), np.round(lower_left[1]).astype(int))
 
     upper_right = (
-        lower_left[0] + min(int((height_map.shape[0]-1 - lower_left[0]) / 8) * 8, int(size_x / 8) * 8),
-        lower_left[1] + min(int((height_map.shape[1]-1 - lower_left[1]) / 8) * 8, int(size_y / 8) * 8)
+        int(lower_left[0] + min(int((height_map.shape[0]-1 - lower_left[0]) / out_res_x) * out_res_x, int(size_x / res_x / out_res_x) * out_res_x)),
+        int(lower_left[1] + min(int((height_map.shape[1]-1 - lower_left[1]) / out_res_y) * out_res_y, int(size_y / res_y / out_res_y) * out_res_y))
     )
 
     height_map = height_map[lower_left[0]:upper_right[0], lower_left[1]:upper_right[1]]
@@ -173,7 +186,7 @@ class DataSource(ABC):
         super().__init__()
 
     @abstractmethod
-    def get_data(self, bounding_box: BoundingBox, cache_dir: str) -> pandas.DataFrame:
+    def get_data(self, bounding_box: BoundingBox, cache_dir: str, output_resolution: Tuple = (1.0, 1.0)) -> pandas.DataFrame:
         pass
 
     @abstractmethod
@@ -193,23 +206,30 @@ class DataSource(ABC):
         gdf = self.get_gdf()
         return gdf.sindex.query(bounding_box.get_box(self.crs), predicate='intersects').any()
 
-    def cut_out_bounding_box(self, df: pandas.DataFrame, bounding_box: BoundingBox):
+    def cut_out_bounding_box(
+            self, 
+            df: pandas.DataFrame, 
+            bounding_box: BoundingBox, 
+            calculation_resoultion: Tuple = (1.0, 1.0), 
+            output_resolution: Tuple = (8.0, 8.0)
+        ):
         box = bounding_box.get_box(bounding_box.crs_projected)
         p0, p1, p2, _ = get_polygon_node_points(box)
         df = clip_dataframe_to_bounding_box(df, box.bounds)
         rotation_angle = get_rectangle_rotation_angle(box, p0)
-        height_map = dataframe2ndarray(df)
+        height_map = dataframe2ndarray(df, resolution=calculation_resoultion)
 
         center = get_map_center(df)
 
         size_x = p0.distance(p1)
         size_y = p1.distance(p2)
 
-        height_map = rotate_height_map(height_map, rotation_angle, None, size_x, size_y, 1.0, 1.0)
+        height_map = rotate_height_map(height_map, rotation_angle, None, size_x, size_y, calculation_resoultion[0], calculation_resoultion[1], output_resolution[0], output_resolution[1])
 
-        height_map_reduced = rescale_height_map(height_map)
+        if calculation_resoultion != output_resolution:
+            height_map = rescale_height_map(height_map)
 
-        height_map_df = ndarray2dataframe(height_map_reduced)
+        height_map_df = ndarray2dataframe(height_map)
 
         return height_map_df
     
@@ -236,7 +256,7 @@ class GeoTiffDataSource(DataSource):
 
             
         
-    def get_merged_dataframe(self, bounding_box: BoundingBox) -> pandas.DataFrame:
+    def get_merged_dataframe(self, bounding_box: BoundingBox, calculation_resolution: Tuple = (1.0, 1.0)) -> pandas.DataFrame:
         with rasterio_open(self.current_merged_image_path) as src:
             data = src.read(1)
 
@@ -250,7 +270,7 @@ class GeoTiffDataSource(DataSource):
                 src.bounds,
                 self.crs,
                 bounding_box.crs_projected,
-                (1.0, 1.0),
+                calculation_resolution,
             )
             upper_left = transform_point(Point(*src.xy(0,0)), self.crs.to_epsg(), bounding_box.crs_projected.to_epsg())
             lower_right = transform_point(Point(*src.xy(data.shape[0] - 1, data.shape[1] - 1)), self.crs.to_epsg(), bounding_box.crs_projected.to_epsg())
