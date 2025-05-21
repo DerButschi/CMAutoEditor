@@ -1,10 +1,15 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 from shapely import Polygon, Point
+from shapely.affinity import rotate
 import pandas
+from affine import Affine
 from rasterio.enums import Resampling
 from rasterio import open as rasterio_open
+from rasterio.warp import calculate_default_transform, reproject
+from rasterio.io import MemoryFile
 from rasterio.fill import fillnodata
+from rasterio import band
 import numpy as np
 from rasterio.merge import merge
 import os
@@ -15,9 +20,11 @@ import matplotlib as mpl
 import geopandas
 import zipfile
 import gzip
+import math
 
-from terrain_extraction.projection_utils import reproject_array, transform_point
+from terrain_extraction.projection_utils import reproject_array, transform_point, reproject_geotiff
 from terrain_extraction.bbox_utils import get_rectangle_rotation_angle, get_polygon_node_points, BoundingBox
+from terrain_extraction.data_container import ElevationDataContainer
 
 def clip_dataframe_to_bounding_box(df: pandas.DataFrame, bounds: Tuple[float]) -> pandas.DataFrame:
     xmin_request, ymin_request, xmax_request, ymax_request = bounds
@@ -87,7 +94,7 @@ def rotate_height_map(height_map: np.ndarray,
 
     return height_map
 
-def ndarray2dataframe(arr: np.ndarray, x_offset: float = 0, y_offset: float = 0, origin_bottom: bool = True) -> pandas.DataFrame:
+def ndarray2dataframe(arr: np.ndarray, x_offset: float = 0, y_offset: float = 0, origin_bottom: bool = True, resolution: Tuple[float] = (1.0, 1.0)) -> pandas.DataFrame:
     x_arr = []
     y_arr = []
     z_arr = []
@@ -97,8 +104,8 @@ def ndarray2dataframe(arr: np.ndarray, x_offset: float = 0, y_offset: float = 0,
         arr_tmp = arr
     for xx in range(arr_tmp.shape[0]):
         for yy in range(arr_tmp.shape[1]):
-            x_arr.append(xx)
-            y_arr.append(yy)
+            x_arr.append(xx * resolution[0])
+            y_arr.append(yy * resolution[1])
             z_arr.append(arr_tmp[xx, yy])
 
     df = pandas.DataFrame({'x': x_arr, 'y': y_arr, 'z': z_arr})
@@ -154,6 +161,58 @@ def reproject_dataframe(df: pandas.DataFrame, source_crs: CRS, target_crs: CRS, 
     )
     reprojected_df = ndarray2dataframe(reprojected_df_arr, x_offset=offset_point.x, y_offset=offset_point.y, origin_bottom=False)
     return reprojected_df
+
+def ndarray2dataframe_transform(
+        arr: np.ndarray,
+        transform: Affine,
+        nodata: float = None
+    ) -> pandas.DataFrame:
+    """
+    Convert a 2D array into a DataFrame with x, y, z columns.
+    
+    Parameters
+    ----------
+    arr : np.ndarray
+        2D array of shape (rows, cols), e.g. your extracted window.
+    transform : Affine
+        The Affine mapping pixel (col, row) → map (x, y).
+    nodata : float, optional
+        Value to ignore/drop (e.g. np.nan or src.nodata). If None, all cells are included.
+    
+    Returns
+    -------
+    df : pd.DataFrame
+        Columns: x (Easting), y (Northing), z (pixel value).
+    """
+    # 1. Build the grid of column and row indices
+    n_rows, n_cols = arr.shape
+    cols = np.arange(n_cols)
+    rows = np.arange(n_rows)
+    col_idxs, row_idxs = np.meshgrid(cols, rows)
+    
+    # 2. Convert pixel‐indices to map coords
+    #    x = A * col + B * row + C
+    #    y = D * col + E * row + F
+    xs, ys = transform * (col_idxs, row_idxs)  # vectorized Affine
+    
+    # 3. Flatten everything
+    xs_flat = xs.ravel()
+    ys_flat = ys.ravel()
+    zs_flat = arr.ravel()
+    
+    # 4. Build DataFrame
+    df = pandas.DataFrame({
+        'x': xs_flat,
+        'y': ys_flat,
+        'z': zs_flat
+    })
+    
+    # 5. Optionally drop nodata
+    if nodata is not None:
+        df = df[df['z'] != nodata].reset_index(drop=True)
+    
+    return df
+
 
 def check_zip_file(file_path):
     try:
@@ -237,9 +296,9 @@ class DataSource(ABC):
         if self.cached_data is None or not self.cached_data_bounding_box.equals(bounding_box):
             self.get_data(bounding_box, cache_dir)
 
-        df = self.cached_data
+        elevation_data = self.cached_data
         file_path = os.path.join(cache_dir, 'current_height_map.png')
-        dataframe_in_bbox_to_png(df, self.cached_data_bounding_box, file_path)
+        elevation_data.to_png(file_path, bounding_box.crs_orig)
 
         return file_path
 
@@ -254,7 +313,193 @@ class GeoTiffDataSource(DataSource):
         bounds = bounding_box.get_buffer(self.crs).bounds
         merge(image_files, dst_path=self.current_merged_image_path, bounds=bounds, resampling=Resampling.bilinear)
 
-            
+    def get_merged_elevation_data_in_bounding_box(
+        self,
+        bounding_box: BoundingBox,                       # Shapely Polygon in EPSG:32632
+        target_res: Tuple[float] = (10.0,10.0) # (Δx, Δy) in metres
+    ) -> ElevationDataContainer:
+        
+        return ElevationDataContainer.from_geotiff(self.current_merged_image_path, bounding_box, target_res)
+
+    def reproject_rotate_and_crop_merged_image(self, bounding_box: BoundingBox, output_resolution: Tuple = (1.0, 1.0), resampling=Resampling.bilinear):
+        with rasterio_open(self.current_merged_image_path) as src:
+            dst_crs = bounding_box.crs_projected
+            transform, width, height = calculate_default_transform(
+                src.crs, dst_crs, src.width, src.height, *src.bounds)
+            kwargs = src.meta.copy()
+            kwargs.update({
+                'crs': dst_crs,
+                'transform': transform,
+                'width': width,
+                'height': height
+            })
+
+            with MemoryFile() as memfile:
+                with memfile.open(**kwargs) as utm_raster:
+                    reproject(
+                        source=band(src, 1),
+                        destination=band(utm_raster, 1),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=transform,
+                        dst_crs=dst_crs,
+                        resampling=Resampling.bilinear
+                    )
+
+        box = bounding_box.get_box(bounding_box.crs_projected)
+        p0, p1, p2, _ = get_polygon_node_points(box)
+        rotation_angle = get_rectangle_rotation_angle(box, p0)
+
+        # Rotate the rectangle so it becomes axis-aligned
+        rotated_rect = rotate(bounding_box.box_utm, rotation_angle, origin='centroid', use_radians=False)
+        minx, miny, maxx, maxy = rotated_rect.bounds
+
+        # Desired resolution
+        res = (1.0, 1.0)  # or any other (xres, yres)
+
+        width = int((maxx - minx) / output_resolution[0])
+        height = int((maxy - miny) / output_resolution[1])
+
+        # Build transform: rotate, then translate to minx/miny
+        rotation = Affine.rotation(rotation_angle)
+        translation = Affine.translation(minx, maxy)  # note: y origin is top
+
+        # Scaling to match resolution
+        scaling = Affine.scale(output_resolution[0], -output_resolution[1])  # negative y for top-down
+
+        dst_transform = translation * rotation * scaling
+
+        profile = kwargs.copy()
+
+        profile.update({
+            'height': height,
+            'width': width,
+            'transform': dst_transform,
+            'crs': dst_crs
+        })
+
+        with memfile.open() as utm_raster:
+            with rasterio_open("output_rotated_crop.tif", 'w', **profile) as dst:
+                reproject(
+                    source=band(utm_raster, 1),
+                    destination=band(dst, 1),
+                    src_transform=utm_raster.transform,
+                    src_crs=utm_raster.crs,
+                    dst_transform=dst_transform,
+                    dst_crs=dst_crs,
+                    resampling=Resampling.bilinear
+                )
+
+
+        """
+        Script to:
+        1. Reproject a GeoTIFF from WGS84 to UTM Zone 32N (EPSG:32632).
+        2. Rotate the reprojected image so a user-defined non-axis-aligned rectangle becomes axis-aligned.
+        3. Crop the rotated image exactly to that rectangle extents.
+
+        Dependencies:
+        - rasterio
+        - shapely
+        - affine
+
+        Usage:
+        Set your file paths, the target CRS, desired output resolution, and the rectangle corners in UTM.
+        """
+        # import math
+        # import rasterio
+        # from rasterio.warp import calculate_default_transform, reproject, Resampling
+        # from rasterio.io import MemoryFile
+        # from affine import Affine
+        # from shapely.geometry import Polygon, mapping
+
+        # ----- User parameters -----
+        # Paths
+        # src_path = "input_wgs84.tif"              # Input GeoTIFF in WGS84
+        # dst_path = "output_rotated_cropped.tif"   # Final output
+
+        # # Target CRS and resolution
+        # dst_crs = 'EPSG:32632'  # UTM Zone 32N
+        # # Output pixel size (in CRS units), e.g. (30, 30) for 30m resolution
+        # dst_resolution = None  # None to inherit source resolution
+
+        # # Define four corners of the non-axis-aligned rectangle in EPSG:32632
+        # # Order: (x1,y1), (x2,y2), (x3,y3), (x4,y4)
+        # utm_rect = [
+        #     (500000, 5200000),
+        #     (500500, 5200100),
+        #     (501000, 5200050),
+        #     (500500, 5200000)
+        # ]
+        # # ----------------------------
+
+        # 1) Reproject input to UTM32N into memory
+        # with rasterio_open(self.current_merged_image_path) as src:
+        #     transform, width, height = calculate_default_transform(
+        #         src.crs, bounding_box.crs_projected, src.width, src.height, *src.bounds, resolution=output_resolution
+        #     )
+        #     meta = src.meta.copy()
+        #     meta.update({ 'crs': bounding_box.crs_projected, 'transform': transform, 'width': width, 'height': height })
+
+        #     memfile = MemoryFile()
+        #     with memfile.open(**meta) as tmp:
+        #         for b in range(1, src.count+1):
+        #             reproject(
+        #                 source=band(src, b),
+        #                 destination=band(tmp, b),
+        #                 src_transform=src.transform, src_crs=src.crs,
+        #                 dst_transform=transform, dst_crs=bounding_box.crs_projected,
+        #                 resampling=resampling
+        #             )
+
+        # # 2) Compute rotation angle so that edge (pt1->pt2) aligns with the x-axis
+        # #    and build an Affine transform: translate -> rotate -> crop
+        # # box = bounding_box.get_box(bounding_box.crs_projected)
+        # # p0, p1, p2, _ = get_polygon_node_points(box)
+        # # rotation_angle = get_rectangle_rotation_angle(box, p0)
+
+        # rect = bounding_box.box_utm
+        # utm_rect = [coord for coord in rect.exterior.coords]
+        # (x1, y1), (x2, y2) = utm_rect[0], utm_rect[1]
+        # dx = x2 - x1
+        # dy = y2 - y1
+        # angle = math.atan2(dy, dx)  # negative to rotate cylinder to horizontal
+
+        # rotated_rect = rotate(bounding_box.box_utm, angle * 180 / math.pi, origin='centroid', use_radians=False)
+        # minx, miny, maxx, maxy = rotated_rect.bounds
+
+        # out_width = int((maxx - minx) / output_resolution[0])
+        # out_height = int((maxy - miny) / output_resolution[1])
+
+        # # Build transform: rotate, then translate to minx/miny
+        # rotation = Affine.rotation(angle * 180 / math.pi)
+        # translation = Affine.translation(minx, maxy)  # note: y origin is top
+
+        # # Scaling to match resolution
+        # scaling = Affine.scale(output_resolution[0], -output_resolution[1])  # negative y for top-down
+
+        # dst_transform = translation * rotation * scaling
+
+        # # Update metadata for final output
+        # out_meta = meta.copy()
+        # out_meta.update({
+        #     'crs': bounding_box.crs_projected,
+        #     'transform': dst_transform,
+        #     'width': out_width,
+        #     'height': out_height
+        # })
+
+        # # 5) Reproject from in-memory UTM to the rotated & cropped output
+        # with memfile.open() as src:
+        #     with rasterio_open(os.path.join(os.path.dirname(self.current_merged_image_path), 'proj_crop_' + os.path.basename(self.current_merged_image_path)), 'w', **out_meta) as dst:
+        #         for b in range(1, src.count+1):
+        #             reproject(
+        #                 source=band(src, b),
+        #                 destination=band(dst, b),
+        #                 src_transform=src.transform, src_crs=src.crs,
+        #                 dst_transform=dst_transform, dst_crs=bounding_box.crs_projected,
+        #                 dst_width=out_width, dst_height=out_height,
+        #                 resampling=resampling
+        #             )
         
     def get_merged_dataframe(self, bounding_box: BoundingBox, calculation_resolution: Tuple = (1.0, 1.0)) -> pandas.DataFrame:
         with rasterio_open(self.current_merged_image_path) as src:

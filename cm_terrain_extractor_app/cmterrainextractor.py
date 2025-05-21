@@ -25,6 +25,7 @@ from terrain_extraction.data_sources.bavaria_dgm1.data_source import BavariaData
 from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
 from terrain_extraction.data_sources.lower_saxony_dgm1.data_source import LowerSaxonyDataSource
 from terrain_extraction.visualization_utils import shapely2folium
+from terrain_extraction.data_container import ElevationDataContainer
 
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -129,12 +130,8 @@ def dataframe2csv(df: pandas.DataFrame):
     return df.to_csv().encode('utf-8')
 
 @st.cache_data
-def dataframe2raw(df: pandas.DataFrame):
-    imarray = dataframe2ndarray(df)
-
-    imarray = imarray.astype('float16')
-    imarray = (imarray - imarray.min()) / (imarray.max() - imarray.min())
-    return imarray.tobytes(order="C")
+def elevation_data2raw(_elevation_data: ElevationDataContainer):
+    return _elevation_data.to_bytes()
 
 def extract_data_in_bbox(status_update_area):
     with status_update_area.container():
@@ -283,9 +280,14 @@ def draw_sidebar(status_update_area):
                 if FLAVOUR == 'SG':
                     st.download_button(
                         'Download heightmap raw image', 
-                        dataframe2raw(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
+                        elevation_data2raw(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
                         file_name='elevation_data.raw',
-                        disabled=not ('elevation_in_bbox' in st.session_state)
+                        disabled=not ('elevation_in_bbox' in st.session_state),
+                        help='x: {}, y: {}, z-Scale: {}'.format(
+                            st.session_state['elevation_in_bbox'].n_cells_x,
+                            st.session_state['elevation_in_bbox'].n_cells_y,
+                            st.session_state['elevation_in_bbox'].z_scale
+                        ) if 'elevation_in_bbox' in st.session_state else ''
                     )
                 else:
                     st.download_button(

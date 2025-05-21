@@ -8,6 +8,8 @@ import numpy as np
 from rasterio.warp import calculate_default_transform, reproject
 from rasterio.transform import from_bounds
 from rasterio.enums import Resampling
+from rasterio import open as rasterio_open
+from rasterio import band
 
 
 def get_projection_epsg_code_from_bbox(bbox):
@@ -66,3 +68,45 @@ def reproject_array(arr: np.ndarray, source_bounds: Tuple[float], source_crs: CR
     )
 
     return reprojected_arr
+
+def reproject_geotiff(source_path: str, destination_path: str, destination_crs: CRS, destination_resolution: Tuple[float] = (1.0, 1.0), resampling=Resampling.bilinear):
+    """
+    Script to reproject a GeoTIFF from WGS84 to UTM Zone 32N (EPSG:32632).
+
+    Features:
+    - Reproject from WGS84 to UTM32N
+    - Optional custom output resolution (in CRS units)
+    """
+
+    with rasterio_open(source_path) as src:
+        # Compute transform, width, height for dest
+        transform, width, height = calculate_default_transform(
+            src.crs,
+            destination_crs,
+            src.width,
+            src.height,
+            *src.bounds,
+            resolution=destination_resolution
+        )
+
+        # Update metadata for destination
+        kwargs = src.meta.copy()
+        kwargs.update({
+            'crs': destination_crs,
+            'transform': transform,
+            'width': width,
+            'height': height
+        })
+
+        # Write reprojected raster
+        with rasterio_open(destination_path, 'w', **kwargs) as dst:
+            for band_idx in range(1, src.count + 1):
+                reproject(
+                    source=band(src, band_idx),
+                    destination=band(dst, band_idx),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=destination_crs,
+                    resampling=resampling
+                )

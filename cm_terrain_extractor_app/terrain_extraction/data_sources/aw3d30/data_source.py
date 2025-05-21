@@ -110,7 +110,7 @@ class AW3D30DataSource(GeoTiffDataSource):
 
     def get_data(self, bounding_box: BoundingBox, cache_dir: str, calculation_resolution: Tuple = (1.0, 1.0), output_resolution: Tuple = (8.0, 8.0)):
         if self.cached_data is not None and self.cached_data_bounding_box.equals(bounding_box):
-            df = self.cached_data
+            elevation_data = self.cached_data
         else:
             st.write("Checking data cache...")
             missing_files = self.get_missing_files(bounding_box, cache_dir)
@@ -120,11 +120,12 @@ class AW3D30DataSource(GeoTiffDataSource):
             st.write("Merging geotiffs...")
             self.merge_image_files(image_files, cache_dir, bounding_box)
             st.write('Reading elevation data from geotiff...')
-            df = self.get_merged_dataframe(bounding_box, calculation_resolution)
-            self.cached_data = df
+            elevation_data = self.get_merged_elevation_data_in_bounding_box(bounding_box, output_resolution)
+            # df = self.get_merged_dataframe(bounding_box, calculation_resolution)
+            self.cached_data = elevation_data
             self.cached_data_bounding_box = bounding_box
 
-        st.write('Cutting out data in selected area...')
-        df = self.cut_out_bounding_box(df, bounding_box, calculation_resolution, output_resolution)
+        # st.write('Cutting out data in selected area...')
+        # df = self.cut_out_bounding_box(df, bounding_box, calculation_resolution, output_resolution)
 
-        return df
+        return elevation_data
