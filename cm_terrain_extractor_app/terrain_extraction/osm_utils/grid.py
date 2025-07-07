@@ -16,22 +16,24 @@
 import numpy as np
 import geopandas
 import pandas
-from shapely import Polygon, Point
+from shapely import Polygon, Point, box
+from shapely.affinity import rotate
 
 def _create_geodataframe(xarr, yarr, xiarr, yiarr, geometry):
+    neg1 = np.full(len(xarr), -1, dtype=int)
     gdf = geopandas.GeoDataFrame({
         'x': xarr, 
         'y': yarr, 
         'xidx': xiarr, 
         'yidx': yiarr, 
-        'z': [-1] * len(xarr),
-        'menu': [-1] * len(xarr),
-        'cat1': [-1] * len(xarr),
-        'cat2': [-1] * len(xarr),
-        'direction': [-1] * len(xarr),
-        'id': [-1] * len(xarr),
-        'name': [-1] * len(xarr),
-        'priority': [-1] * len(xarr),
+        'z': neg1,
+        'menu': neg1,
+        'cat1': neg1,
+        'cat2': neg1,
+        'direction': neg1,
+        'id': neg1,
+        'name': neg1,
+        'priority': neg1,
     }, 
     geometry=geometry
     )
@@ -49,20 +51,36 @@ def _rotate_grid(gdf, rotation_angle, rotation_center=None):
 
 
 def get_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle=None, rotation_center=None):
-    xarr = []
-    yarr = []
-    xiarr = []
-    yiarr = []
+    print('calculating grid...')    
+    # xarr = []
+    # yarr = []
+    # xiarr = []
+    # yiarr = []
     cell_size_x = (xmax - xmin) / n_squares_x
     cell_size_y = (ymax - ymin) / n_squares_y
-    for xidx, x in enumerate(np.linspace(xmin + cell_size_x / 2, xmax - cell_size_x / 2, n_squares_x)):
-        for yidx, y in enumerate(np.linspace(ymin + cell_size_y / 2, ymax - cell_size_y / 2, n_squares_y)):
-            xarr.append(x)
-            yarr.append(y)
-            xiarr.append(xidx)
-            yiarr.append(yidx)
+    # for xidx, x in enumerate(np.linspace(xmin + cell_size_x / 2, xmax - cell_size_x / 2, n_squares_x)):
+    #     for yidx, y in enumerate(np.linspace(ymin + cell_size_y / 2, ymax - cell_size_y / 2, n_squares_y)):
+    #         xarr.append(x)
+    #         yarr.append(y)
+    #         xiarr.append(xidx)
+    #         yiarr.append(yidx)
 
-    geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, cap_style=3)
+    xs = np.linspace(xmin + cell_size_x/2, xmax - cell_size_x/2, n_squares_x)
+    ys = np.linspace(ymin + cell_size_y/2, ymax - cell_size_y/2, n_squares_y)
+
+    # 2D grids of coords and indices
+    X, Y = np.meshgrid(xs, ys, indexing='ij')
+    XI, YI = np.meshgrid(np.arange(n_squares_x), np.arange(n_squares_y), indexing='ij')
+
+    # flatten to 1D
+    xarr, yarr = X.ravel(), Y.ravel()
+    xiarr, yiarr = XI.ravel(), YI.ravel()
+
+    x0, x1 = xarr - cell_size_x / 2, xarr + cell_size_x / 2
+    y0, y1 = yarr - cell_size_y / 2, yarr + cell_size_y / 2
+    geometry = [box(x0i, y0i, x1i, y1i) for x0i,y0i,x1i,y1i in zip(x0, y0, x1, y1)]    
+
+    # geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, cap_style=3)
 
     gdf = _create_geodataframe(xarr, yarr, xiarr, yiarr, geometry)
 
@@ -72,31 +90,46 @@ def get_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle=No
     return gdf
 
 def get_diagonal_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle=None, rotation_center=None):
-    xarr = []
-    yarr = []
-    xiarr = []
-    yiarr = []
+    print('calculating diagonal grid...')    
     cell_size_x = (xmax - xmin) / n_squares_x
     cell_size_y = (ymax - ymin) / n_squares_y
-    for xidx, x in enumerate(np.linspace(xmin + cell_size_x / 2, xmax - cell_size_x / 2, n_squares_x)):
-        for yidx, y in enumerate(np.linspace(ymin + cell_size_y / 2, ymax - cell_size_y / 2, n_squares_y)):
-            xarr.append(x - cell_size_x / 2)
-            yarr.append(y)
-            xiarr.append(xidx - 0.5)
-            yiarr.append(yidx)
-            xarr.append(x + cell_size_x / 2)
-            yarr.append(y)
-            xiarr.append(xidx + 0.5)
-            yiarr.append(yidx)
-            xarr.append(x)
-            yarr.append(y - cell_size_y / 2)
-            xiarr.append(xidx)
-            yiarr.append(yidx - 0.5)
-            xarr.append(x)
-            yarr.append(y + cell_size_y / 2)
-            xiarr.append(xidx)
-            yiarr.append(yidx + 0.5)
-        
+
+    # 1D centers
+    xs = np.linspace(xmin + cell_size_x/2, xmax - cell_size_x/2, n_squares_x)
+    ys = np.linspace(ymin + cell_size_y/2, ymax - cell_size_y/2, n_squares_y)
+
+    # 2D grids of centers and indices (matching your x‐outer, y‐inner order)
+    Xc, Yc = np.meshgrid(xs, ys, indexing='ij')   # shapes (n_x, n_y)
+    XI, YI = np.meshgrid(np.arange(n_squares_x), np.arange(n_squares_y), indexing='ij')
+
+    # flatten to 1D
+    Xc = Xc.ravel()   # len = n_x * n_y
+    Yc = Yc.ravel()
+    XI = XI.ravel()
+    YI = YI.ravel()    
+    # offsets
+    offs = np.array([
+        (-cell_size_x/2,  0.0,  -0.5,  0.0),   # x_off, y_off, xi_off, yi_off
+        (+cell_size_x/2,  0.0,  +0.5,  0.0),
+        ( 0.0,  -cell_size_y/2,  0.0,  -0.5),
+        ( 0.0,  +cell_size_y/2,  0.0,  +0.5),
+    ])   # shape (4,4)
+
+    # repeat center arrays 4×
+    X_rep = np.repeat(Xc, 4)
+    Y_rep = np.repeat(Yc, 4)
+    XI_rep = np.repeat(XI, 4)
+    YI_rep = np.repeat(YI, 4)
+
+    # tile offsets to match length
+    off_tile = np.tile(offs, (Xc.size,1))  # shape (N*4,4)
+
+    # apply
+    xarr = X_rep + off_tile[:,0]
+    yarr = Y_rep + off_tile[:,1]
+    xiarr = XI_rep + off_tile[:,2]
+    yiarr = YI_rep + off_tile[:,3]
+
     grid_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, resolution=1)
     diagonal_gdf = _create_geodataframe(xarr, yarr, xiarr, yiarr, grid_geometry)
 
@@ -106,30 +139,25 @@ def get_diagonal_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation
     return diagonal_gdf
 
 def get_sub_square_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle=None, rotation_center=None):
-    xarr = []
-    yarr = []
-    xiarr = []
-    yiarr = []
+    print('calculating sub square grid...')    
     cell_size_x = (xmax - xmin) / n_squares_x
     cell_size_y = (ymax - ymin) / n_squares_y
-    for xidx, x in enumerate(np.linspace(xmin + cell_size_x / 2, xmax - cell_size_x / 2, n_squares_x)):
-        for yidx, y in enumerate(np.linspace(ymin + cell_size_y / 2, ymax - cell_size_y / 2, n_squares_y)):
-            xarr.append(x - 2)
-            yarr.append(y - 2)
-            xiarr.append(xidx - 0.25)
-            yiarr.append(yidx - 0.25)
-            xarr.append(x - 2)
-            yarr.append(y + 2)
-            xiarr.append(xidx - 0.25)
-            yiarr.append(yidx + 0.25)
-            xarr.append(x + 2)
-            yarr.append(y - 2)
-            xiarr.append(xidx + 0.25)
-            yiarr.append(yidx - 0.25)
-            xarr.append(x + 2)
-            yarr.append(y + 2)
-            xiarr.append(xidx + 0.25)
-            yiarr.append(yidx + 0.25)
+
+    xs = np.linspace(xmin + cell_size_x/2, xmax - cell_size_x/2, n_squares_x)
+    ys = np.linspace(ymin + cell_size_y/2, ymax - cell_size_y/2, n_squares_y)
+    Xc, Yc = np.meshgrid(xs, ys, indexing='ij')
+    XI, YI = np.meshgrid(np.arange(n_squares_x), np.arange(n_squares_y), indexing='ij')
+    Xc, Yc, XI, YI = (arr.ravel() for arr in (Xc, Yc, XI, YI))
+
+    # 2) quarter-cell offsets
+    offsets = np.array([[-cell_size_x/4, -cell_size_y/4, -0.25, -0.25],
+                        [-cell_size_x/4, +cell_size_y/4, -0.25, +0.25],
+                        [+cell_size_x/4, -cell_size_y/4, +0.25, -0.25],
+                        [+cell_size_x/4, +cell_size_y/4, +0.25, +0.25]])
+    N = Xc.size
+    centers = np.repeat(np.stack([Xc,Yc,XI,YI],axis=1), 4, axis=0)
+    offs = np.tile(offsets, (N,1))
+    xarr, yarr, xiarr, yiarr = (centers[:,i] + offs[:,i] for i in range(4))
 
     geometry = geopandas.points_from_xy(xarr, yarr).buffer(2, cap_style=3)
 

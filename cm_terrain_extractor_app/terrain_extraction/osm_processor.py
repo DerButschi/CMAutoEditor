@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Tuple
 
 import pyproj
 from terrain_extraction.bbox_utils import BoundingBox
@@ -15,7 +15,7 @@ from pyproj.crs import CRS
 from profiles import get_building_tiles, get_building_cat2, process_to_building_type, get_building_outline_by_df_entry
 
 class OSMProcessor:
-    def __init__(self, profile: str, bbox: BoundingBox, path_to_config: str = "default_osm_config.json"):
+    def __init__(self, profile: str, bbox: BoundingBox, path_to_config: str = "default_osm_config.json", cell_size: Tuple[float] = (8.0, 8.0)):
         self.path_to_congih = path_to_config
         self.config = json.load(open(path_to_config, 'r'))
         self.profile = profile
@@ -30,6 +30,7 @@ class OSMProcessor:
         self.building_outlines = {}
         self.grid_graph = None
         self.occupancy_gdf = geopandas.GeoDataFrame(columns=['geometry', 'priority', 'name'])
+        self.cell_size = cell_size
 
         self.matched_elements = []
 
@@ -92,12 +93,12 @@ class OSMProcessor:
     def _init_grid(self, bbox: BoundingBox):
         p0, p1, p2 = bbox.get_reference_points(bbox.crs_projected)
 
-        n_bins_x = np.floor((p0.distance(p1)) / 8).astype(int)
-        n_bins_y = np.floor((p0.distance(p2)) / 8).astype(int)
+        n_bins_x = np.floor((p0.distance(p1)) / self.cell_size[0]).astype(int)
+        n_bins_y = np.floor((p0.distance(p2)) / self.cell_size[1]).astype(int)
 
         xmin, ymin = p0.x, p0.y
-        xmax = xmin + n_bins_x * 8
-        ymax = ymin + n_bins_y * 8
+        xmax = xmin + n_bins_x * self.cell_size[0]
+        ymax = ymin + n_bins_y * self.cell_size[1]
         rotation_angle = bbox.get_rotation_angle()
         
         grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf = get_all_grids(xmin, ymin, xmax, ymax, n_bins_x, n_bins_y, 
@@ -110,8 +111,7 @@ class OSMProcessor:
         self.sub_square_grid_gdf = self.sub_square_grid_gdf.set_crs(epsg=bbox.crs_projected.to_epsg())
         self.sub_square_grid_diagonal_gdf = self.sub_square_grid_diagonal_gdf.set_crs(epsg=bbox.crs_projected.to_epsg())
 
-        grid_polygons = MultiPolygon(self.gdf.geometry.values)
-        self.effective_bbox_polygon = grid_polygons.buffer(0)
+        self.effective_bbox_polygon = self.gdf.geometry.unary
 
         self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
 

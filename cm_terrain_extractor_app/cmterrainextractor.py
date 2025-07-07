@@ -75,6 +75,7 @@ if DEBUG_MODE == 'OSM_PROCESSOR' and 'osm_output' not in st.session_state:
 elif DEBUG_MODE == 'PRESET_BOUNDING_BOX':
     from shapely import Polygon
     from pyproj import CRS
+    from geopandas import GeoDataFrame
     # bounding_box = BoundingBox(Polygon([[6.282861, 50.769203], [6.332458, 50.768958], [6.283221, 50.796127], [6.332729, 50.795871]]), CRS.from_epsg(4326))
     # bounding_box = BoundingBox(Polygon([[6.338900, 50.674261], [6.338900, 50.696929], [6.395622, 50.696929], [6.395622, 50.674261]]), CRS.from_epsg(4326))
     bounding_box = BoundingBox(Polygon([[7.117368801891561, 50.61290765446361], [7.680817, 50.794477999999984], [7.470654265842595, 51.05774603550387], [6.904907, 50.875138]]), CRS.from_epsg(4326))
@@ -85,6 +86,29 @@ elif DEBUG_MODE == 'PRESET_BOUNDING_BOX':
     st.session_state['len_x'] = bounding_box.get_length_xaxis()
     st.session_state['len_y'] = bounding_box.get_length_yaxis()
     st.session_state['bbox_origin'] = 0
+
+    osm_data = GeoDataFrame.from_file(os.path.join(data_cache_path, 'current_osm_data.geojson'))
+    st.session_state['osm_data'] = geojson.loads(osm_data.to_json())
+    st.session_state['map_mode'] = 'OpenStreetMap'
+
+    osm_data = st.session_state['osm_data']
+    osm_processor = OSMProcessor(
+        path_to_config=os.path.join(executable_path, 'strategy_osm_config.json'),
+        bbox=st.session_state['bbox_object'],
+        profile='cold_war',
+        cell_size=(30.0, 30.0)
+    )
+
+    # osm_processor.preprocess_osm_data(osm_data=osm_data)
+    import pickle
+
+    with open(os.path.join('test_objects', 'osm_processor_20250525.pkl'), 'rb') as pkl_file:
+        osm_processor: OSMProcessor = pickle.load(pkl_file)
+
+        # osm_processor.run_processors()
+        osm_processor.post_process()
+        a = 1
+
 
 FLAVOUR = 'SG'
 
@@ -301,21 +325,25 @@ def draw_sidebar(status_update_area):
                 'black_sea': 'Black Sea',
                 'cold_war': 'Cold War',
                 'fortress_italy': 'Fortress Italy',
-                'shock_force_2': 'Shock Force 2'
+                'shock_force_2': 'Shock Force 2',
+                'strategy': 'Strategy'
             }
             with st.container(border=True):
                 profile_str = st.selectbox(
                     "Select Combat Mission Title",
-                    options=['black_sea', 'cold_war', 'fortress_italy', 'shock_force_2'],
+                    options=['black_sea', 'cold_war', 'fortress_italy', 'shock_force_2'] if FLAVOUR != 'SG' else ['strategy'],
                     format_func=lambda x: title_dict[x]
                 )
                 config_files = [f for f in os.listdir(executable_path) if os.path.isfile(os.path.join(executable_path, f)) and f.endswith('.json')]
-                default_config_files = {
-                    'black_sea': 'default_osm_config_cmbs.json',
-                    'cold_war': 'default_osm_config_cmcw.json',
-                    'fortress_italy': 'default_osm_config_cmfi.json',
-                    'shock_force_2': 'default_osm_config_cmsf2.json',
-                }
+                if FLAVOUR == 'SG':
+                    default_config_files = {'strategy': 'strategy_osm_config.json'}
+                else:
+                    default_config_files = {
+                        'black_sea': 'default_osm_config_cmbs.json',
+                        'cold_war': 'default_osm_config_cmcw.json',
+                        'fortress_italy': 'default_osm_config_cmfi.json',
+                        'shock_force_2': 'default_osm_config_cmsf2.json',
+                    }
                 config_file = st.selectbox(
                     "Select configuration file",
                     options=config_files,
@@ -361,7 +389,11 @@ def draw_sidebar(status_update_area):
 def process_osm_data(status_update_area):
     osm_data = st.session_state['osm_data']
     osm_processor = OSMProcessor(
-        path_to_config=os.path.join(executable_path, st.session_state['osm_config_file']), bbox=st.session_state['bbox_object'], profile=st.session_state['osm_profile_str'])
+        path_to_config=os.path.join(executable_path, st.session_state['osm_config_file']),
+        bbox=st.session_state['bbox_object'],
+        profile=st.session_state['osm_profile_str'] if FLAVOUR != 'SG' else 'cold_war',
+        cell_size=(30.0, 30.0) if FLAVOUR == 'SG' else (8.0, 8.0)
+    )
 
     with status_update_area.container():
         with st.status('Processing OpenStreetMap data...'):
@@ -395,6 +427,9 @@ def get_osm_data(status_update_area):
         osm_data = osm_data.drop(columns=['ways'])
     if 'nodes' in osm_data.columns:
         osm_data.drop(columns=['nodes'])
+
+    osm_data = osm_data.drop([c for c in osm_data.columns if c not in tag_dict and c != 'geometry'], axis=1)
+    osm_data.to_file(os.path.join(data_cache_path, 'current_osm_data.geojson'), driver='GeoJSON')
 
     st.session_state['osm_data'] = geojson.loads(osm_data.to_json())
 

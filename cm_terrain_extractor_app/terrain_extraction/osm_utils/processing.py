@@ -112,21 +112,52 @@ def draw_square_graph(graph: nx.MultiGraph, gdf: geopandas.GeoDataFrame = None, 
     if show:
         plt.show()
 
-def get_grid_cells_to_fill(gdf, geometry, config_entry):
-    if 'modifiers' in config_entry and 'is_core' in config_entry['modifiers'] and "border_size" in config_entry['modifiers']:
-        geometry = geometry.buffer(-config_entry['modifiers']['border_size'] * 8)
+def get_grid_cells_to_fill(gdf, geometry, config_entry, config_meta):
+    # 1) optional inward buffer
+    mods = config_entry.get('modifiers', {})
+    if mods.get('is_core') and 'border_size' in mods:
+        bs = mods['border_size'] * config_meta['cell_size'][0]
+        geometry = geometry.buffer(-bs)
 
-    within = gdf.index.isin(gdf.sindex.query(geometry, predicate='contains'))
-    intersecting = gdf.index.isin(gdf.sindex.query(geometry, predicate='intersects'))
-    # within = gdf.geometry.within(geometry)
-    # intersecting = gdf.geometry.intersects(geometry)
-    is_border = np.bitwise_and(intersecting, ~within)
-    gdf_border = gdf.loc[is_border]
-    gdf_border_largest_square_area = gdf_border.loc[gdf_border.geometry.intersection(geometry).area > 32]
-    is_largest_square_area = gdf.index.isin(gdf_border_largest_square_area.index)
-    to_fill = np.bitwise_or(within, is_largest_square_area)
+    # 2) early exit on invalid geometry
+    if not geometry.is_valid:
+        return np.zeros(len(gdf), dtype=bool)
+    # within = gdf.index.isin(gdf.sindex.query(geometry, predicate='contains'))
+    # intersecting = gdf.index.isin(gdf.sindex.query(geometry, predicate='intersects'))
+    # # within = gdf.geometry.within(geometry)
+    # # intersecting = gdf.geometry.intersects(geometry)
+    # is_border = np.bitwise_and(intersecting, ~within)
+    # gdf_border = gdf.loc[is_border]
+    # gdf_border = gdf_border.loc[gdf_border.is_valid]
+    # gdf_border_largest_square_area = gdf_border.loc[gdf_border.geometry.intersection(geometry).area > np.square(config_meta['cell_size'][0]) / 2]
+    # is_largest_square_area = gdf.index.isin(gdf_border_largest_square_area.index)
+    # to_fill = np.bitwise_or(within, is_largest_square_area)
 
-    return to_fill
+    # 3) spatial-index to get candidate row indices
+    candidate_idxs = list(gdf.sindex.intersection(geometry.bounds))
+    if not candidate_idxs:
+        return np.zeros(len(gdf), dtype=bool)
+    candidate_idxs = np.array(candidate_idxs, dtype=int)
+
+    sub = gdf.iloc[candidate_idxs]
+
+    # 4) boolean masks on the subset
+    within_mask    = sub.geometry.within(geometry).to_numpy()
+    intersect_mask = sub.geometry.intersects(geometry).to_numpy()
+
+    # 5) assemble final mask
+    mask = np.zeros(len(gdf), dtype=bool)
+    mask[candidate_idxs[within_mask]] = True
+
+    # border cells that overlap by > half a cell
+    border_pos = np.nonzero(intersect_mask & ~within_mask)[0]
+    if border_pos.size:
+        inters = sub.geometry.iloc[border_pos].intersection(geometry)
+        area_ok = inters.area.to_numpy() > (config_meta['cell_size'][0]**2) / 2
+        mask[candidate_idxs[border_pos[area_ok]]] = True
+
+
+    return mask
 
 def extract_connection_directions_from_node(node_id, other_node_id, road_graph, loop=None):
     directions = []
@@ -277,7 +308,7 @@ def get_matched_cm_type(config, element_entry):
     return matched_cm_type
 
 def assign_type_from_tag(osm_processor, config, element_entry):
-    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
+    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']], config['meta'])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
     sub_df['priority'] = config[element_entry['name']]['priority']
@@ -504,7 +535,7 @@ def assign_type_randomly_in_area(osm_processor, config, element_entry):
     n_types = len(cm_types)
     df = osm_processor.df
 
-    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
+    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']], config['meta'])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
 
@@ -540,7 +571,7 @@ def assign_type_randomly_for_each_square(osm_processor, config, element_entry):
     n_types = len(cm_types)
     df = osm_processor.df
 
-    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
+    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']], config['meta'])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
 
@@ -624,7 +655,7 @@ def assign_type_in_random_clusters(osm_processor, config, element_entry):
     cm_types = config[element_entry['name']]['cm_types']
     n_types = len(cm_types)
 
-    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']])
+    grid_cells = get_grid_cells_to_fill(osm_processor.gdf, element_entry['geometry'], config[element_entry['name']], config['meta'])
     sub_df = osm_processor._get_sub_df(grid_cells)
     sub_df.name = element_entry['name']
 
