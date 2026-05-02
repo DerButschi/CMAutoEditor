@@ -27,15 +27,27 @@ from terrain_extraction.osm_utils.io import (
 )
 from terrain_extraction.visualization_utils import shapely2folium
 
+from cm_terrain_extractor_app.app_core.exports import (
+    dataframe_to_csv_bytes,
+    suggest_elevation_filename,
+    suggest_osm_filename,
+)
 from cm_terrain_extractor_app.app_core.resources import (
     find_default_osm_configs,
     prepare_runtime_environment,
     resolve_resources,
 )
 from cm_terrain_extractor_app.app_core.state import (
-    clear_bbox_dependent_results,
     clear_elevation_result,
     clear_osm_processing_result,
+)
+from cm_terrain_extractor_app.app_core.validation import (
+    MAX_LEN_X_METERS,
+    MAX_LEN_Y_METERS,
+    MAX_SELECTED_AREA_SQUARE_METERS,
+    compute_bbox_metrics,
+    is_selected_area_valid,
+    update_state_from_bbox,
 )
 from cm_terrain_extractor_app.streamlit_ui.session_adapter import get_state
 
@@ -90,14 +102,7 @@ def update_bounding_box(points):
         return
 
     bounding_box = BoundingBox(polygon)
-
-    state.bbox_coordinates = bounding_box.get_coordinates(xy=False)
-    state.bbox_object = bounding_box
-    state.projected_bbox_object = bounding_box.get_box(bounding_box.crs_projected)
-    state.len_x = bounding_box.get_length_xaxis()
-    state.len_y = bounding_box.get_length_yaxis()
-    state.bbox_origin = 0
-    clear_bbox_dependent_results(state)
+    update_state_from_bbox(state, bounding_box)
 
     st.rerun()
     # return bounding_box.get_dataframe()
@@ -114,10 +119,6 @@ def find_data_sources_in_bbox(status_update_area):
 
 def get_data_source_label(data_source):
     return f'{data_source.name} - {data_source.model_type}, {data_source.resolution}'
-
-@st.cache_data
-def dataframe2csv(df: pandas.DataFrame):
-    return df.to_csv().encode('utf-8')
 
 def extract_data_in_bbox(status_update_area):
     with status_update_area.container():
@@ -142,10 +143,12 @@ def extract_data_in_bbox(status_update_area):
 def permute_bbox():
     bounding_box = state.bbox_object
     bounding_box.cycle_origin()
+    metrics = compute_bbox_metrics(bounding_box)
     state.bbox_coordinates = bounding_box.get_coordinates(xy=False)
     state.projected_bbox_object = bounding_box.get_box(bounding_box.crs_projected)
-    state.len_x = bounding_box.get_length_xaxis()
-    state.len_y = bounding_box.get_length_yaxis()
+    state.len_x = metrics["len_x"]
+    state.len_y = metrics["len_y"]
+    state.selected_area_valid = is_selected_area_valid(state.len_x, state.len_y)
     state.bbox_origin = (state.bbox_origin + 1) % 4
 
 def update_bbox_from_df():
@@ -155,9 +158,6 @@ def update_bbox_from_df():
         update_bounding_box(list(zip(df.x.values, df.y.values, strict=False)))
 
 def draw_sidebar(status_update_area):  # noqa: C901, PLR0915
-    max_len_x_axis = 4160 # m
-    max_len_y_axis = 4160 # m
-    max_area = 18000000 # km2
     len_x_axis = None
     len_y_axis = None
     delta_len_x = None
@@ -168,15 +168,12 @@ def draw_sidebar(status_update_area):  # noqa: C901, PLR0915
         len_x_axis = state.len_x
         len_y_axis = state.len_y
         area = len_x_axis * len_y_axis
-        delta_len_x = len_x_axis - max_len_x_axis
-        delta_len_y = len_y_axis - max_len_y_axis
-        delta_area = area - max_area
+        delta_len_x = len_x_axis - MAX_LEN_X_METERS
+        delta_len_y = len_y_axis - MAX_LEN_Y_METERS
+        delta_area = area - MAX_SELECTED_AREA_SQUARE_METERS
         # area = np.round(state.len_x * state.len_y / 1e6, decimals=1)
         # delta = np.round(state.len_x * state.len_y / 1e6 - 16, decimals=1)
-        if delta_len_x > 0 or delta_len_y > 0 or delta_area > 0:
-            state.selected_area_valid = False
-        else:
-            state.selected_area_valid = True
+        state.selected_area_valid = is_selected_area_valid(len_x_axis, len_y_axis)
     else:
         state.selected_area_valid = False
 
@@ -274,8 +271,8 @@ def draw_sidebar(status_update_area):  # noqa: C901, PLR0915
             with st.container(border=True):
                 st.download_button(
                     'Download elevation .csv-file', 
-                    dataframe2csv(state.elevation_in_bbox) if state.elevation_in_bbox is not None else 'dummy',
-                    file_name='elevation_data.csv',
+                    dataframe_to_csv_bytes(state.elevation_in_bbox) if state.elevation_in_bbox is not None else 'dummy',
+                    file_name=suggest_elevation_filename(state),
                     disabled=state.elevation_in_bbox is None,
                 )
         if state.map_mode == 'OpenStreetMap':
@@ -343,8 +340,8 @@ def draw_sidebar(status_update_area):  # noqa: C901, PLR0915
             with st.container(border=True):
                 st.download_button(
                     'Download OpenStreetMap .csv-file', 
-                    dataframe2csv(state.osm_output) if state.osm_output is not None else 'dummy',
-                    file_name='osm_data.csv',
+                    dataframe_to_csv_bytes(state.osm_output) if state.osm_output is not None else 'dummy',
+                    file_name=suggest_osm_filename(state),
                     disabled=state.osm_output is None,
                 )
 
