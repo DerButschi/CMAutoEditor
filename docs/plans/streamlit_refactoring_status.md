@@ -13,7 +13,7 @@ Future agents and humans must update this document after each milestone. Record 
 | Milestone | Name | Status | Owner | Last updated | Notes |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Inventory and behavior snapshot | Done | Codex | 2026-05-02 | Created `docs/plans/streamlit_refactoring_inventory.md`; app code untouched. |
-| 2 | Introduce test harness and first regression tests | Not started | Unassigned | 2026-05-02 | Must establish `tests/cm_terrain_extractor/`; tests should fail before target modules exist. |
+| 2 | Introduce test harness and first regression tests | Done | Codex | 2026-05-02 | Added `tests/cm_terrain_extractor/` with expected failures for missing `app_core` and `map_view` modules. |
 | 3 | Extract resource and path handling | Not started | Unassigned | 2026-05-02 | Must preserve launcher and source-run behavior. |
 | 4 | Introduce `AppState` and session adapter | Not started | Unassigned | 2026-05-02 | Temporary legacy session keys must be recorded as debt. |
 | 5 | Extract validation and export helpers | Not started | Unassigned | 2026-05-02 | CSV bytes must remain compatible with current `df.to_csv().encode("utf-8")`. |
@@ -32,6 +32,7 @@ Future agents and humans must update this document after each milestone. Record 
 | 2026-05-02 | Use `docs/plans/streamlit_refactoring_status.md` as the living status ledger. | The user requested status tracking for progress, decisions, debt, and validation results. | User |
 | 2026-05-02 | Treat the existing `test/` directory as fixture data, not an active pytest suite. | The plan states the repository currently contains no test suite; future tests go under `tests/cm_terrain_extractor/`. | User |
 | 2026-05-02 | Milestone 1 is documentation-only. | The execution plan explicitly forbids Python code changes in M1; inventory is sufficient to guide M2-M8. | Codex |
+| 2026-05-02 | Configure pytest with `pythonpath = ["."]`. | The approved `pytest.exe` entrypoint starts from the Conda `Scripts` directory, so repository packages were not importable without explicitly adding the repo root. | Codex |
 
 ## Contract Changes Requested or Approved
 
@@ -47,6 +48,7 @@ No further contract changes have been requested or approved.
 | --- | --- | --- | --- | --- |
 | 2026-05-02 | Planning docs | No implementation debt recorded. | Docs-only setup. | Not applicable. |
 | 2026-05-02 | Milestone 1 | No application debt introduced. Inventory records existing unknowns around `bbox_origin`, `height_map_layer`, cache clearing, invalidation, source-mode paths, and Streamlit-cached OSM IO. | M1 changed only planning docs. | Resolve through M3-M8 tests and extraction work. |
+| 2026-05-02 | Milestone 2 | No production-code debt introduced. Pytest and ruff cache writes reported sandbox permission issues; ruff validation used `--no-cache`. | M2 added only tests and pytest import-path configuration. | Recheck cache behavior in unrestricted local runs if warnings become noisy. |
 
 ## Test and Validation Results
 
@@ -56,6 +58,9 @@ No further contract changes have been requested or approved.
 | 2026-05-02 | Planning docs | `Select-String -Path docs\plans\streamlit_refactoring_*.md -Pattern "authoritative","contract","TDD","pytest","ruff"` | Passed | Confirmed required keywords are present across the generated planning docs. |
 | 2026-05-02 | Milestone 1 | `Get-Content docs\plans\streamlit_refactoring_inventory.md \| Select-String -Pattern "session_state","cmterrainextractor.py","Folium","PyInstaller","CSV"` | Passed | Confirmed the inventory includes required behavior categories. |
 | 2026-05-02 | Milestone 1 | `Get-Content docs\plans\streamlit_refactoring_status.md \| Select-String -Pattern "Milestone 1","Inventory"` | Passed | Confirmed the status ledger records M1 completion and inventory notes. |
+| 2026-05-02 | Milestone 2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor -v` | Failed as expected | Collected 3 tests. Failures are expected missing target modules: `cm_terrain_extractor_app.map_view` and `cm_terrain_extractor_app.app_core`. Pytest also warned that `.pytest_cache` could not be written in the sandbox. |
+| 2026-05-02 | Milestone 2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check tests\cm_terrain_extractor\__init__.py tests\cm_terrain_extractor\test_exports.py tests\cm_terrain_extractor\test_state.py tests\cm_terrain_extractor\test_drawing.py` | Failed due environment/cache | Ruff could not initialize `.ruff_cache` because the sandbox denied cache writes. |
+| 2026-05-02 | Milestone 2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check --no-cache tests\cm_terrain_extractor\__init__.py tests\cm_terrain_extractor\test_exports.py tests\cm_terrain_extractor\test_state.py tests\cm_terrain_extractor\test_drawing.py` | Passed | Retry with cache disabled reported `All checks passed!`. |
 
 ## Known Blockers
 
