@@ -2,12 +2,10 @@ import json
 import os
 import warnings
 
-import folium
 import numpy as np
 import pandas
-import shapely
 import streamlit as st
-from folium.plugins import Draw
+from shapely import Polygon
 from streamlit_folium import st_folium
 from terrain_extraction.bbox_utils import BoundingBox
 from terrain_extraction.data_sources.aw3d30.data_source import AW3D30DataSource
@@ -20,7 +18,6 @@ from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSourc
 from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
 from terrain_extraction.osm_processor import OSMProcessor
 from terrain_extraction.osm_utils.io import get_bounding_box
-from terrain_extraction.visualization_utils import shapely2folium
 
 from cm_terrain_extractor_app.app_core.actions import (
     download_osm_data as download_osm_data_action,
@@ -60,6 +57,11 @@ from cm_terrain_extractor_app.app_core.validation import (
     is_selected_area_valid,
     update_state_from_bbox,
 )
+from cm_terrain_extractor_app.map_view.drawing import (
+    drawing_to_bounding_box,
+    extract_last_active_drawing,
+)
+from cm_terrain_extractor_app.map_view.folium_map import build_folium_map
 from cm_terrain_extractor_app.streamlit_ui.session_adapter import get_state
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -108,7 +110,7 @@ if DEBUG_MODE == 'OSM_PROCESSOR' and state.osm_output is None:
         state.bbox_origin = 0
 
 def update_bounding_box(points):
-    polygon = shapely.Polygon(points)
+    polygon = Polygon(points)
     if polygon.minimum_rotated_rectangle.geom_type == 'LineString':
         return
 
@@ -397,104 +399,15 @@ def map_view_tab():  # noqa: C901, PLR0915
     # if 'zoom' not in st.session_state:
     #     st.session_state['zoom'] = 1
 
-    map_obj = folium.Map(tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
-                     attr=(
-                            '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
-                            'contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
-                     ),
-                     )
-    
-    bbox_fg = folium.FeatureGroup('bbox')
-
-    if state.map_mode == 'Bounding Box Selection':
-        draw = Draw(draw_options={
-            'polyline': False,
-            'circle': False,
-            'marker': False,
-            'circlemarker': False,
-        })
-        draw.add_to(map_obj)
-
-    folium.plugins.Geocoder(postion='bottomleft').add_to(map_obj)
-    folium.plugins.MeasureControl().add_to(map_obj)
-    folium.plugins.Fullscreen().add_to(map_obj)
-
-    if state.elevation_in_bbox is not None:
-        if 'height_map_layer' not in st.session_state:
+    if state.elevation_in_bbox is not None and 'height_map_layer' not in st.session_state:
         # if 'zoom_cache' in st.session_state:
-            if 'zoom_cache' in st.session_state:
-                state.map_zoom = st.session_state['zoom_cache']
-            if 'center_cache' in st.session_state:
-                center_cache = st.session_state['center_cache']
-                state.map_center = (center_cache['lat'], center_cache['lng'])
-            state.map_key += 1
-            st.session_state['height_map_layer'] = True
-
-        bbox_fg.add_child(
-            folium.raster_layers.ImageOverlay(
-                name='Elevation data',
-                image=os.path.join(data_cache_path, 'current_height_map.png'),
-                bounds=state.bbox_coordinates,
-                # interactive=False,
-                # cross_origin=False,
-                opacity=0.9,
-                # zindex=1,
-            )
-        )
-    # bbox_fg.add_child(folium.GeoJson(geopandas.GeoDataFrame.from_file("terrain_extraction/data_sources/hessen.geojson")))
-
-    if state.bbox_coordinates is not None:
-        bbox = state.bbox_coordinates
-        line1 = folium.vector_layers.PolyLine([bbox[0], bbox[1]], color='red')
-        line2 = folium.vector_layers.PolyLine([bbox[1], bbox[2]], color='red')
-        line3 = folium.vector_layers.PolyLine([bbox[2], bbox[3]], color='red')
-        line4 = folium.vector_layers.PolyLine([bbox[0], bbox[3]], color='red')
-        line1_text = folium.plugins.PolyLineTextPath(line1, "CM W\u2194E axis", center=True, offset=20, color='red', attributes={'font-size': 16, 'fill': 'red'})
-        line4_text = folium.plugins.PolyLineTextPath(line4, "CM S\u2194N axis", center=True, offset=-7, color='red', attributes={'font-size': 16, 'fill': 'red'})
-        bbox_fg.add_child(line1)
-        bbox_fg.add_child(line2)
-        bbox_fg.add_child(line3)
-        bbox_fg.add_child(line4)
-        bbox_fg.add_child(line1_text)
-        bbox_fg.add_child(line4_text)
-        bbox_fg.add_child(folium.vector_layers.CircleMarker(state.bbox_coordinates[0], color='red', radius=5))
-
-    if state.osm_bbox_object is not None:
-        bbox = state.osm_bbox_object.get_coordinates(xy=False)
-        line1 = folium.vector_layers.PolyLine([bbox[0], bbox[1]], color='red', dash_array='6')
-        line2 = folium.vector_layers.PolyLine([bbox[1], bbox[2]], color='red', dash_array='6')
-        line3 = folium.vector_layers.PolyLine([bbox[2], bbox[3]], color='red', dash_array='6')
-        line4 = folium.vector_layers.PolyLine([bbox[0], bbox[3]], color='red', dash_array='6')
-        line1_text = folium.plugins.PolyLineTextPath(line1, "OSM data", center=True, offset=20, color='red', attributes={'font-size': 16, 'fill': 'red'})
-        bbox_fg.add_child(line1)
-        bbox_fg.add_child(line2)
-        bbox_fg.add_child(line3)
-        bbox_fg.add_child(line4)
-        bbox_fg.add_child(line1_text)
-
-    if state.osm_geometries is not None:
-        osm_geometries = state.osm_geometries
-        if osm_geometries is not None:
-            folium_geometries = {}
-            for key in osm_geometries:
-                visualization_dict = None
-                priority = -999
-                if state.osm_config is not None and key in state.osm_config:
-                    if 'visualization' in state.osm_config[key]:
-                        visualization_dict = state.osm_config[key]['visualization']
-                    if 'priority' in state.osm_config[key]:
-                        priority = int(state.osm_config[key]['priority'])
-                if priority not in folium_geometries:
-                    folium_geometries[priority] = []
-                for geom in osm_geometries[key]:
-                    folium_geom = shapely2folium(geom, visualization_dict, key)
-                    if folium_geom is not None:
-                        folium_geometries[priority].append(folium_geom)
-            
-            priorities = sorted(folium_geometries.keys(), key=lambda x: -x)
-            for priority in priorities:
-                for folium_geom in folium_geometries[priority]:
-                    bbox_fg.add_child(folium_geom)
+        if 'zoom_cache' in st.session_state:
+            state.map_zoom = st.session_state['zoom_cache']
+        if 'center_cache' in st.session_state:
+            center_cache = st.session_state['center_cache']
+            state.map_center = (center_cache['lat'], center_cache['lng'])
+        state.map_key += 1
+        st.session_state['height_map_layer'] = True
 
     # tags = []
     # if st.session_state['map_mode'] == 'OpenStreetMap' and 'osm_config' in st.session_state:
@@ -504,22 +417,25 @@ def map_view_tab():  # noqa: C901, PLR0915
 
     # folium.LayerControl().add_to(map)
 
+    map_obj = build_folium_map(state=state, resources=resources)
+
     st_data = st_folium(
         map_obj,
         center=state.map_center,
         zoom=state.map_zoom,
-        feature_group_to_add=bbox_fg,
         width=1200,
         key=state.map_key,
     )
 
-    if st_data['last_active_drawing'] is not None and state.map_mode == 'Bounding Box Selection':
-        coordinates = np.array(st_data['last_active_drawing']['geometry']['coordinates'])
+    drawing = extract_last_active_drawing(st_data)
+    if drawing is not None and state.map_mode == 'Bounding Box Selection':
+        coordinates = np.array(drawing['geometry']['coordinates'])
         if 'drawn_coordinates' not in st.session_state or \
             st.session_state['drawn_coordinates'].shape != coordinates.shape or \
             not (st.session_state['drawn_coordinates'] == coordinates).all():
             st.session_state['drawn_coordinates'] = coordinates
-            update_bounding_box(coordinates[0])
+            update_state_from_bbox(state, drawing_to_bounding_box(drawing))
+            st.rerun()
 
     if 'zoom' in st_data:
         st.session_state['zoom_cache'] = st_data['zoom']
