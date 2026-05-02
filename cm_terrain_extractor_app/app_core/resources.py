@@ -36,6 +36,15 @@ def prepare_runtime_environment(resources: AppResources) -> None:
     _PREPARED_DLL_DIRS.add(dll_dir)
 
 
+def prepare_import_environment(resources: AppResources) -> None:
+    _prepend_sys_path_once(resources.app_root)
+    _prepend_sys_path_once(resources.app_root.parent)
+
+
+def streamlit_entrypoint_path(resources: AppResources) -> Path:
+    return resources.app_root / "streamlit_main.py"
+
+
 def find_default_osm_configs(resources: AppResources) -> list[Path]:
     if not resources.config_dir.exists():
         return []
@@ -85,3 +94,10 @@ def _prepend_path_once(path: Path) -> None:
     if path_str in normalized_entries:
         return
     os.environ["PATH"] = os.pathsep.join([path_str, *path_entries]) if path_entries else path_str
+
+
+def _prepend_sys_path_once(path: Path) -> None:
+    path_str = str(path.resolve())
+    normalized_entries = {str(Path(entry).resolve()) for entry in sys.path if entry}
+    if path_str not in normalized_entries:
+        sys.path.insert(0, path_str)

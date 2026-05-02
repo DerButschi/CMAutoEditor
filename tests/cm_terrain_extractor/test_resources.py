@@ -116,3 +116,47 @@ def test_prepare_runtime_environment_adds_dll_path_once(tmp_path: Path, monkeypa
     assert path_entries.count(str(dll_dir)) == 1
     assert path_entries[0] == str(dll_dir)
     assert added_dll_dirs == [str(dll_dir)]
+
+
+def test_streamlit_entrypoint_targets_split_main_module(tmp_path: Path) -> None:
+    from cm_terrain_extractor_app.app_core.resources import (
+        AppResources,
+        streamlit_entrypoint_path,
+    )
+
+    resources = AppResources(
+        app_root=tmp_path / "cm_terrain_extractor_app",
+        executable_root=tmp_path,
+        data_cache_path=tmp_path / "data_cache",
+        config_dir=tmp_path,
+        dll_dir=tmp_path / "dll",
+    )
+
+    assert streamlit_entrypoint_path(resources) == resources.app_root / "streamlit_main.py"
+
+
+def test_prepare_import_environment_adds_package_and_legacy_paths_once(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from cm_terrain_extractor_app.app_core.resources import (
+        AppResources,
+        prepare_import_environment,
+    )
+
+    app_root = tmp_path / "bundle" / "cm_terrain_extractor_app"
+    resources = AppResources(
+        app_root=app_root,
+        executable_root=tmp_path / "dist",
+        data_cache_path=tmp_path / "dist" / "data_cache",
+        config_dir=tmp_path / "dist",
+        dll_dir=tmp_path / "bundle" / "dll",
+    )
+    existing_path = tmp_path / "existing"
+    monkeypatch.setattr(sys, "path", [str(existing_path)])
+
+    prepare_import_environment(resources)
+    prepare_import_environment(resources)
+
+    assert sys.path.count(str(app_root.parent)) == 1
+    assert sys.path.count(str(app_root)) == 1
+    assert sys.path[:2] == [str(app_root.parent), str(app_root)]

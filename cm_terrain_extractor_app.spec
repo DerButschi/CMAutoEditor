@@ -1,5 +1,29 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+import sys
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_submodules
+
+project_root = Path.cwd()
+app_source_root = project_root / "cm_terrain_extractor_app"
+if str(app_source_root) not in sys.path:
+    sys.path.insert(0, str(app_source_root))
+
+hiddenimports = [
+    'streamlit', 'streamlit_folium', 'shapely', 'pyproj', 'geopandas', 'rasterio', 'py7zr', 'rasterio.transform', 'rasterio.sample', 'rasterio.vrt',
+    'rasterio._features', 'rasterio.fill', 'rasterio.merge', "skimage.measure", "skimage.transform", 'rasterio.warp',
+    'terrain_extraction.projection_utils', 'terrain_extraction.bbox_utils', 'terrain_extraction.data_sources.hessen_dgm1.data_source',
+    'terrain_extraction.data_sources.aw3d30.data_source', 'terrain_extraction.data_sources.nrw_dgm1.data_source', 'terrain_extraction.data_sources.netherlands_dtm05.data_source',
+    'terrain_extraction.data_sources.bavaria_dgm1.data_source', 'terrain_extraction.data_sources.thuringia_dgm1.data_source',
+    'terrain_extraction.data_sources.lower_saxony_dgm1.data_source', 'terrain_extraction.elevation_map', 'terrain_extraction.data_sources.rge_alti.data_source',
+    'fiona._shim', 'rasterio._shim', 'osmnx', 'geojson', 'profiles', 'matplotlib.backends.backend_svg',
+]
+hiddenimports += collect_submodules('cm_terrain_extractor_app.app_core')
+hiddenimports += collect_submodules('cm_terrain_extractor_app.map_view')
+hiddenimports += collect_submodules('cm_terrain_extractor_app.streamlit_ui')
+hiddenimports += collect_submodules('profiles')
+
 
 a = Analysis(
     ['cm_terrain_extractor_app/cm_terrain_extractor_app.py'],
@@ -27,13 +51,7 @@ a = Analysis(
         ),
 
     ],    
-    hiddenimports=['streamlit', 'streamlit_folium', 'shapely', 'pyproj', 'geopandas', 'rasterio', 'py7zr', 'rasterio.transform', 'rasterio.sample', 'rasterio.vrt', 
-                   'rasterio._features', 'rasterio.fill', 'rasterio.merge', "skimage.measure", "skimage.transform", 'rasterio.warp', 
-                   'terrain_extraction.projection_utils', 'terrain_extraction.bbox_utils', 'terrain_extraction.data_sources.hessen_dgm1.data_source', 
-                   'terrain_extraction.data_sources.aw3d30.data_source', 'terrain_extraction.data_sources.nrw_dgm1.data_source', 'terrain_extraction.data_sources.netherlands_dtm05.data_source',
-                   'terrain_extraction.data_sources.bavaria_dgm1.data_source', 'terrain_extraction.data_sources.thuringia_dgm1.data_source',
-                   'terrain_extraction.elevation_map', 'terrain_extraction.data_sources.rge_alti.data_source', 'fiona._shim', 'rasterio._shim', 'osmnx', 'geojson', 'profiles',
-                   'matplotlib.backends.backend_svg'],
+    hiddenimports=hiddenimports,
 
     hookspath=['./hooks'],
     hooksconfig={},
