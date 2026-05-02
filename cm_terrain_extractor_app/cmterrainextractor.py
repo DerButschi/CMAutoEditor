@@ -1,31 +1,44 @@
 import json
-import streamlit as st
-from streamlit_folium import st_folium
-import folium
-from folium.plugins import Draw
 import os
+import warnings
+
+import folium
+import geojson
 import numpy as np
+import osmnx
 import pandas
 import shapely
-import sys
-import osmnx
-import geojson
-
-from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
+import streamlit as st
+from folium.plugins import Draw
+from streamlit_folium import st_folium
 from terrain_extraction.bbox_utils import BoundingBox
-from terrain_extraction.osm_utils.io import read_file, read_file_object, get_bounding_box, get_bounding_box_from_file_object
-from terrain_extraction.osm_processor import OSMProcessor
-from terrain_extraction.data_sources.hessen_dgm1.data_source import HessenDataSource
 from terrain_extraction.data_sources.aw3d30.data_source import AW3D30DataSource
-from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
-from terrain_extraction.data_sources.netherlands_dtm05.data_source import NetherlandsDataSource
 from terrain_extraction.data_sources.bavaria_dgm1.data_source import BavariaDataSource
-from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
+from terrain_extraction.data_sources.hessen_dgm1.data_source import HessenDataSource
 from terrain_extraction.data_sources.lower_saxony_dgm1.data_source import LowerSaxonyDataSource
+from terrain_extraction.data_sources.netherlands_dtm05.data_source import NetherlandsDataSource
+from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
+from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
+from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
+from terrain_extraction.osm_processor import OSMProcessor
+from terrain_extraction.osm_utils.io import (
+    get_bounding_box_from_file_object,
+    read_file_object,
+)
 from terrain_extraction.visualization_utils import shapely2folium
 
-import warnings
+from cm_terrain_extractor_app.app_core.resources import (
+    find_default_osm_configs,
+    prepare_runtime_environment,
+    resolve_resources,
+)
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+resources = resolve_resources()
+prepare_runtime_environment(resources)
+executable_path = str(resources.config_dir)
+data_cache_path = str(resources.data_cache_path)
 
 # data_sources = [HessenDataSource(), AW3D30DataSource()]
 data_sources = [HessenDataSource(), 
@@ -38,16 +51,9 @@ data_sources = [HessenDataSource(),
                 LowerSaxonyDataSource(),
                 ]
 
-st.session_state['selectable_data_sources'] = [ds for ds in data_sources]
+st.session_state['selectable_data_sources'] = list(data_sources)
 
 # data_sources = [NetherlandsDataSource()]
-
-if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-    executable_path = os.path.dirname(sys.executable)
-    data_cache_path = os.path.join(os.path.dirname(sys.executable), 'data_cache')
-else:
-    data_cache_path = 'data_cache'
-    executable_path = '.'
 
 # DEBUG_MODE = 'OSM_PROCESSOR'
 DEBUG_MODE = None
@@ -58,7 +64,7 @@ if DEBUG_MODE == 'OSM_PROCESSOR' and 'osm_output' not in st.session_state:
         st.session_state['osm_output'] = osm_processor.get_output()
         st.session_state['osm_geometries'] = osm_processor.get_geometries()
         st.session_state['osm_config_file'] = 'default_osm_config.json'
-        with open(st.session_state['osm_config_file'], 'r') as config_file_handle:
+        with open(st.session_state['osm_config_file']) as config_file_handle:
             st.session_state['osm_config'] = json.load(config_file_handle)
 
         st.session_state['osm_profile_str'] = osm_processor.profile
@@ -93,18 +99,17 @@ def update_bounding_box(points):
     # return bounding_box.get_dataframe()
 
 def find_data_sources_in_bbox(status_update_area):
-    with status_update_area.container(border=True):
-        with st.spinner('Searching for data sources in the selected area...'):
-            available_data_sources = []
-            for data_source in st.session_state['selectable_data_sources']:
-                if data_source.intersects_bounding_box(st.session_state['bbox_object']):
-                    available_data_sources.append(data_source)
+    with status_update_area.container(border=True), st.spinner('Searching for data sources in the selected area...'):
+        available_data_sources = []
+        for data_source in st.session_state['selectable_data_sources']:
+            if data_source.intersects_bounding_box(st.session_state['bbox_object']):
+                available_data_sources.append(data_source)
 
-            st.session_state['data_sources'] = available_data_sources
+        st.session_state['data_sources'] = available_data_sources
     status_update_area.empty()
 
 def get_data_source_label(data_source):
-    return '{} - {}, {}'.format(data_source.name, data_source.model_type, data_source.resolution)
+    return f'{data_source.name} - {data_source.model_type}, {data_source.resolution}'
 
 @st.cache_data
 def dataframe2csv(df: pandas.DataFrame):
@@ -115,7 +120,7 @@ def extract_data_in_bbox(status_update_area):
         data_source = st.session_state['selected_data_source']
         bounding_box = st.session_state['bbox_object']
         st.session_state['currently_processing_data'] = (
-            'Extracting data from {}'.format(data_source.name),
+            f'Extracting data from {data_source.name}',
             data_source.name
         )
 
@@ -123,7 +128,7 @@ def extract_data_in_bbox(status_update_area):
         with st.status('Extracting elevation data', expanded=True) as status:
             elevation_data = data_source.get_data(bounding_box, data_cache_path)
             st.session_state['elevation_in_bbox'] = elevation_data
-            path_to_png = data_source.get_png(bounding_box, data_cache_path)
+            data_source.get_png(bounding_box, data_cache_path)
             status.update(label="Elevation data extracted!", state="complete", expanded=False)
 
         del st.session_state['currently_processing_data']
@@ -141,9 +146,9 @@ def update_bbox_from_df():
     df = st.session_state['edited_df'].copy()
     del st.session_state['edited_df']
     if (~df.isnull().any()).all():
-        update_bounding_box(list(zip(df.x.values, df.y.values)))
+        update_bounding_box(list(zip(df.x.values, df.y.values, strict=False)))
 
-def draw_sidebar(status_update_area):
+def draw_sidebar(status_update_area):  # noqa: PLR0915
     max_len_x_axis = 4160 # m
     max_len_y_axis = 4160 # m
     max_area = 18000000 # km2
@@ -214,23 +219,23 @@ def draw_sidebar(status_update_area):
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     if len_x_axis is not None and delta_len_x <= 0:
-                        st.metric(label='Length W\u2194E', value='{} m'.format(np.round(len_x_axis).astype(int)))
+                        st.metric(label='Length W\u2194E', value=f'{np.round(len_x_axis).astype(int)} m')
                     elif len_x_axis is not None and delta_len_x > 0:
-                        st.metric(label='Length W\u2194E', value='{} m'.format(np.round(len_x_axis).astype(int)), delta='{} m'.format(np.round(delta_len_x).astype(int)), delta_color="inverse")
+                        st.metric(label='Length W\u2194E', value=f'{np.round(len_x_axis).astype(int)} m', delta=f'{np.round(delta_len_x).astype(int)} m', delta_color="inverse")
                     else:
                         st.metric(label='Length W\u2194E', value='-')    
                 with col2:
                     if len_y_axis is not None and delta_len_y <= 0:
-                        st.metric(label='Length S\u2194N', value='{} m'.format(np.round(len_y_axis).astype(int)))
+                        st.metric(label='Length S\u2194N', value=f'{np.round(len_y_axis).astype(int)} m')
                     elif len_y_axis is not None and delta_len_y > 0:
-                        st.metric(label='Length S\u2194N', value='{} m'.format(np.round(len_y_axis).astype(int)), delta='{} m'.format(np.round(delta_len_y).astype(int)), delta_color="inverse")
+                        st.metric(label='Length S\u2194N', value=f'{np.round(len_y_axis).astype(int)} m', delta=f'{np.round(delta_len_y).astype(int)} m', delta_color="inverse")
                     else:
                         st.metric(label='Length S\u2194N', value='-')    
                 with col3:
                     if area is not None and delta_area <= 0:
-                        st.metric(label='Selected Area', value='{} km²'.format(np.round(area / 1e6, decimals=1)))
+                        st.metric(label='Selected Area', value=f'{np.round(area / 1e6, decimals=1)} km²')
                     elif area is not None and delta_area > 0:
-                        st.metric(label='Selected Area', value='{} km²'.format(np.round(area / 1e6, decimals=1)), delta='{} km²'.format(np.round(delta_area / 1e6, decimals=1)), delta_color="inverse")
+                        st.metric(label='Selected Area', value=f'{np.round(area / 1e6, decimals=1)} km²', delta=f'{np.round(delta_area / 1e6, decimals=1)} km²', delta_color="inverse")
                     else:
                         st.metric(label='Selected Area', value='-')    
 
@@ -239,7 +244,7 @@ def draw_sidebar(status_update_area):
                 if not st.session_state['selected_area_valid']:
                     st.markdown(":red[Please select a valid bounding box first.]")
                 st.button('Find available data sources', disabled=not st.session_state['selected_area_valid'], on_click=find_data_sources_in_bbox, args=[status_update_area])
-                selected_data_source = st.selectbox('Data sources', st.session_state['data_sources'] if 'data_sources' in st.session_state else [], format_func=get_data_source_label)
+                selected_data_source = st.selectbox('Data sources', st.session_state.get('data_sources', []), format_func=get_data_source_label)
 
                 st.session_state['selected_data_source'] = selected_data_source
                 st.button('Extract elevation data', disabled=selected_data_source is None, on_click=extract_data_in_bbox, args=[status_update_area])
@@ -249,7 +254,7 @@ def draw_sidebar(status_update_area):
                     'Download elevation .csv-file', 
                     dataframe2csv(st.session_state['elevation_in_bbox']) if 'elevation_in_bbox' in st.session_state else 'dummy', 
                     file_name='elevation_data.csv',
-                    disabled=not ('elevation_in_bbox' in st.session_state)
+                    disabled='elevation_in_bbox' not in st.session_state
                 )
         if st.session_state['map_mode'] == 'OpenStreetMap':
             title_dict = {
@@ -264,7 +269,7 @@ def draw_sidebar(status_update_area):
                     options=['black_sea', 'cold_war', 'fortress_italy', 'shock_force_2'],
                     format_func=lambda x: title_dict[x]
                 )
-                config_files = [f for f in os.listdir(executable_path) if os.path.isfile(os.path.join(executable_path, f)) and f.endswith('.json')]
+                config_files = [path.name for path in find_default_osm_configs(resources)]
                 default_config_files = {
                     'black_sea': 'default_osm_config_cmbs.json',
                     'cold_war': 'default_osm_config_cmcw.json',
@@ -278,7 +283,7 @@ def draw_sidebar(status_update_area):
                 )
                 st.session_state['osm_config_file'] = config_file
                 st.session_state['osm_profile_str'] = profile_str
-                with open(os.path.join(executable_path, config_file), 'r') as config_file_handle:
+                with open(os.path.join(executable_path, config_file)) as config_file_handle:
                     st.session_state['osm_config'] = json.load(config_file_handle)
 
             with st.container(border=True):
@@ -300,7 +305,7 @@ def draw_sidebar(status_update_area):
                         st.markdown(":red[Please select a valid bounding box first.]")
                         processing_enabled = False
                     # if not 'osm_file' in st.session_state:
-                    if not 'osm_data' in st.session_state:
+                    if 'osm_data' not in st.session_state:
                         st.markdown(":red[Please import or download OpenStreetMap data first.]")
                         processing_enabled = False
                     st.button('Process OpenStreeMap data', disabled=not processing_enabled, on_click=process_osm_data, args=[status_update_area])
@@ -309,7 +314,7 @@ def draw_sidebar(status_update_area):
                     'Download OpenStreetMap .csv-file', 
                     dataframe2csv(st.session_state['osm_output']) if 'osm_output' in st.session_state else 'dummy', 
                     file_name='osm_data.csv',
-                    disabled=not ('osm_output' in st.session_state)
+                    disabled='osm_output' not in st.session_state
                 )
 
 
@@ -318,24 +323,22 @@ def process_osm_data(status_update_area):
     osm_processor = OSMProcessor(
         path_to_config=os.path.join(executable_path, st.session_state['osm_config_file']), bbox=st.session_state['bbox_object'], profile=st.session_state['osm_profile_str'])
 
-    with status_update_area.container():
-        with st.status('Processing OpenStreetMap data...'):
-            st.write('Preprocessing data...')
-            osm_processor.preprocess_osm_data(osm_data=osm_data)
-            st.write('Running processors...')
-            osm_processor.run_processors()
-            st.write('Doing postprocessing...')
-            osm_processor.post_process()
-            st.session_state['osm_output'] = osm_processor.get_output()
-            st.session_state['osm_geometries'] = osm_processor.get_geometries()
+    with status_update_area.container(), st.status('Processing OpenStreetMap data...'):
+        st.write('Preprocessing data...')
+        osm_processor.preprocess_osm_data(osm_data=osm_data)
+        st.write('Running processors...')
+        osm_processor.run_processors()
+        st.write('Doing postprocessing...')
+        osm_processor.post_process()
+        st.session_state['osm_output'] = osm_processor.get_output()
+        st.session_state['osm_geometries'] = osm_processor.get_geometries()
     status_update_area.empty()
     # osm_processor.write_to_file(args.output_file)
 
-    a = 1
-
 def get_osm_data(status_update_area):
     bounding_box: BoundingBox = st.session_state['bbox_object']
-    config = json.load(open(os.path.join(executable_path, st.session_state['osm_config_file']),'r'))
+    with open(os.path.join(executable_path, st.session_state['osm_config_file'])) as config_file_handle:
+        config = json.load(config_file_handle)
     tag_dict = {}
     for key in config:
         for tag_entry in ['tags', 'exclude_tags', 'required_tags']:
@@ -353,7 +356,7 @@ def get_osm_data(status_update_area):
 
     st.session_state['osm_data'] = geojson.loads(osm_data.to_json())
 
-def map_view_tab():
+def map_view_tab():  # noqa: C901, PLR0915
     if st.session_state['map_mode'] == 'Bounding Box Selection':
         header = 'Bounding Box Selection'
         sub_header = 'Select the outline of the Combat Mission map by drawing a rectangle or polygon.'
@@ -384,7 +387,7 @@ def map_view_tab():
     # if 'zoom' not in st.session_state:
     #     st.session_state['zoom'] = 1
 
-    map = folium.Map(tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", 
+    map_obj = folium.Map(tiles="https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
                      attr=(
                             '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> '
                             'contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)'
@@ -400,11 +403,11 @@ def map_view_tab():
             'marker': False,
             'circlemarker': False,
         })
-        draw.add_to(map)
+        draw.add_to(map_obj)
 
-    folium.plugins.Geocoder(postion='bottomleft').add_to(map)
-    folium.plugins.MeasureControl().add_to(map)
-    folium.plugins.Fullscreen().add_to(map)
+    folium.plugins.Geocoder(postion='bottomleft').add_to(map_obj)
+    folium.plugins.MeasureControl().add_to(map_obj)
+    folium.plugins.Fullscreen().add_to(map_obj)
 
     if 'elevation_in_bbox' in st.session_state:
         if 'height_map_layer' not in st.session_state:
@@ -475,7 +478,7 @@ def map_view_tab():
                     if folium_geom is not None:
                         folium_geometries[priority].append(folium_geom)
             
-            priorities = sorted(list(folium_geometries.keys()), key=lambda x: -x)
+            priorities = sorted(folium_geometries.keys(), key=lambda x: -x)
             for priority in priorities:
                 for folium_geom in folium_geometries[priority]:
                     bbox_fg.add_child(folium_geom)
@@ -489,7 +492,7 @@ def map_view_tab():
     # folium.LayerControl().add_to(map)
 
     st_data = st_folium(
-        map,
+        map_obj,
         center=st.session_state['map_center'],
         zoom=st.session_state['map_zoom'],
         feature_group_to_add=bbox_fg,
@@ -500,7 +503,7 @@ def map_view_tab():
     if st_data['last_active_drawing'] is not None and st.session_state['map_mode'] == 'Bounding Box Selection':
         coordinates = np.array(st_data['last_active_drawing']['geometry']['coordinates'])
         if 'drawn_coordinates' not in st.session_state or \
-            not (st.session_state['drawn_coordinates'].shape == coordinates.shape) or \
+            st.session_state['drawn_coordinates'].shape != coordinates.shape or \
             not (st.session_state['drawn_coordinates'] == coordinates).all():
             st.session_state['drawn_coordinates'] = coordinates
             update_bounding_box(coordinates[0])
@@ -548,7 +551,7 @@ def options_tab():
     st.session_state['selectable_data_sources'] = [ds for ds in data_sources if ds.name in selected_data_source_names]
 
     file_sizes = 0
-    for dir_path, dir_name, file_names in os.walk(data_cache_path):
+    for dir_path, _dir_name, file_names in os.walk(data_cache_path):
         for fname in file_names:
             file_sizes += os.path.getsize(os.path.join(dir_path, fname))
 
@@ -561,8 +564,7 @@ def options_tab():
         if file_sizes / factor < 1024:
             break
     
-    st.button('Clear Cache ({} {})'.format(np.round(file_sizes / factor, decimals=2), size_str))
-    a = 1
+    st.button(f'Clear Cache ({np.round(file_sizes / factor, decimals=2)} {size_str})')
 
 if __name__ == '__main__':
     st.set_page_config(

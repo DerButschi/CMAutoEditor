@@ -14,7 +14,7 @@ Future agents and humans must update this document after each milestone. Record 
 | --- | --- | --- | --- | --- | --- |
 | 1 | Inventory and behavior snapshot | Done | Codex | 2026-05-02 | Created `docs/plans/streamlit_refactoring_inventory.md`; app code untouched. |
 | 2 | Introduce test harness and first regression tests | Done | Codex | 2026-05-02 | Added `tests/cm_terrain_extractor/` with expected failures for missing `app_core` and `map_view` modules. |
-| 3 | Extract resource and path handling | Not started | Unassigned | 2026-05-02 | Must preserve launcher and source-run behavior. |
+| 3 | Extract resource and path handling | Done | Codex | 2026-05-02 | Added `app_core.resources`; app and launcher now share source/packaged path and DLL setup. |
 | 4 | Introduce `AppState` and session adapter | Not started | Unassigned | 2026-05-02 | Temporary legacy session keys must be recorded as debt. |
 | 5 | Extract validation and export helpers | Not started | Unassigned | 2026-05-02 | CSV bytes must remain compatible with current `df.to_csv().encode("utf-8")`. |
 | 6 | Extract backend actions | Not started | Unassigned | 2026-05-02 | Unit tests must use fakes and avoid network dependency. |
@@ -33,6 +33,8 @@ Future agents and humans must update this document after each milestone. Record 
 | 2026-05-02 | Treat the existing `test/` directory as fixture data, not an active pytest suite. | The plan states the repository currently contains no test suite; future tests go under `tests/cm_terrain_extractor/`. | User |
 | 2026-05-02 | Milestone 1 is documentation-only. | The execution plan explicitly forbids Python code changes in M1; inventory is sufficient to guide M2-M8. | Codex |
 | 2026-05-02 | Configure pytest with `pythonpath = ["."]`. | The approved `pytest.exe` entrypoint starts from the Conda `Scripts` directory, so repository packages were not importable without explicitly adding the repo root. | Codex |
+| 2026-05-02 | Source-mode resources use the current working directory for JSON configs and `data_cache`. | This preserves the current `cmterrainextractor.py` source behavior where config lookup used `executable_path = "."` and cache writes used `data_cache` relative to the Streamlit working directory. | Codex |
+| 2026-05-02 | Packaged resources use `sys.executable` parent for configs/cache and `_MEIPASS` for bundled app/DLL files. | This preserves the launcher/PyInstaller split where user-editable configs and cache live beside the executable while bundled app files are loaded from the PyInstaller extraction root. | Codex |
 
 ## Contract Changes Requested or Approved
 
@@ -49,6 +51,7 @@ No further contract changes have been requested or approved.
 | 2026-05-02 | Planning docs | No implementation debt recorded. | Docs-only setup. | Not applicable. |
 | 2026-05-02 | Milestone 1 | No application debt introduced. Inventory records existing unknowns around `bbox_origin`, `height_map_layer`, cache clearing, invalidation, source-mode paths, and Streamlit-cached OSM IO. | M1 changed only planning docs. | Resolve through M3-M8 tests and extraction work. |
 | 2026-05-02 | Milestone 2 | No production-code debt introduced. Pytest and ruff cache writes reported sandbox permission issues; ruff validation used `--no-cache`. | M2 added only tests and pytest import-path configuration. | Recheck cache behavior in unrestricted local runs if warnings become noisy. |
+| 2026-05-02 | Milestone 3 | `cmterrainextractor.py` still keeps compatibility globals `resources`, `executable_path`, and `data_cache_path`; existing large UI functions carry ruff complexity suppressions. | M3 centralizes resource handling without performing the planned UI/module split. Ruff validation would otherwise fail on pre-existing monolithic Streamlit complexity. | Pay down during M8 Streamlit UI split. |
 
 ## Test and Validation Results
 
@@ -61,6 +64,10 @@ No further contract changes have been requested or approved.
 | 2026-05-02 | Milestone 2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor -v` | Failed as expected | Collected 3 tests. Failures are expected missing target modules: `cm_terrain_extractor_app.map_view` and `cm_terrain_extractor_app.app_core`. Pytest also warned that `.pytest_cache` could not be written in the sandbox. |
 | 2026-05-02 | Milestone 2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check tests\cm_terrain_extractor\__init__.py tests\cm_terrain_extractor\test_exports.py tests\cm_terrain_extractor\test_state.py tests\cm_terrain_extractor\test_drawing.py` | Failed due environment/cache | Ruff could not initialize `.ruff_cache` because the sandbox denied cache writes. |
 | 2026-05-02 | Milestone 2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check --no-cache tests\cm_terrain_extractor\__init__.py tests\cm_terrain_extractor\test_exports.py tests\cm_terrain_extractor\test_state.py tests\cm_terrain_extractor\test_drawing.py` | Passed | Retry with cache disabled reported `All checks passed!`. |
+| 2026-05-02 | Milestone 3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\test_resources.py -v --basetemp=tmp_pytest_codex` | Failed as expected | After sandbox temp-directory failures, an unrestricted run collected 4 tests and failed with expected `ModuleNotFoundError: No module named 'cm_terrain_extractor_app.app_core'`. |
+| 2026-05-02 | Milestone 3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\test_resources.py -v --basetemp=tmp_pytest_codex` | Passed | 4 resource tests passed after implementing `AppResources`, source/packaged path resolution, config discovery, and idempotent DLL path setup. |
+| 2026-05-02 | Milestone 3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check cm_terrain_extractor_app\app_core\resources.py cm_terrain_extractor_app\cmterrainextractor.py cm_terrain_extractor_app\cm_terrain_extractor_app.py tests\cm_terrain_extractor\test_resources.py --no-cache` | Passed | Ruff cache writes are still avoided with `--no-cache`; safe mechanical fixes were applied in the touched Streamlit wrapper. |
+| 2026-05-02 | Milestone 3 | Temporary source smoke: `C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m streamlit run cm_terrain_extractor_app\cmterrainextractor.py --server.headless=true --server.port=18501 --browser.gatherUsageStats=false` | Passed | Hidden Streamlit process returned HTTP 200 and was stopped. Full interactive checks for config selection/elevation/OSM remain future manual smoke scope. |
 
 ## Known Blockers
 
