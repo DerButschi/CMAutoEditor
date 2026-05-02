@@ -3,9 +3,7 @@ import os
 import warnings
 
 import folium
-import geojson
 import numpy as np
-import osmnx
 import pandas
 import shapely
 import streamlit as st
@@ -21,12 +19,25 @@ from terrain_extraction.data_sources.nrw_dgm1.data_source import NRWDataSource
 from terrain_extraction.data_sources.rge_alti.data_source import FranceDataSource
 from terrain_extraction.data_sources.thuringia_dgm1.data_source import ThuringiaDataSource
 from terrain_extraction.osm_processor import OSMProcessor
-from terrain_extraction.osm_utils.io import (
-    get_bounding_box_from_file_object,
-    read_file_object,
-)
+from terrain_extraction.osm_utils.io import get_bounding_box
 from terrain_extraction.visualization_utils import shapely2folium
 
+from cm_terrain_extractor_app.app_core.actions import (
+    download_osm_data as download_osm_data_action,
+)
+from cm_terrain_extractor_app.app_core.actions import (
+    extract_elevation_data as extract_elevation_data_action,
+)
+from cm_terrain_extractor_app.app_core.actions import (
+    find_data_sources_in_bbox as find_data_sources_in_bbox_action,
+)
+from cm_terrain_extractor_app.app_core.actions import (
+    load_osm_config,
+    load_osm_data_from_uploaded_bytes,
+)
+from cm_terrain_extractor_app.app_core.actions import (
+    process_osm_data as process_osm_data_action,
+)
 from cm_terrain_extractor_app.app_core.exports import (
     dataframe_to_csv_bytes,
     suggest_elevation_filename,
@@ -109,12 +120,10 @@ def update_bounding_box(points):
 
 def find_data_sources_in_bbox(status_update_area):
     with status_update_area.container(border=True), st.spinner('Searching for data sources in the selected area...'):
-        available_data_sources = []
-        for data_source in state.selectable_data_sources:
-            if data_source.intersects_bounding_box(state.bbox_object):
-                available_data_sources.append(data_source)
-
-        state.available_data_sources = available_data_sources
+        state.available_data_sources = find_data_sources_in_bbox_action(
+            bbox=state.bbox_object,
+            selectable_sources=state.selectable_data_sources,
+        )
     status_update_area.empty()
 
 def get_data_source_label(data_source):
@@ -129,12 +138,12 @@ def extract_data_in_bbox(status_update_area):
             data_source.name
         )
 
-        os.makedirs(data_cache_path, exist_ok=True)
         with st.status('Extracting elevation data', expanded=True) as status:
-            elevation_data = data_source.get_data(bounding_box, data_cache_path)
-            state.elevation_in_bbox = elevation_data
-            data_source.get_png(bounding_box, data_cache_path)
-            state.height_map_png = resources.data_cache_path / "current_height_map.png"
+            state.elevation_in_bbox, state.height_map_png = extract_elevation_data_action(
+                data_source=data_source,
+                bbox=bounding_box,
+                data_cache_path=resources.data_cache_path,
+            )
             status.update(label="Elevation data extracted!", state="complete", expanded=False)
 
         state.currently_processing_data = None
@@ -308,8 +317,7 @@ def draw_sidebar(status_update_area):  # noqa: C901, PLR0915
                 )
                 state.osm_config_file = config_file
                 state.osm_profile = profile_str
-                with open(os.path.join(executable_path, config_file)) as config_file_handle:
-                    state.osm_config = json.load(config_file_handle)
+                state.osm_config = load_osm_config(config_path=resources.config_dir / config_file)
                 if osm_settings_changed:
                     clear_osm_processing_result(state)
 
@@ -322,10 +330,11 @@ def draw_sidebar(status_update_area):  # noqa: C901, PLR0915
                 with st.container(border=True):
                     osm_file = st.file_uploader('Import OpenStreetMap file', type='geojson')
                     if osm_file is not None:
-                        bbox = get_bounding_box_from_file_object(osm_file)
-                        state.osm_bbox_object = bbox
-                        # st.session_state['osm_file'] = osm_file
-                        state.osm_data = read_file_object(osm_file)
+                        state.osm_data = load_osm_data_from_uploaded_bytes(
+                            data=osm_file.getvalue(),
+                            filename=osm_file.name,
+                        )
+                        state.osm_bbox_object = get_bounding_box(state.osm_data)
                         clear_osm_processing_result(state)
                 with st.container(border=True):
                     processing_enabled = True
@@ -347,45 +356,24 @@ def draw_sidebar(status_update_area):  # noqa: C901, PLR0915
 
 
 def process_osm_data(status_update_area):
-    osm_data = state.osm_data
-    osm_processor = OSMProcessor(
-        path_to_config=os.path.join(executable_path, state.osm_config_file),
-        bbox=state.bbox_object,
-        profile=state.osm_profile,
-    )
-
     with status_update_area.container(), st.status('Processing OpenStreetMap data...'):
-        st.write('Preprocessing data...')
-        osm_processor.preprocess_osm_data(osm_data=osm_data)
-        st.write('Running processors...')
-        osm_processor.run_processors()
-        st.write('Doing postprocessing...')
-        osm_processor.post_process()
-        state.osm_output = osm_processor.get_output()
-        state.osm_geometries = osm_processor.get_geometries()
+        st.write('Processing data...')
+        state.osm_output, state.osm_geometries = process_osm_data_action(
+            osm_data=state.osm_data,
+            bbox=state.bbox_object,
+            config_path=resources.config_dir / state.osm_config_file,
+            profile=state.osm_profile,
+        )
+        st.write('Processing complete.')
     status_update_area.empty()
     # osm_processor.write_to_file(args.output_file)
 
 def get_osm_data(status_update_area):
-    bounding_box: BoundingBox = state.bbox_object
-    with open(os.path.join(executable_path, state.osm_config_file)) as config_file_handle:
-        config = json.load(config_file_handle)
-    tag_dict = {}
-    for key in config:
-        for tag_entry in ['tags', 'exclude_tags', 'required_tags']:
-            if tag_entry in config[key]: # actually, should be but...
-                for k, v in config[key][tag_entry]:
-                    if k not in tag_dict:
-                        tag_dict[k] = []
-                    tag_dict[k].append(v)
-
-    osm_data = osmnx.features_from_polygon(bounding_box.box_wgs84, tag_dict)
-    if 'ways' in osm_data.columns:
-        osm_data = osm_data.drop(columns=['ways'])
-    if 'nodes' in osm_data.columns:
-        osm_data.drop(columns=['nodes'])
-
-    state.osm_data = geojson.loads(osm_data.to_json())
+    state.osm_data = download_osm_data_action(
+        bbox=state.bbox_object,
+        config=load_osm_config(config_path=resources.config_dir / state.osm_config_file),
+    )
+    state.osm_bbox_object = get_bounding_box(state.osm_data)
     clear_osm_processing_result(state)
 
 def map_view_tab():  # noqa: C901, PLR0915
