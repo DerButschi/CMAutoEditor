@@ -1,0 +1,4 @@
+[shell_environment_policy]
+inherit = "all"
+include_only = []
+set = { PATH = 'C:\Users\der_b\miniconda3\envs\cm_terrain;C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts;C:\Users\der_b\miniconda3\envs\cm_terrain\Library\bin;C:\Users\der_b\miniconda3\condabin;C:\Program Files\Git\cmd;C:\Program Files\Git\usr\bin;C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0;C:\Users\der_b\AppData\Local\Microsoft\WinGet\Packages\BurntSushi.ripgrep.MSVC_Microsoft.Winget.Source_8wekyb3d8bbwe\ripgrep-15.1.0-x86_64-pc-windows-msvc' }
