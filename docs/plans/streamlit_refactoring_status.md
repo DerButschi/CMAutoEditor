@@ -21,7 +21,7 @@ Future agents and humans must update this document after each milestone. Record 
 | 7 | Extract drawing parser and Folium map/layers | Done | Codex | 2026-05-02 | Added `map_view` drawing parser and Folium map/layer builders; coordinate order is covered by regression tests. |
 | 8 | Split Streamlit UI modules | Done | Codex | 2026-05-02 | Added `streamlit_main.py` and split Streamlit rendering into `streamlit_ui` modules; `cmterrainextractor.py` is now a wrapper. |
 | 9 | Stabilize launcher and PyInstaller spec | Done | Codex | 2026-05-02 | Launcher now bootstraps `streamlit_main.py`; packaging docs record source smoke success and PyInstaller hook blocker. |
-| 10 | Final integration, docs, and validation | Not started | Unassigned | 2026-05-02 | Must record final tests, ruff, import checks, manual smoke checks, and residual risks. |
+| 10 | Final integration, docs, and validation | Done | Codex | 2026-05-02 | Final app tests, ruff, import checks, source smoke, and PyInstaller clean rebuild attempt recorded; packaged executable remains blocked by PyInstaller/scikit-image hook analysis. |
 
 ## Decisions Made
 
@@ -42,6 +42,7 @@ Future agents and humans must update this document after each milestone. Record 
 | 2026-05-02 | The packaged launcher now bootstraps `streamlit_main.py` directly. | M8 made `streamlit_main.py` the split Streamlit entrypoint, so M9 points the executable launcher at the stable app surface instead of the compatibility wrapper. | Codex |
 | 2026-05-02 | `prepare_import_environment(resources)` adds both the app package parent and app root to `sys.path`. | Packaged execution needs `cm_terrain_extractor_app.*` imports and the legacy `terrain_extraction.*` imports to remain available after Streamlit bootstrap. | Codex |
 | 2026-05-02 | PyInstaller hidden imports collect the split `app_core`, `map_view`, and `streamlit_ui` packages, but terrain hidden imports stay explicit. | Broad terrain submodule collection pulled optional processing scripts into PyInstaller's scikit-image hook path and worsened the build blocker. | Codex |
+| 2026-05-02 | Keep scikit-image packaging narrow by explicitly importing `skimage.measure` and `skimage.transform`, excluding `skimage.io`, `skimage.io._plugins`, and `skimage.viewer`, and disabling UPX. | The requested PyInstaller experiment advanced past the previous `skimage.io._plugins` failure point, and `upx=False` avoids a later executable compression variable once analysis succeeds. | User request / Codex |
 
 ## Contract Changes Requested or Approved
 
@@ -69,6 +70,7 @@ No further contract changes have been requested or approved.
 | 2026-05-02 | Milestone 8 | Legacy `terrain_extraction` modules still import Streamlit directly. | M8 split the app entry/UI surface without rewriting terrain data-source, OSM IO, or processor internals; `app_core` and `map_view` remain clean. | Later terrain-internal cleanup if full framework isolation outside UI becomes required. |
 | 2026-05-02 | Milestone 9 | Packaged executable launch remains unverified because PyInstaller fails before EXE creation in the local Conda environment. | The unrestricted build reaches PyInstaller analysis but the child process dies inside scikit-image hook isolation (`skimage.io._plugins`; a temporary exclusion moved the failure to `skimage.filters`). | Revisit PyInstaller/scikit-image hook compatibility or environment package versions before M10 packaged smoke. |
 | 2026-05-02 | Milestone 9 | PyInstaller still reports missing hidden imports `fiona._shim` and `rasterio._shim`. | These were pre-existing hidden imports in the spec and are warnings before the later scikit-image hook failure. | Confirm whether current Fiona/Rasterio versions still need these entries during the next successful packaging build. |
+| 2026-05-02 | Milestone 10 | Packaged executable launch remains unverified after the requested skimage IO/plugin excludes. | The unrestricted clean build got past the original `skimage.io._plugins` isolation failure but still died in PyInstaller analysis while `hook-skimage.filters.py` collected `skimage.filters.rank.tests`. | Investigate a narrower/custom scikit-image filters hook, PyInstaller hooks-contrib compatibility, or scikit-image/PyInstaller package versions. |
 
 ## Test and Validation Results
 
@@ -128,14 +130,22 @@ No further contract changes have been requested or approved.
 | 2026-05-02 | Milestone 9 | Temporary source smoke: `C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m streamlit run cm_terrain_extractor_app\streamlit_main.py --server.headless=true --server.port=18559 --browser.gatherUsageStats=false` | Passed | Hidden Streamlit process returned HTTP 200 and was stopped. |
 | 2026-05-02 | Milestone 9 | `C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m PyInstaller --version` | Passed | PyInstaller 6.4.0 is available in the approved Conda environment. |
 | 2026-05-02 | Milestone 9 | `C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m PyInstaller cm_terrain_extractor_app.spec --noconfirm` | Failed due environment/build setup | Sandboxed build failed replacing `build\cm_terrain_extractor_app\base_library.zip`; unrestricted retries advanced into analysis but failed before EXE creation with `PyInstaller.isolated._parent.SubprocessDiedError` in scikit-image hook isolation. Packaged executable launch is unverified and documented in `docs/cm_terrain_extractor_packaging.md`. |
+| 2026-05-02 | Milestone 10 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor -v --basetemp=tmp_pytest_m10_full` | Failed due environment/temp setup | 25 tests passed before pytest hit the known sandbox Windows temp-directory permission issue. |
+| 2026-05-02 | Milestone 10 | Elevated retry: `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor -v --basetemp=tmp_pytest_m10_elevated` | Passed | 33 app-specific tests passed outside the sandbox; only deprecation warnings were reported. |
+| 2026-05-02 | Milestone 10 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check cm_terrain_extractor_app\app_core cm_terrain_extractor_app\map_view cm_terrain_extractor_app\streamlit_ui cm_terrain_extractor_app\streamlit_main.py cm_terrain_extractor_app\cmterrainextractor.py cm_terrain_extractor_app\cm_terrain_extractor_app.py tests\cm_terrain_extractor --no-cache` | Passed | Ruff reported `All checks passed!`. |
+| 2026-05-02 | Milestone 10 | `Select-String -Path cm_terrain_extractor_app\app_core\*.py -Pattern "streamlit","streamlit_folium"` | Passed with expected name/docstring matches | Matches were `streamlit_entrypoint_path` in `resources.py` and the `Streamlit-free` package docstring; no forbidden imports matched. |
+| 2026-05-02 | Milestone 10 | `Select-String -Path cm_terrain_extractor_app\map_view\*.py -Pattern "streamlit"` | Passed | No Streamlit matches in `map_view`. |
+| 2026-05-02 | Milestone 10 | `Select-String -Path cm_terrain_extractor_app.spec -Pattern "skimage.measure","skimage.transform","skimage.io","skimage.io._plugins","skimage.viewer","upx=False"` | Passed | Confirmed explicit skimage hidden imports, requested skimage excludes, and `upx=False`. |
+| 2026-05-02 | Milestone 10 | Temporary source smoke: `C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m streamlit run cm_terrain_extractor_app\streamlit_main.py --server.headless=true --server.port=18570 --browser.gatherUsageStats=false` | Passed | Hidden Streamlit process returned HTTP 200 and was stopped. Interactive bbox/elevation/OSM workflows remain manual residual risk. |
+| 2026-05-02 | Milestone 10 | `C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m PyInstaller cm_terrain_extractor_app.spec --noconfirm --clean` | Failed due environment/build setup | Sandboxed clean build failed deleting `build\cm_terrain_extractor_app\Analysis-00.toc`; unrestricted retry advanced past the previous `skimage.io._plugins` failure point but failed during `hook-skimage.filters.py` while collecting `skimage.filters.rank.tests`. Packaged executable launch remains unverified and is documented in `docs/cm_terrain_extractor_packaging.md`. |
 
 ## Known Blockers
 
 | Date | Blocker | Impact | Next action |
 | --- | --- | --- | --- |
 | 2026-05-02 | No active pytest suite exists for this app. | Refactor cannot safely proceed without adding tests first. | M2 creates `tests/cm_terrain_extractor/` and first failing regression tests. |
-| 2026-05-02 | PyInstaller behavior must be verified manually on Windows. | Automated tests cannot fully prove packaged execution. | M9 records manual packaging command, source smoke result, and the exact PyInstaller blocker. |
-| 2026-05-02 | PyInstaller fails before EXE creation in the approved Conda environment with a scikit-image hook isolation subprocess error. | Packaged executable launch cannot be verified from M9 even though source execution works. | Investigate PyInstaller/scikit-image hook compatibility or package versions before treating packaged status as green in M10. |
+| 2026-05-02 | PyInstaller behavior must be verified manually on Windows. | Automated tests cannot fully prove packaged execution. | M10 records the clean rebuild command, source smoke result, and the exact remaining PyInstaller blocker. |
+| 2026-05-02 | PyInstaller fails before EXE creation in the approved Conda environment with a scikit-image hook isolation subprocess error. | Packaged executable launch cannot be verified even though source execution works. | Investigate a narrower/custom scikit-image filters hook, PyInstaller hooks-contrib compatibility, or scikit-image/PyInstaller package versions. |
 | 2026-05-02 | OSM download requires network access. | Unit tests must not depend on live OSMnx calls. | Use fakes/fixtures for unit tests; keep live download as manual or marked integration check. |
 
 ## Current Working Assumptions

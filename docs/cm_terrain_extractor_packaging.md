@@ -70,7 +70,7 @@ as hidden imports because OSM processing imports profile modules dynamically.
 Build from the repository root with the approved Conda environment:
 
 ```powershell
-C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m PyInstaller cm_terrain_extractor_app.spec --noconfirm
+C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m PyInstaller cm_terrain_extractor_app.spec --noconfirm --clean
 ```
 
 The spec bundles:
@@ -83,6 +83,10 @@ The spec bundles:
 - Hidden imports for the split `app_core`, `map_view`, and `streamlit_ui`
   packages.
 - Explicit terrain data-source hidden imports, including Lower Saxony.
+- Explicit `skimage.measure` and `skimage.transform` hidden imports.
+- Excludes for `skimage.io`, `skimage.io._plugins`, and `skimage.viewer`
+  to avoid pulling optional image IO/viewer plugin paths into analysis.
+- `upx=False` for the executable stage.
 
 ## Milestone 9 Verification
 
@@ -107,3 +111,33 @@ to the `skimage.filters` hook, so that exclusion was not kept.
 Packaged executable launch is therefore unverified in this environment. The
 remaining blocker appears to be the local PyInstaller/scikit-image hook
 interaction in the Conda environment, not the Streamlit split entrypoint itself.
+
+## Milestone 10 Verification
+
+On 2026-05-02, `hooks/` was inspected and contains only the custom Streamlit
+hook; there is no custom scikit-image hook and no broad
+`skimage.io._plugins` collection in the app spec. The app spec now keeps
+`skimage.measure` and `skimage.transform` explicit, excludes `skimage.io`,
+`skimage.io._plugins`, and `skimage.viewer`, and sets `upx=False`.
+
+The requested clean rebuild was attempted:
+
+```powershell
+C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m PyInstaller cm_terrain_extractor_app.spec --noconfirm --clean
+```
+
+The sandboxed run failed during build-directory cleanup with a Windows
+permission error. The unrestricted retry advanced past the previous
+`skimage.io._plugins` failure point, but still failed during PyInstaller
+analysis while the contrib hook for `skimage.filters` collected
+`skimage.filters.rank.tests`:
+
+```text
+PyInstaller.isolated._parent.SubprocessDiedError:
+Child process died calling _collect_submodules()
+with args=('skimage.filters.rank.tests', 'warn once')
+```
+
+The skimage IO/plugin excludes therefore reduce the original blocker but do not
+fully solve packaging in this Conda environment. Packaged executable launch
+remains unverified.
