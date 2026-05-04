@@ -13,10 +13,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import numpy as np
 import geopandas
-import pandas
-from shapely import Polygon, Point
+import numpy as np
+from shapely import Point, Polygon
+
 
 def _create_geodataframe(xarr, yarr, xiarr, yiarr, geometry):
     gdf = geopandas.GeoDataFrame({
@@ -38,12 +38,74 @@ def _create_geodataframe(xarr, yarr, xiarr, yiarr, geometry):
 
     return gdf
 
+def _is_rotated(rotation_angle):
+    return rotation_angle is not None and not np.isclose(rotation_angle, 0.0)
+
+def _get_rotation_parameters(xarr, yarr, rotation_angle, rotation_center):
+    if rotation_center is None or rotation_center == 'center':
+        rotation_center = [(min(xarr) + max(xarr)) / 2, (min(yarr) + max(yarr)) / 2]
+
+    center = np.asarray(rotation_center)
+    angle = np.deg2rad(rotation_angle)
+    return center, np.cos(angle), np.sin(angle)
+
+def _rotate_xy(xarr, yarr, center, cos_angle, sin_angle):
+    x = np.asarray(xarr) - center[0]
+    y = np.asarray(yarr) - center[1]
+    return (
+        x * cos_angle - y * sin_angle + center[0],
+        x * sin_angle + y * cos_angle + center[1],
+    )
+
+def _get_rotated_geometry(xarr, yarr, offsets, rotation_angle, rotation_center):
+    center, cos_angle, sin_angle = _get_rotation_parameters(xarr, yarr, rotation_angle, rotation_center)
+    rotated_x, rotated_y = _rotate_xy(xarr, yarr, center, cos_angle, sin_angle)
+    geometry = []
+    for x, y in zip(xarr, yarr, strict=True):
+        cell_x = np.asarray([x + offset[0] for offset in offsets])
+        cell_y = np.asarray([y + offset[1] for offset in offsets])
+        polygon_x, polygon_y = _rotate_xy(cell_x, cell_y, center, cos_angle, sin_angle)
+        geometry.append(Polygon(zip(polygon_x, polygon_y, strict=True)))
+
+    return rotated_x, rotated_y, geometry
+
 def _rotate_grid(gdf, rotation_angle, rotation_center=None):
     if rotation_center is None:
         rotation_center = 'center'
-    gdf.geometry = gdf.rotate(rotation_angle, origin=rotation_center)
-    gdf.x = gdf.geometry.centroid.x
-    gdf.y = gdf.geometry.centroid.y
+
+    if rotation_center == 'center':
+        xmin, ymin, xmax, ymax = gdf.total_bounds
+        rotation_center = [(xmin + xmax) / 2, (ymin + ymax) / 2]
+
+    center = np.asarray(rotation_center)
+    angle = np.deg2rad(rotation_angle)
+    cos_angle = np.cos(angle)
+    sin_angle = np.sin(angle)
+
+    def _rotate_polygon(polygon):
+        coordinates = np.asarray(polygon.exterior.coords, dtype=float)
+        x = coordinates[:, 0] - center[0]
+        y = coordinates[:, 1] - center[1]
+        rotated_coordinates = np.column_stack(
+            (
+                x * cos_angle - y * sin_angle + center[0],
+                x * sin_angle + y * cos_angle + center[1],
+            )
+        )
+        return Polygon([tuple(coordinate) for coordinate in rotated_coordinates])
+
+    gdf.geometry = [_rotate_polygon(polygon) for polygon in gdf.geometry.values]
+    xy = gdf.loc[:, ['x', 'y']].to_numpy()
+    x = xy[:, 0] - center[0]
+    y = xy[:, 1] - center[1]
+    rotated_xy = np.column_stack(
+        (
+            x * cos_angle - y * sin_angle + center[0],
+            x * sin_angle + y * cos_angle + center[1],
+        )
+    )
+    gdf.x = rotated_xy[:, 0]
+    gdf.y = rotated_xy[:, 1]
     
     return gdf
 
@@ -62,13 +124,14 @@ def get_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle=No
             xiarr.append(xidx)
             yiarr.append(yidx)
 
-    geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, cap_style=3)
+    if _is_rotated(rotation_angle):
+        xarr, yarr, geometry = _get_rotated_geometry(
+            xarr, yarr, [(-4, -4), (4, -4), (4, 4), (-4, 4)], rotation_angle, rotation_center
+        )
+    else:
+        geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, cap_style=3)
 
     gdf = _create_geodataframe(xarr, yarr, xiarr, yiarr, geometry)
-
-    if rotation_angle is not None:
-        gdf = _rotate_grid(gdf, rotation_angle, rotation_center)
-    
     return gdf
 
 def get_diagonal_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle=None, rotation_center=None):
@@ -97,12 +160,14 @@ def get_diagonal_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation
             xiarr.append(xidx)
             yiarr.append(yidx + 0.5)
         
-    grid_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, resolution=1)
+    if _is_rotated(rotation_angle):
+        xarr, yarr, grid_geometry = _get_rotated_geometry(
+            xarr, yarr, [(4, 0), (0, -4), (-4, 0), (0, 4)], rotation_angle, rotation_center
+        )
+    else:
+        grid_geometry = geopandas.points_from_xy(xarr, yarr).buffer(4, resolution=1)
+
     diagonal_gdf = _create_geodataframe(xarr, yarr, xiarr, yiarr, grid_geometry)
-
-    if rotation_angle is not None:
-        diagonal_gdf = _rotate_grid(diagonal_gdf, rotation_angle, rotation_center)
-
     return diagonal_gdf
 
 def get_sub_square_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle=None, rotation_center=None):
@@ -131,13 +196,14 @@ def get_sub_square_grid(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotati
             xiarr.append(xidx + 0.25)
             yiarr.append(yidx + 0.25)
 
-    geometry = geopandas.points_from_xy(xarr, yarr).buffer(2, cap_style=3)
+    if _is_rotated(rotation_angle):
+        xarr, yarr, geometry = _get_rotated_geometry(
+            xarr, yarr, [(-2, -2), (2, -2), (2, 2), (-2, 2)], rotation_angle, rotation_center
+        )
+    else:
+        geometry = geopandas.points_from_xy(xarr, yarr).buffer(2, cap_style=3)
 
     sub_square_grid_gdf = _create_geodataframe(xarr, yarr, xiarr, yiarr, geometry)
-
-    if rotation_angle is not None:
-        sub_square_grid_gdf = _rotate_grid(sub_square_grid_gdf, rotation_angle, rotation_center)
-
     return sub_square_grid_gdf
 
 def get_all_grids(xmin, ymin, xmax, ymax, n_squares_x, n_squares_y, rotation_angle=None, rotation_center=None):

@@ -22,7 +22,6 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas
-from shapely.affinity import scale, translate
 from shapely.geometry import LineString, MultiPoint, Point
 from shapely.ops import substring
 
@@ -40,7 +39,7 @@ road_direction_dict = {
     (-1, -1): 'dl',
 }
 
-direction_dict = dict((v,k) for k,v in road_direction_dict.items())
+direction_dict = {v: k for k, v in road_direction_dict.items()}
 
 def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, source, target, current_path, dist):
     # Directly discard paths where the new node was already visited before the previous node
@@ -64,7 +63,7 @@ def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, sou
     # now check if there is a tile in the tile set that has all the necessary connections
     if 'connections' in graph.nodes[node1] and len(graph.nodes[node1]['connections']) > 0:
         # only source and target node may have more than two connections
-        if len(graph.nodes[node1]['connections']) > 1 and not (node1 == source or node1 == target):
+        if len(graph.nodes[node1]['connections']) > 1 and node1 not in (source, target):
             return None
         condition = ~pandas.isnull(tiles[direction_node1])
         for con in graph.nodes[node1]['connections']:
@@ -74,7 +73,7 @@ def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, sou
             return None 
     if 'connections' in graph.nodes[node2] and len(graph.nodes[node2]['connections']) > 0:
         # only source and target node may have more than two connections
-        if len(graph.nodes[node2]['connections']) > 1 and not (node2 == source or node2 == target):
+        if len(graph.nodes[node2]['connections']) > 1 and node2 not in (source, target):
             return None
         condition = ~pandas.isnull(tiles[direction_node2])
         for con in graph.nodes[node2]['connections']:
@@ -108,7 +107,11 @@ def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, sou
 
     # return np.abs(geom2.hausdorff_distance(ref_line_cut2) - geom1.hausdorff_distance(ref_line_cut1))
     # return max(np.min([Point(*ref_line_cut2.coords[i]).distance(Point(node2)) for i in range(len(ref_line_cut2.coords))]), dist) - dist
-    return np.min([Point(*ref_line_cut2.coords[i]).distance(Point(node2)) for i in range(len(ref_line_cut2.coords))])
+    ref_line_coordinates = np.asarray(ref_line_cut2.coords)
+    return np.hypot(
+        ref_line_coordinates[:, 0] - node2[0],
+        ref_line_coordinates[:, 1] - node2[1],
+    ).min()
 
 def _find_astar_path(start_node, end_node, grid_graph, ls, tiles, allow_vary_first_node=False):
     path_found = False
@@ -123,15 +126,15 @@ def _find_astar_path(start_node, end_node, grid_graph, ls, tiles, allow_vary_fir
     idx_mods = sorted(idx_mods, key=lambda x: sum(np.abs(x)))
     for idx_mod in idx_mods:
         mod_start_node = (start_node[0] + idx_mod[0], start_node[1] + idx_mod[1])
-        if not mod_start_node in grid_graph.nodes:
+        if mod_start_node not in grid_graph.nodes:
             continue
         mod_end_node = (end_node[0] + idx_mod[2], end_node[1] + idx_mod[3])
-        if not mod_end_node in grid_graph.nodes:
+        if mod_end_node not in grid_graph.nodes:
             continue
         if mod_start_node == mod_end_node:
             continue
-        mod_start_edges = grid_graph.nodes[mod_start_node]['edges'] if 'edges' in grid_graph.nodes[mod_start_node] else []
-        mod_end_edges = grid_graph.nodes[mod_end_node]['edges'] if 'edges' in grid_graph.nodes[mod_end_node] else []
+        mod_start_edges = grid_graph.nodes[mod_start_node].get('edges', [])
+        mod_end_edges = grid_graph.nodes[mod_end_node].get('edges', [])
         
         if (idx_mod[0] != 0 or idx_mod[1] != 0) and ((len(connected_start_edges) > 0 and len(set(mod_start_edges).intersection(connected_start_edges)) == 0) or not allow_vary_first_node):
             continue
@@ -150,7 +153,7 @@ def _find_astar_path(start_node, end_node, grid_graph, ls, tiles, allow_vary_fir
     else:
         return None
 
-def search_path(osm_processor, config, name, tqdm_string):
+def search_path(osm_processor, config, name, tqdm_string):  # noqa: C901, PLR0915
     logger = logging.getLogger('osm2cm')
 
     if 'road_tiles' in config[name]['process']:
@@ -164,7 +167,6 @@ def search_path(osm_processor, config, name, tqdm_string):
 
     line_graph = osm_processor.network_graphs[name]['line_graph']
     grid_gdf = osm_processor.gdf
-    df = osm_processor.df 
 
     square_graph = nx.MultiGraph()
 
@@ -210,9 +212,6 @@ def search_path(osm_processor, config, name, tqdm_string):
         # count += 1
         # if count > 5:
         #     break
-        closest_node_to_start = _get_closest_node_in_gdf(grid_gdf, edge[0])
-        closest_node_to_end = _get_closest_node_in_gdf(grid_gdf, edge[1])
-
         edge_data = line_graph.get_edge_data(*edge)
         ls = edge_data['ls']
         ls_points = []
@@ -225,7 +224,6 @@ def search_path(osm_processor, config, name, tqdm_string):
         
         if len(ls_points) < 2:
             continue
-        ls_valid = LineString(ls_points)
 
         # path = []
         # for i in range(1, len(ls_points)):
@@ -247,7 +245,7 @@ def search_path(osm_processor, config, name, tqdm_string):
         path = _find_astar_path(ls_points[0], ls_points[-1], grid_graph, LineString(ls_points), tiles, allow_vary_first_node=True)
 
         if path is None or len(path) == 0:
-            logger.debug('No path found from {} to {}.'.format(edge[0], edge[1]))
+            logger.debug(f'No path found from {edge[0]} to {edge[1]}.')
             # plt.plot(ls.xy[0], ls.xy[1], '-ro')
             continue
 
@@ -263,7 +261,7 @@ def search_path(osm_processor, config, name, tqdm_string):
                 other_edge_idx = node_dict['edges'][-1]
                 edges_to_process.append(other_edge_idx)
 
-                logger.debug('Edge {} crosses edge {} reprocessing both.'.format(edge_idx, other_edge_idx))
+                logger.debug(f'Edge {edge_idx} crosses edge {other_edge_idx} reprocessing both.')
 
                 # remove the other edge from the grid_graph
                 other_path = path_dict[other_edge_idx]
@@ -285,7 +283,7 @@ def search_path(osm_processor, config, name, tqdm_string):
                 next_node = path[nidx + 1]
                 diff = (next_node[0] - node[0], next_node[1] - node[1])
                 direction = road_direction_dict[diff]
-                if not 'connections' in grid_graph.nodes[path[nidx]]:
+                if 'connections' not in grid_graph.nodes[path[nidx]]:
                     grid_graph.nodes[path[nidx]]['connections'] = []
                     grid_graph.nodes[path[nidx]]['edges'] = []
                 grid_graph.nodes[path[nidx]]['connections'].append(direction)
@@ -294,7 +292,7 @@ def search_path(osm_processor, config, name, tqdm_string):
                 prev_node = path[nidx - 1]
                 diff = (prev_node[0] - node[0], prev_node[1] - node[1])
                 direction = road_direction_dict[diff]
-                if not 'connections' in grid_graph.nodes[path[nidx]]:
+                if 'connections' not in grid_graph.nodes[path[nidx]]:
                     grid_graph.nodes[path[nidx]]['connections'] = []
                     grid_graph.nodes[path[nidx]]['edges'] = []
                 grid_graph.nodes[path[nidx]]['connections'].append(direction)
@@ -308,7 +306,6 @@ def search_path(osm_processor, config, name, tqdm_string):
         # plt.plot(ls.xy[0], ls.xy[1], ':ko')
         # plt.text(ls.interpolate(0.5, normalized=True).x, ls.interpolate(0.5, normalized=True).y, str(edge_idx))
         # square_geom = [grid_gdf[(grid_gdf.xidx == p[0]) & (grid_gdf.yidx == p[1])].geometry.values[0] for p in path]
-        ls_xy = LineString(xy)
         # plt.plot([xy[i][0] for i in range(len(xy))], [xy[i][1] for i in range(len(xy))], '-b')
         # plt.plot(xy[0][0], xy[0][1], 'bo')
         # plt.plot(xy[-1][0], xy[-1][1], 'bD')
@@ -319,7 +316,7 @@ def search_path(osm_processor, config, name, tqdm_string):
     # plt.savefig('debug/path_search_{}.svg'.format(name))
 
     # create square graph from paths
-    for edge_idx in path_dict.keys():
+    for edge_idx in path_dict:
         # get path and edge data        
         path = path_dict[edge_idx][0]
         edge_data = path_dict[edge_idx][1]
@@ -345,7 +342,7 @@ def search_path(osm_processor, config, name, tqdm_string):
     if config[name]['priority'] < 1:
         osm_processor.grid_graph = None
     else:
-        for edge_idx in path_dict.keys():
+        for edge_idx in path_dict:
             path = path_dict[edge_idx][0]
             grid_graph.remove_nodes_from(path)
 
@@ -353,7 +350,7 @@ def search_path(osm_processor, config, name, tqdm_string):
 
     
 # def search_path(line_graph, grid_gdf, df):
-def search_path2(osm_processor, config, name):
+def search_path2(osm_processor, config, name):  # noqa: C901, PLR0915
     logger = logging.getLogger('osm2cm')
 
     if 'road_tiles' in config[name]['process']:
@@ -406,7 +403,6 @@ def search_path2(osm_processor, config, name):
     # plt.figure()
     # plt.axis('equal')
     # plt.plot(valid_gdf.xidx, valid_gdf.yidx, 'k+')
-    count = 0
     for edge in line_graph.edges:
         # count += 1
         # if count > 5:
@@ -429,7 +425,6 @@ def search_path2(osm_processor, config, name):
 
         edge_data = line_graph.get_edge_data(*edge)
         ls = edge_data['ls']
-        ls_rel = scale(translate(ls, -grid_gdf.x.min(), -grid_gdf.y.min()), 1.0/8.0, 1.0/8.0, origin=(0,0))
         # plt.plot(ls_rel.xy[0], ls_rel.xy[1], ':go')
         ls_valid = []
         for coord in ls.coords:
@@ -458,7 +453,6 @@ def search_path2(osm_processor, config, name):
                 # else:
                 #     path = paths[0]
 
-                ls_path = LineString(path)
                 # plt.plot(ls_path.xy[0], ls_path.xy[1], '-b')
             else:
                 continue
@@ -493,7 +487,7 @@ def search_path2(osm_processor, config, name):
         if len(squares) > 0:
             square_graph.add_edge(squares[0], squares[-1], squares=squares, element_idx=edge_data['element_idx'], from_node_to_node=[squares[0], squares[-1]])
         else:
-            logger.warn('Could not find valid squares for edge {} - {}.'.format(edge[0], edge[1]))
+            logger.warn(f'Could not find valid squares for edge {edge[0]} - {edge[1]}.')
 
 
     # plt.show()

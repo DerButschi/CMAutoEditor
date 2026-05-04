@@ -255,6 +255,22 @@ def fix_tile_for_node(node_id, edge_graphs, tile):
 
             graph.remove_nodes_from(nodes_to_delete)
 
+def _get_grid_indices_for_cells(gdf, cells):
+    cell_index = {
+        (xidx, yidx): idx
+        for idx, xidx, yidx in gdf.loc[:, ['xidx', 'yidx']].itertuples()
+    }
+    indices = []
+    seen_cells = set()
+    for cell in cells:
+        if cell in seen_cells:
+            continue
+        if cell in cell_index:
+            indices.append(cell_index[cell])
+            seen_cells.add(cell)
+
+    return pandas.Index(indices)
+
 def get_matched_cm_type(config, element_entry):
     cm_types = config[element_entry['name']]['cm_types']
 
@@ -293,6 +309,8 @@ def assign_type_from_tag(osm_processor, config, element_entry):
 
 def create_line_graph(osm_processor, config, name, tqdm_string):
     logger = logging.getLogger('osm2cm')
+    if hasattr(osm_processor, '_flush_network_line_parts'):
+        osm_processor._flush_network_line_parts(name)
     lines = osm_processor.network_graphs[name]['lines']
 
     line_graph = nx.MultiGraph()
@@ -863,7 +881,7 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df, tqdm_string):
 
         path = valid_paths[0]
 
-        sub_df = osm_processor._get_sub_df(gdf.xidx.isin([sq[0] for sq in squares]) & gdf.yidx.isin([sq[1] for sq in squares]))
+        sub_df = osm_processor._get_sub_df(osm_processor._get_grid_indices_for_cells(gdf, squares), gdf=gdf)
         sub_df.name = name
         element_idx = square_graph.get_edge_data(*edge)['element_idx']
         element_entry = osm_processor.matched_elements[element_idx]
@@ -891,10 +909,16 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df, tqdm_string):
         valid_tiles_dict[node1_id] = [path[0][0]]
         valid_tiles_dict[node2_id] = [path[-1][0]]
 
-        for square in squares:
-            polygon = osm_processor.gdf[(osm_processor.gdf.xidx == square[0]) & (osm_processor.gdf.yidx == square[1])].geometry.values[0]
-            occupancy_entry = geopandas.GeoDataFrame({'geometry': [polygon], 'priority': [config[name]['priority']], 'name': name})
-            osm_processor.occupancy_gdf = pandas.concat((osm_processor.occupancy_gdf, occupancy_entry), ignore_index=True)
+        occupancy_indices = osm_processor._get_grid_indices_for_cells(osm_processor.gdf, squares)
+        if len(occupancy_indices) > 0:
+            occupancy_entry = geopandas.GeoDataFrame(
+                {
+                    'geometry': osm_processor.gdf.loc[occupancy_indices].geometry.values,
+                    'priority': [config[name]['priority']] * len(occupancy_indices),
+                    'name': [name] * len(occupancy_indices),
+                }
+            )
+            osm_processor._append_occupancy_gdf(occupancy_entry)
 
         # if len(node1_neighbors) > 0:
         # fix_tile_for_node(node1_id, edge_graphs, path[0][0])
@@ -956,7 +980,9 @@ def collect_network_data(osm_processor, config, element_entry):
         element_entry_indices = [element_entry['idx']] * len(linestrings)
 
         element_gdf = geopandas.GeoDataFrame({'element_idx': element_entry_indices, 'geometry': linestrings})
-        if 'lines' not in osm_processor.network_graphs[name]:
+        if hasattr(osm_processor, '_append_network_lines'):
+            osm_processor._append_network_lines(name, element_gdf)
+        elif 'lines' not in osm_processor.network_graphs[name]:
             osm_processor.network_graphs[name]['lines'] = element_gdf
         else:
             osm_processor.network_graphs[name]['lines'] = pandas.concat((osm_processor.network_graphs[name]['lines'], element_gdf), ignore_index=True)
@@ -1034,6 +1060,8 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
     logger = logging.getLogger('osm2cm')
     if name not in osm_processor.building_outlines:
         return
+    if hasattr(osm_processor, '_flush_occupancy_gdf_parts'):
+        osm_processor._flush_occupancy_gdf_parts()
     
     raw_outlines = osm_processor.building_outlines[name]
 
@@ -1169,9 +1197,15 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
         else:
             matching_gdf = grid_gdf
 
-        for square in matched_tiles[4]:
-            occupancy_entry = geopandas.GeoDataFrame({'geometry': [square], 'priority': [config[name]['priority']], 'name': name})
-            osm_processor.occupancy_gdf = pandas.concat((osm_processor.occupancy_gdf, occupancy_entry), ignore_index=True)
+        if len(matched_tiles[4]) > 0:
+            occupancy_entry = geopandas.GeoDataFrame(
+                {
+                    'geometry': matched_tiles[4],
+                    'priority': [config[name]['priority']] * len(matched_tiles[4]),
+                    'name': [name] * len(matched_tiles[4]),
+                }
+            )
+            osm_processor._append_occupancy_gdf(occupancy_entry)
             # plt.plot(*square.exterior.xy, '-r')
 
         if len(matched_buildings) == 0:
@@ -1200,6 +1234,8 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
     # plt.savefig('debug/buildings_{}.svg'.format(name))
 
 def _get_matched_squares(osm_processor, priority, geometry, diagonal, min_square_overlap=0):
+    if hasattr(osm_processor, '_flush_occupancy_gdf_parts'):
+        osm_processor._flush_occupancy_gdf_parts()
     if diagonal:
         diag_grid_gdf = osm_processor.sub_square_grid_diagonal_gdf
         diamonds = diag_grid_gdf.geometry
