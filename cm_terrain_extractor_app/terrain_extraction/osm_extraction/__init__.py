@@ -19,7 +19,11 @@ from terrain_extraction.osm_extraction.models import (
     OccupancyConflict,
     PlacementRecord,
     ProcessKind,
+    TopologyEdge,
+    TopologyGraph,
+    TopologyNode,
 )
+from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.pipeline import (
     ExtractionContext,
@@ -47,6 +51,7 @@ __all__ = [
     "GridIndex",
     "GridNode",
     "LayerKind",
+    "NetworkTopologyBuilder",
     "OccupancyConflict",
     "OccupancyModel",
     "PlacementRecord",
@@ -54,4 +59,7 @@ __all__ = [
     "ProgressCallback",
     "noop_progress",
     "TagSelector",
+    "TopologyEdge",
+    "TopologyGraph",
+    "TopologyNode",
 ]

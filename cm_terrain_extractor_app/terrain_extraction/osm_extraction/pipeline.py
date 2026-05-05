@@ -94,6 +94,34 @@ class ExtractionPipeline:
             ),
         )
 
+    def run_network_topology(
+        self,
+        *,
+        features: tuple[Any, ...],
+        clip_geometry: Any | None = None,
+        snap_tolerance_m: float = 1.0,
+    ) -> ExtractionResult:
+        if not self.context.feature_flags.get("use_new_network_topology", False):
+            return ExtractionResult(diagnostics={"network_topology": "disabled"})
+
+        from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+
+        topology = NetworkTopologyBuilder(
+            clip_geometry=clip_geometry,
+            snap_tolerance_m=snap_tolerance_m,
+        ).build(features)
+        self.context.progress("network_noding", 1.0, "Network topology complete")
+        return ExtractionResult(
+            features=features,
+            stats=ExtractionStats(
+                timings={"network_noding": None},
+                counts={"topology_nodes": len(topology.nodes), "topology_edges": len(topology.edges)},
+                quality={"topology_components": _topology_component_count(topology)},
+                diagnostics={"mode": "network_topology", **dict(topology.diagnostics)},
+            ),
+            diagnostics={"network_topology": topology},
+        )
+
     def run_legacy(self, processor: LegacyProcessor, osm_data: object) -> ExtractionResult:
         timings: dict[str, float] = {}
 
@@ -156,3 +184,25 @@ def _records_from_output(output: Any) -> tuple[Mapping[str, Any], ...]:
     if output is None:
         return ()
     return tuple(output)
+
+
+def _topology_component_count(topology: Any) -> int:
+    if not topology.nodes:
+        return 0
+    parent = {node.node_id: node.node_id for node in topology.nodes}
+
+    def find(node_id: int) -> int:
+        while parent[node_id] != node_id:
+            parent[node_id] = parent[parent[node_id]]
+            node_id = parent[node_id]
+        return node_id
+
+    def union(first: int, second: int) -> None:
+        first_root = find(first)
+        second_root = find(second)
+        if first_root != second_root:
+            parent[second_root] = first_root
+
+    for edge in topology.edges:
+        union(edge.start_node_id, edge.end_node_id)
+    return len({find(node.node_id) for node in topology.nodes})

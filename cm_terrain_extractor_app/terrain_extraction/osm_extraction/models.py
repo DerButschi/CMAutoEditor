@@ -6,6 +6,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 
 
@@ -121,6 +122,62 @@ class PlacementRecord:
     def __post_init__(self) -> None:
         object.__setattr__(self, "cells", tuple(self.cells))
         object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
+
+
+@dataclass(frozen=True, slots=True)
+class TopologyNode:
+    node_id: int
+    point: Point
+    source_point_count: int = 1
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
+
+
+@dataclass(frozen=True, slots=True)
+class TopologyEdge:
+    edge_id: int
+    start_node_id: int
+    end_node_id: int
+    geometry: LineString
+    feature_ids: tuple[str | int | None, ...]
+    source_indices: tuple[int, ...]
+    config_name: str
+    process: ProcessKind
+    priority: int
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "feature_ids", tuple(self.feature_ids))
+        object.__setattr__(self, "source_indices", tuple(self.source_indices))
+        object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
+
+
+@dataclass(frozen=True, slots=True)
+class TopologyGraph:
+    nodes: tuple[TopologyNode, ...] = ()
+    edges: tuple[TopologyEdge, ...] = ()
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "nodes", tuple(self.nodes))
+        object.__setattr__(self, "edges", tuple(self.edges))
+        object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
+
+    def degree(self, node_id: int) -> int:
+        return sum(1 for edge in self.edges if edge.start_node_id == node_id or edge.end_node_id == node_id)
+
+    def incident_edges(self, node_id: int) -> tuple[TopologyEdge, ...]:
+        return tuple(edge for edge in self.edges if edge.start_node_id == node_id or edge.end_node_id == node_id)
+
+    def nearest_node(self, point: Point, *, tolerance: float = 1e-6) -> TopologyNode | None:
+        if not self.nodes:
+            return None
+        node = min(self.nodes, key=lambda candidate: candidate.point.distance(point))
+        if node.point.distance(point) <= tolerance:
+            return node
+        return None
 
 
 @dataclass(frozen=True, slots=True)
