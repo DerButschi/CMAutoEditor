@@ -168,7 +168,7 @@ def test_failed_route_is_explicit_and_counted() -> None:
     assert result.diagnostics["failed_routes"] == 1
 
 
-def test_pipeline_runs_router_only_when_feature_flag_is_enabled() -> None:
+def test_pipeline_runs_router_without_migration_flag() -> None:
     from terrain_extraction.osm_extraction.network_routing import NetworkRouter
     from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
 
@@ -179,7 +179,6 @@ def test_pipeline_runs_router_only_when_feature_flag_is_enabled() -> None:
         config_path="default_osm_config.json",
         seed=123,
         rng=np.random.default_rng(123),
-        feature_flags={"use_new_network_router": True},
     )
 
     result = ExtractionPipeline(context).run_network_router(topology=_graph((edge,)), grid_index=_grid())
@@ -187,17 +186,6 @@ def test_pipeline_runs_router_only_when_feature_flag_is_enabled() -> None:
     assert result.stats.counts["network_routes_succeeded"] == 1
     assert result.diagnostics["network_routes"].routes[0].edge_id == 0
     assert isinstance(result.diagnostics["network_router"], NetworkRouter)
-
-    disabled = ExtractionPipeline(
-        ExtractionContext(
-            profile="cold_war",
-            bbox=None,
-            config_path="default_osm_config.json",
-            seed=123,
-            rng=np.random.default_rng(123),
-        )
-    ).run_network_router(topology=_graph((edge,)), grid_index=_grid())
-    assert disabled.diagnostics == {"network_router": "disabled"}
 
 
 def test_network_routing_module_does_not_import_networkx() -> None:

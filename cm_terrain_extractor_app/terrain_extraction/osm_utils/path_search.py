@@ -41,6 +41,20 @@ road_direction_dict = {
 
 direction_dict = {v: k for k, v in road_direction_dict.items()}
 
+LEGACY_QUARANTINE_REASON = (
+    "historical NetworkX path-search reference. Active routing is implemented by "
+    "terrain_extraction.osm_extraction.network_routing and this module is retained "
+    "only for compatibility tests and old behavior comparison."
+)
+LEGACY_COMPATIBILITY_HELPERS = frozenset(
+    {
+        "search_path",
+        "search_path2",
+        "astar_path",
+        "get_matched_cm_type",
+    }
+)
+
 def custom_weight(graph: nx.Graph, node1, node2, edge_dict, ref_line, tiles, source, target, current_path, dist):
     # Directly discard paths where the new node was already visited before the previous node
     # if len(current_path) > 1 and node2 in current_path[-2::]:

@@ -124,7 +124,7 @@ def test_candidate_choice_is_deterministic_for_equal_cost_variants() -> None:
     ]
 
 
-def test_pipeline_runs_tile_assignment_only_when_feature_flag_is_enabled() -> None:
+def test_pipeline_runs_tile_assignment_without_migration_flag() -> None:
     from terrain_extraction.osm_extraction.models import ProcessKind
     from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
     from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
@@ -135,7 +135,6 @@ def test_pipeline_runs_tile_assignment_only_when_feature_flag_is_enabled() -> No
         config_path="default_osm_config.json",
         seed=123,
         rng=np.random.default_rng(123),
-        feature_flags={"use_new_tile_assignment": True},
     )
     catalog = CompiledTileCatalog.from_records(_catalog_rows(), process=ProcessKind.ROAD)
 
@@ -147,14 +146,3 @@ def test_pipeline_runs_tile_assignment_only_when_feature_flag_is_enabled() -> No
     assert result.stats.counts["tile_assignments_succeeded"] == 1
     assert result.placements[0].cm_type.cat2 == "Road Tile 1"
     assert result.diagnostics["tile_assignment"].success
-
-    disabled = ExtractionPipeline(
-        ExtractionContext(
-            profile="cold_war",
-            bbox=None,
-            config_path="default_osm_config.json",
-            seed=123,
-            rng=np.random.default_rng(123),
-        )
-    ).run_tile_assignment(routes=(), catalogs={})
-    assert disabled.diagnostics == {"tile_assignment": "disabled"}

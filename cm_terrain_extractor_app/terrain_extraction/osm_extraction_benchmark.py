@@ -107,6 +107,9 @@ def run_fixture(
 
     bbox = _bbox_from_fixture(fixture_data)
     processor = OSMProcessor(profile=profile, bbox=bbox, path_to_config=str(config))
+    if seed is not None:
+        processor.pipeline.context.seed = seed
+        processor.pipeline.context.rng = np.random.default_rng(seed)
 
     timings: dict[str, float | None] = {
         "feature_matching": None,

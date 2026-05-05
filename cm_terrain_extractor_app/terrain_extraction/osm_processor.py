@@ -1,21 +1,30 @@
 import json
-import logging
-import time
 
 import geopandas
 import numpy as np
 import pandas
 import pyproj
-import terrain_extraction.osm_utils.processing
 from pyproj.crs import CRS
 from shapely import MultiPolygon, affinity, transform, union_all
 from shapely.geometry import shape
 from terrain_extraction.bbox_utils import BoundingBox
 from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+from terrain_extraction.osm_extraction.grid_index import GridIndex
+from terrain_extraction.osm_extraction.models import (
+    CMType,
+    FeatureRecord,
+    GridCell,
+    GridKind,
+    LayerKind,
+    PlacementRecord,
+    ProcessKind,
+)
 from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
+from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
 from terrain_extraction.osm_utils.grid import get_all_grids
 
-from profiles import get_building_outline_by_df_entry, process_to_building_type
+from profiles import get_building_outline_by_df_entry, get_building_tiles, process_to_building_type
+from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
 
 try:
     import streamlit as st
@@ -71,7 +80,12 @@ class OSMProcessor:
         self._occupancy_gdf_parts = []
 
         self.matched_elements = []
+        self.features = ()
         self.placements = ()
+        self.output_rows = ()
+        self.topology = None
+        self.routing = None
+        self.stats = None
 
         self.processing_stages = {
             "type_from_tag": [(0, "assign_type_from_tag", "by_element")],
@@ -179,6 +193,7 @@ class OSMProcessor:
             progress_bar.progress((feature_idx + 1) / total_features, 'Preprocessing OSM Data')
 
     def _init_grid(self, bbox: BoundingBox):
+        self.grid_index = GridIndex.from_bbox(bbox)
         p0, p1, p2 = bbox.get_reference_points(bbox.crs_projected)
 
         n_bins_x = np.floor((p0.distance(p1)) / 8).astype(int)
@@ -379,41 +394,229 @@ class OSMProcessor:
         self._occupancy_gdf_parts = []
 
     def run_processors(self):
-        logger = logging.getLogger('osm2cm')
-        stages = self._collect_stages()
+        self._run_typed_processors()
 
-        # plt.figure()
-        for priority in sorted(stages.keys()):
-            for stage_idx in sorted(stages[priority].keys()):
-                for stage in stages[priority][stage_idx]:
-                    stage_items = stages[priority][stage_idx][stage]
-                    stage_start = time.perf_counter()
-                    if isinstance(stages[priority][stage_idx][stage][0], int):
-                        for item in stage_items:
-                            terrain_extraction.osm_utils.processing.__getattribute__(stage)(self, self.config, self.matched_elements[item])
-                    else:
-                        self._flush_df_parts()
-                        self._flush_network_line_parts()
-                        self._flush_occupancy_gdf_parts()
-                        for item in stage_items:
-                            terrain_extraction.osm_utils.processing.__getattribute__(stage)(self, self.config, item, tqdm_string=f'Processing Priority {priority}, Stage {stage_idx}, processor {stage}')
-                    self._flush_df_parts()
-                    self._flush_network_line_parts()
-                    self._flush_occupancy_gdf_parts()
-                    logger.debug(
-                        "OSM stage %s priority=%s stage_idx=%s items=%s rows=%s elapsed=%.3fs",
-                        stage,
-                        priority,
-                        stage_idx,
-                        len(stage_items),
-                        0 if self.df is None else len(self.df),
-                        time.perf_counter() - stage_start,
+    def _run_typed_processors(self):
+        grid_index = getattr(self, "grid_index", None)
+        if grid_index is None:
+            grid_index = GridIndex.from_bbox(self.bbox)
+            self.grid_index = grid_index
+
+        from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+        self.occupancy = OccupancyModel.from_grid_index(grid_index)
+        features = self._typed_features_from_matched_elements()
+        self.features = features
+
+        placements = []
+        area_features = tuple(
+            feature
+            for feature in features
+            if feature.process in {ProcessKind.AREA, ProcessKind.RANDOM, ProcessKind.POINT}
+        )
+        area_result = self.pipeline.run_area_rasterizer(
+            features=area_features,
+            config=self.extraction_config,
+            grid_index=grid_index,
+            occupancy=self.occupancy,
+        )
+        placements.extend(area_result.placements)
+
+        linear_features = tuple(
+            feature
+            for feature in features
+            if feature.process in {ProcessKind.ROAD, ProcessKind.RAIL, ProcessKind.STREAM, ProcessKind.FENCE}
+        )
+        if linear_features:
+            topology_result = self.pipeline.run_network_topology(
+                features=linear_features,
+                clip_geometry=getattr(self, "effective_bbox_polygon", None),
+            )
+            self.topology = topology_result.diagnostics["network_topology"]
+            routing_result = self.pipeline.run_network_router(
+                topology=self.topology,
+                grid_index=grid_index,
+                occupancy=self.occupancy,
+            )
+            self.routing = routing_result.diagnostics["network_routes"]
+            tile_result = self.pipeline.run_tile_assignment(
+                routes=self.routing.routes,
+                catalogs=self._tile_catalogs_for(linear_features),
+            )
+            placements.extend(tile_result.placements)
+            self._reserve_output_placements(tile_result.placements)
+
+        linear_dependent_placements = self._typed_linear_feature_placements(tuple(placements))
+        placements.extend(linear_dependent_placements)
+        self._reserve_output_placements(linear_dependent_placements)
+
+        building_features = tuple(feature for feature in features if feature.process is ProcessKind.BUILDING_OUTLINE)
+        if building_features:
+            building_result = self.pipeline.run_building_fitter(
+                features=building_features,
+                catalogs=self._building_catalogs_for(building_features),
+                grid_index=grid_index,
+                occupancy=self.occupancy,
+            )
+            placements.extend(building_result.placements)
+
+        self.placements = tuple(placements)
+        output_result = self.pipeline.run_output_rows(
+            placements=self.placements,
+            bounds=tuple(self.idx_bbox),
+        )
+        self.output_rows = output_result.output_rows
+        self.stats = output_result.stats
+        self._set_compatibility_df_from_placements()
+
+    def _set_compatibility_df_from_placements(self):
+        from terrain_extraction.osm_extraction.output_rows import (
+            OUTPUT_ROW_COLUMNS,
+            placements_to_output_rows,
+        )
+
+        rows = placements_to_output_rows(self.placements)
+        self.df = pandas.DataFrame.from_records(rows, columns=OUTPUT_ROW_COLUMNS)
+
+    def _typed_features_from_matched_elements(self):
+        features = []
+        for fallback_index, element_entry in enumerate(self.matched_elements):
+            name = element_entry["name"]
+            try:
+                config_entry = self.extraction_config.entry_by_name(name)
+            except KeyError:
+                continue
+            properties = self._element_properties(element_entry.get("element"))
+            source_tags = properties.get("tags") if isinstance(properties.get("tags"), dict) else properties
+            feature_id = properties.get("id", element_entry.get("idx", fallback_index))
+            for process in config_entry.processes:
+                if process is ProcessKind.DEFAULT:
+                    continue
+                features.append(
+                    FeatureRecord(
+                        feature_id=feature_id,
+                        source_index=int(element_entry.get("idx", fallback_index)),
+                        config_name=name,
+                        process=process,
+                        priority=config_entry.priority,
+                        geometry=element_entry["geometry"],
+                        source_tags=source_tags,
+                        source_properties=properties,
                     )
+                )
+        return tuple(features)
 
-                            
+    @staticmethod
+    def _element_properties(element):
+        if element is None:
+            return {}
+        properties = getattr(element, "properties", {})
+        return dict(properties or {})
 
-        # plt.axis('equal')
-        # plt.show()
+    def _tile_catalogs_for(self, features):
+        tile_sources = {
+            ProcessKind.ROAD: road_tiles,
+            ProcessKind.RAIL: rail_tiles,
+            ProcessKind.STREAM: stream_tiles,
+            ProcessKind.FENCE: fence_tiles,
+        }
+        processes = {feature.process for feature in features}
+        return {
+            process: CompiledTileCatalog.from_records(
+                tile_sources[process],
+                process=process,
+                base_cm_type=self._base_cm_type_for_process(process),
+            )
+            for process in sorted(processes, key=lambda item: item.value)
+        }
+
+    def _base_cm_type_for_process(self, process):
+        for entry in self.extraction_config.entries:
+            if process in entry.processes and entry.cm_types:
+                return entry.cm_types[0]
+        return None
+
+    def _building_catalogs_for(self, features):
+        catalogs = {}
+        for feature in features:
+            if feature.config_name in catalogs:
+                continue
+            entry = self.extraction_config.entry_by_name(feature.config_name)
+            building_type = None
+            for legacy_process in entry.legacy_processes:
+                if legacy_process in process_to_building_type:
+                    building_type = process_to_building_type[legacy_process]
+                    break
+            if building_type is not None:
+                catalogs[feature.config_name] = get_building_tiles(building_type, self.profile)
+        return catalogs
+
+    def _typed_linear_feature_placements(self, placements):
+        linear_placements = []
+        cells_by_name = {}
+        for placement in placements:
+            for cell in placement.cells:
+                cells_by_name.setdefault(placement.config_name, set()).add(cell)
+
+        for entry in self.extraction_config.entries:
+            if ProcessKind.LINEAR not in entry.processes:
+                continue
+            source_name = entry.modifiers.get("linear_name")
+            if not source_name:
+                continue
+            for cell in sorted(cells_by_name.get(source_name, ()), key=lambda item: (item.xidx, item.yidx)):
+                cm_type = self._choose_cm_type(entry.cm_types)
+                if cm_type is None:
+                    continue
+                linear_placements.append(
+                    PlacementRecord(
+                        layer=self._layer_for_cm_type(cm_type),
+                        grid_kind=GridKind.NORMAL,
+                        cells=(GridCell(cell.xidx, cell.yidx),),
+                        config_name=entry.name,
+                        feature_id=f"{entry.name}:{source_name}:{cell.xidx}:{cell.yidx}",
+                        priority=entry.priority,
+                        cm_type=cm_type,
+                        score=1.0,
+                        diagnostics={"derived_from_linear": source_name},
+                    )
+                )
+        return tuple(linear_placements)
+
+    def _choose_cm_type(self, cm_types):
+        if not cm_types:
+            return None
+        weights = np.array([float(cm_type.modifiers.get("weight", 1.0)) for cm_type in cm_types], dtype=float)
+        probabilities = weights / weights.sum()
+        cm_type = cm_types[int(self.pipeline.context.rng.choice(len(cm_types), p=probabilities))]
+        return None if cm_type.modifiers.get("dummy") is True else cm_type
+
+    @staticmethod
+    def _layer_for_cm_type(cm_type: CMType):
+        menu = cm_type.menu.lower()
+        if menu.startswith("foliage") or menu.startswith("brush"):
+            return LayerKind.FOLIAGE
+        if menu.startswith("flavor objects"):
+            return LayerKind.POINT_OBJECT
+        if menu.startswith("walls") or menu.startswith("fence"):
+            return LayerKind.LINEAR_OBJECT
+        if menu.startswith("roads"):
+            return LayerKind.LINEAR_SURFACE
+        if "building" in menu:
+            return LayerKind.BUILDING
+        return LayerKind.GROUND
+
+    def _reserve_output_placements(self, placements):
+        occupancy = getattr(self, "occupancy", None)
+        if occupancy is None:
+            return
+        for placement in placements:
+            object_id = (
+                placement.feature_id
+                if placement.feature_id is not None
+                else f"{placement.config_name}:{placement.cells[0].xidx}:{placement.cells[0].yidx}"
+            )
+            occupancy.place(placement, object_id=object_id, allow_replace=False)
 
     def post_process(self):
         if self._uses_layered_output():
@@ -578,11 +781,7 @@ class OSMProcessor:
         return out_df
 
     def _uses_layered_output(self):
-        feature_flags = getattr(getattr(self, "extraction_config", None), "feature_flags", {})
-        if feature_flags.get("use_layered_output", False):
-            return True
-        pipeline_context = getattr(getattr(self, "pipeline", None), "context", None)
-        return getattr(pipeline_context, "feature_flags", {}).get("use_layered_output", False)
+        return hasattr(self, "idx_bbox") and self.idx_bbox is not None and hasattr(self, "placements")
 
     def _get_layered_output_rows(self):
         from terrain_extraction.osm_extraction.output_rows import (
@@ -605,11 +804,9 @@ class OSMProcessor:
         return pandas.DataFrame.from_records(rows, columns=NORMALIZED_OUTPUT_ROW_COLUMNS)
 
     def _uses_new_debug_export(self):
-        feature_flags = getattr(getattr(self, "extraction_config", None), "feature_flags", {})
-        if feature_flags.get("use_new_debug_export", False):
-            return True
-        pipeline_context = getattr(getattr(self, "pipeline", None), "context", None)
-        return getattr(pipeline_context, "feature_flags", {}).get("use_new_debug_export", False)
+        return getattr(self, "grid_index", None) is not None and (
+            hasattr(self, "placements") or hasattr(self, "output_rows") or hasattr(self, "features")
+        )
 
     def _get_debug_export_geometries(self, crs: CRS | None = None):
         from terrain_extraction.osm_extraction.debug_export import build_debug_layers

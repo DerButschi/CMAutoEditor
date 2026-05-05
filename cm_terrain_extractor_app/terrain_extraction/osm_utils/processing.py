@@ -40,6 +40,28 @@ from .path_search import (_get_closest_node_in_gdf, _remove_nodes_from_gdf,
 
 DRAW_DEBUG_PLOTS = False
 
+LEGACY_QUARANTINE_REASON = (
+    "compatibility-only historical OSM helpers. The active OSMProcessor path uses "
+    "terrain_extraction.osm_extraction typed processors; keep this module only for "
+    "direct regression tests and behavior reference."
+)
+LEGACY_COMPATIBILITY_HELPERS = frozenset(
+    {
+        "assign_type_from_tag",
+        "assign_type_randomly_in_area",
+        "assign_type_randomly_for_each_square",
+        "assign_type_in_random_clusters",
+        "assign_type_at_linear_feature",
+        "collect_network_data",
+        "create_line_graph",
+        "create_square_graph_path_search",
+        "assign_tiles_to_network",
+        "collect_building_outlines",
+        "process_building_outlines",
+        "get_matched_cm_type",
+    }
+)
+
 
 def _spatial_query_pairs(indexed_geometry, query_geometry, predicate):
     return indexed_geometry.sindex.query(query_geometry, predicate=predicate)

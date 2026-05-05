@@ -138,7 +138,7 @@ def test_degree_two_chains_with_identical_metadata_are_collapsed() -> None:
     assert graph.diagnostics["collapsed_degree_two_nodes"] == 2
 
 
-def test_pipeline_runs_network_topology_only_when_feature_flag_is_enabled() -> None:
+def test_pipeline_runs_network_topology_without_migration_flag() -> None:
     from terrain_extraction.osm_extraction.models import ProcessKind
     from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
 
@@ -148,7 +148,6 @@ def test_pipeline_runs_network_topology_only_when_feature_flag_is_enabled() -> N
         config_path="default_osm_config.json",
         seed=123,
         rng=np.random.default_rng(123),
-        feature_flags={"use_new_network_topology": True},
     )
     result = ExtractionPipeline(context).run_network_topology(
         features=(
@@ -158,14 +157,3 @@ def test_pipeline_runs_network_topology_only_when_feature_flag_is_enabled() -> N
 
     assert result.stats.counts["topology_edges"] == 1
     assert result.diagnostics["network_topology"].edges[0].feature_ids == ("road-0",)
-
-    disabled = ExtractionPipeline(
-        ExtractionContext(
-            profile="cold_war",
-            bbox=None,
-            config_path="default_osm_config.json",
-            seed=123,
-            rng=np.random.default_rng(123),
-        )
-    ).run_network_topology(features=())
-    assert disabled.diagnostics == {"network_topology": "disabled"}

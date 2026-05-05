@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -177,7 +176,7 @@ def test_validation_rejects_duplicate_layer_rows_and_building_road_collisions() 
         placements_to_output_rows(building_on_road)
 
 
-def test_pipeline_assembles_output_rows_when_flag_enabled() -> None:
+def test_pipeline_assembles_output_rows_without_migration_flag() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, LayerKind
     from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
 
@@ -187,7 +186,6 @@ def test_pipeline_assembles_output_rows_when_flag_enabled() -> None:
             bbox=object(),
             config_path="default_osm_config.json",
             seed=123,
-            feature_flags={"use_layered_output": True},
         )
     )
 
@@ -210,13 +208,11 @@ def test_pipeline_assembles_output_rows_when_flag_enabled() -> None:
     assert result.stats.counts["output_rows"] == 2
 
 
-def test_osm_processor_get_output_uses_layered_rows_when_enabled() -> None:
+def test_osm_processor_get_output_uses_layered_rows_by_default() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, LayerKind
     from terrain_extraction.osm_processor import OSMProcessor
 
     processor = OSMProcessor.__new__(OSMProcessor)
-    processor.extraction_config = SimpleNamespace(feature_flags={"use_layered_output": True})
-    processor.pipeline = SimpleNamespace(context=SimpleNamespace(feature_flags={"use_layered_output": True}))
     processor.idx_bbox = [10, 20, 11, 21]
     processor.placements = (
         _placement(

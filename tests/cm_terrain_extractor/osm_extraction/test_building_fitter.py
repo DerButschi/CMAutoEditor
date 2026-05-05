@@ -194,7 +194,7 @@ def test_constrained_building_clusters_are_placed_before_open_clusters() -> None
     assert result.diagnostics["cluster_order"][:2] == ("constrained", "open")
 
 
-def test_pipeline_runs_building_fitter_only_when_feature_flag_is_enabled() -> None:
+def test_pipeline_runs_building_fitter_without_migration_flag() -> None:
     from terrain_extraction.osm_extraction.models import GridCell
     from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
 
@@ -204,7 +204,6 @@ def test_pipeline_runs_building_fitter_only_when_feature_flag_is_enabled() -> No
         config_path="default_osm_config.json",
         seed=123,
         rng=np.random.default_rng(123),
-        feature_flags={"use_new_building_fitter": True},
     )
     outline = Polygon([(8, 8), (24, 8), (24, 16), (8, 16)])
 
@@ -217,14 +216,3 @@ def test_pipeline_runs_building_fitter_only_when_feature_flag_is_enabled() -> No
     assert result.stats.counts["buildings_placed"] == 1
     assert result.placements[0].cells == (GridCell(1, 1), GridCell(2, 1))
     assert result.diagnostics["building_fitting"].placed_count == 1
-
-    disabled = ExtractionPipeline(
-        ExtractionContext(
-            profile="cold_war",
-            bbox=None,
-            config_path="default_osm_config.json",
-            seed=123,
-            rng=np.random.default_rng(123),
-        )
-    ).run_building_fitter(features=(), catalogs={}, grid_index=_grid())
-    assert disabled.diagnostics == {"building_fitter": "disabled"}

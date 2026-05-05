@@ -82,9 +82,6 @@ class ExtractionPipeline:
         grid_index: GridIndex,
         occupancy: OccupancyModel | None = None,
     ) -> ExtractionResult:
-        if not self.context.feature_flags.get("use_new_area_rasterizer", False):
-            return ExtractionResult(diagnostics={"area_rasterizer": "disabled"})
-
         from terrain_extraction.osm_extraction.area_rasterizer import AreaRasterizer
 
         occupancy_model = occupancy or OccupancyModel.from_grid_index(grid_index)
@@ -107,9 +104,6 @@ class ExtractionPipeline:
         clip_geometry: Any | None = None,
         snap_tolerance_m: float = 1.0,
     ) -> ExtractionResult:
-        if not self.context.feature_flags.get("use_new_network_topology", False):
-            return ExtractionResult(diagnostics={"network_topology": "disabled"})
-
         from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
 
         topology = NetworkTopologyBuilder(
@@ -137,9 +131,6 @@ class ExtractionPipeline:
         corridor_deviation_m: float = 32.0,
         minor_relaxation_m: float = 48.0,
     ) -> ExtractionResult:
-        if not self.context.feature_flags.get("use_new_network_router", False):
-            return ExtractionResult(diagnostics={"network_router": "disabled"})
-
         from terrain_extraction.osm_extraction.network_routing import NetworkRouter
 
         router = NetworkRouter(
@@ -161,9 +152,6 @@ class ExtractionPipeline:
         routes: tuple[Any, ...],
         catalogs: Mapping[Any, Any],
     ) -> ExtractionResult:
-        if not self.context.feature_flags.get("use_new_tile_assignment", False):
-            return ExtractionResult(diagnostics={"tile_assignment": "disabled"})
-
         from terrain_extraction.osm_extraction.tile_assignment import TileAssigner
 
         assignment = TileAssigner(catalogs, rng=self.context.rng).assign(routes)
@@ -182,9 +170,6 @@ class ExtractionPipeline:
         grid_index: GridIndex,
         occupancy: OccupancyModel | None = None,
     ) -> ExtractionResult:
-        if not self.context.feature_flags.get("use_new_building_fitter", False):
-            return ExtractionResult(diagnostics={"building_fitter": "disabled"})
-
         from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
 
         fitter = BuildingFitter(grid_index, occupancy=occupancy, rng=self.context.rng)
@@ -202,9 +187,6 @@ class ExtractionPipeline:
         placements: tuple[Any, ...],
         bounds: tuple[int | float, int | float, int | float, int | float],
     ) -> ExtractionResult:
-        if not self.context.feature_flags.get("use_layered_output", False):
-            return ExtractionResult(diagnostics={"output_rows": "disabled"})
-
         from terrain_extraction.osm_extraction.output_rows import (
             append_extent_marker,
             normalize_output_coordinates,
@@ -240,9 +222,6 @@ class ExtractionPipeline:
         bounds: tuple[int | float, int | float, int | float, int | float] | None = None,
         stats: ExtractionStats | None = None,
     ) -> ExtractionResult:
-        if not self.context.feature_flags.get("use_new_debug_export", False):
-            return ExtractionResult(diagnostics={"debug_export": "disabled"})
-
         from terrain_extraction.osm_extraction.debug_export import build_debug_layers
 
         debug_export = build_debug_layers(

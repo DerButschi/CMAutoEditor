@@ -262,7 +262,7 @@ def test_overlapping_same_layer_placements_do_not_emit_duplicate_cells() -> None
     assert occupancy.object_id_at(LayerKind.GROUND, GridCell(0, 0)) == "area-1"
 
 
-def test_pipeline_runs_area_rasterizer_only_when_feature_flag_is_enabled() -> None:
+def test_pipeline_runs_area_rasterizer_without_migration_flag() -> None:
     from terrain_extraction.osm_extraction.grid_index import GridIndex
     from terrain_extraction.osm_extraction.models import ProcessKind
     from terrain_extraction.osm_extraction.occupancy import OccupancyModel
@@ -274,7 +274,6 @@ def test_pipeline_runs_area_rasterizer_only_when_feature_flag_is_enabled() -> No
         bbox=object(),
         config_path="cfg.json",
         seed=123,
-        feature_flags={"use_new_area_rasterizer": True},
         progress=lambda stage, value, message=None: events.append((stage, value, message)),
     )
     grid: GridIndex = _grid(width=1, height=1)
@@ -300,9 +299,3 @@ def test_pipeline_runs_area_rasterizer_only_when_feature_flag_is_enabled() -> No
     assert len(result.placements) == 1
     assert result.stats.counts["area_rasterizer_placements"] == 1
     assert events[-1] == ("area_rasterization", 1.0, "Area rasterization complete")
-
-    disabled = ExtractionPipeline(
-        ExtractionContext.create(profile="cold_war", bbox=object(), config_path="cfg.json", seed=123),
-    ).run_area_rasterizer(features=(feature,), config=config, grid_index=grid)
-    assert disabled.placements == ()
-    assert disabled.diagnostics["area_rasterizer"] == "disabled"

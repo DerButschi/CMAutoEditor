@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
@@ -241,7 +240,7 @@ def test_debug_export_writes_optional_geojson_and_records_layer_failures() -> No
     assert "source_features" in result.diagnostics["layer_errors"][0]["layer"]
 
 
-def test_pipeline_and_osm_processor_use_new_debug_export_when_flag_enabled() -> None:
+def test_pipeline_and_osm_processor_use_new_debug_export_by_default() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, LayerKind, ProcessKind
     from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
     from terrain_extraction.osm_processor import OSMProcessor
@@ -264,7 +263,6 @@ def test_pipeline_and_osm_processor_use_new_debug_export_when_flag_enabled() -> 
             config_path="default_osm_config.json",
             seed=123,
             progress=lambda stage, value, message=None: events.append(stage),
-            feature_flags={"use_new_debug_export": True},
         )
     )
 
@@ -280,7 +278,6 @@ def test_pipeline_and_osm_processor_use_new_debug_export_when_flag_enabled() -> 
     assert events == ["debug_export"]
 
     processor = OSMProcessor.__new__(OSMProcessor)
-    processor.extraction_config = SimpleNamespace(feature_flags={"use_new_debug_export": True})
     processor.pipeline = pipeline
     processor.features = ()
     processor.placements = (placement,)
