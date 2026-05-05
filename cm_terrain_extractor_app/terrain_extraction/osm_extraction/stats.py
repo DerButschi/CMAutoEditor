@@ -75,3 +75,16 @@ def stats_from_building_fitting(building_fitting_result: Any) -> ExtractionStats
         },
         diagnostics={"mode": "building_fitting", **diagnostics},
     )
+
+
+def stats_from_debug_export(debug_export_result: Any) -> ExtractionStats:
+    layer_counts = {f"debug_{name}_features": len(layer) for name, layer in debug_export_result.layers.items()}
+    return ExtractionStats(
+        timings={"debug_export": None},
+        counts={
+            "debug_layers": len(debug_export_result.layers),
+            "debug_features": sum(layer_counts.values()),
+            **layer_counts,
+        },
+        diagnostics={"mode": "debug_export", **dict(debug_export_result.diagnostics)},
+    )

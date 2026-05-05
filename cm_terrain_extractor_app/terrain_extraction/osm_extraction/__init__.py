@@ -11,6 +11,11 @@ from terrain_extraction.osm_extraction.config_schema import (
     ExtractionConfig,
     TagSelector,
 )
+from terrain_extraction.osm_extraction.debug_export import (
+    DebugExportResult,
+    build_debug_layers,
+    write_debug_geojson,
+)
 from terrain_extraction.osm_extraction.feature_matcher import FeatureMatcher
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
@@ -71,6 +76,7 @@ __all__ = [
     "ConfigValidationError",
     "ConflictDecision",
     "CompiledMoveSet",
+    "DebugExportResult",
     "ExtractionContext",
     "ExtractionConfig",
     "ExtractionPipeline",
@@ -103,7 +109,9 @@ __all__ = [
     "TopologyGraph",
     "TopologyNode",
     "append_extent_marker",
+    "build_debug_layers",
     "normalize_output_coordinates",
     "placements_to_output_rows",
     "validate_output_rows",
+    "write_debug_geojson",
 ]

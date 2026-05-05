@@ -13,6 +13,7 @@ from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.stats import (
     ExtractionStats,
     stats_from_building_fitting,
+    stats_from_debug_export,
     stats_from_network_routing,
     stats_from_tile_assignment,
 )
@@ -224,6 +225,44 @@ class ExtractionPipeline:
                 counts={"output_rows": len(output_rows)},
                 diagnostics={"mode": "layered_output"},
             ),
+        )
+
+    def run_debug_export(
+        self,
+        *,
+        features: tuple[Any, ...] = (),
+        topology: Any = None,
+        routing: Any = None,
+        occupancy: Any = None,
+        placements: tuple[Any, ...] = (),
+        output_rows: tuple[Mapping[str, Any], ...] = (),
+        grid_index: GridIndex | None = None,
+        bounds: tuple[int | float, int | float, int | float, int | float] | None = None,
+        stats: ExtractionStats | None = None,
+    ) -> ExtractionResult:
+        if not self.context.feature_flags.get("use_new_debug_export", False):
+            return ExtractionResult(diagnostics={"debug_export": "disabled"})
+
+        from terrain_extraction.osm_extraction.debug_export import build_debug_layers
+
+        debug_export = build_debug_layers(
+            features=features,
+            topology=topology,
+            routing=routing,
+            occupancy=occupancy,
+            placements=placements,
+            output_rows=output_rows,
+            grid_index=grid_index,
+            bounds=bounds,
+            stats=stats,
+        )
+        self.context.progress("debug_export", 1.0, "Debug export complete")
+        return ExtractionResult(
+            features=features,
+            placements=placements,
+            output_rows=output_rows,
+            stats=stats_from_debug_export(debug_export),
+            diagnostics={"debug_export": debug_export},
         )
 
     def run_legacy(self, processor: LegacyProcessor, osm_data: object) -> ExtractionResult:

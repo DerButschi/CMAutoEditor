@@ -603,8 +603,54 @@ class OSMProcessor:
 
         rows = self._get_layered_output_rows()
         return pandas.DataFrame.from_records(rows, columns=NORMALIZED_OUTPUT_ROW_COLUMNS)
+
+    def _uses_new_debug_export(self):
+        feature_flags = getattr(getattr(self, "extraction_config", None), "feature_flags", {})
+        if feature_flags.get("use_new_debug_export", False):
+            return True
+        pipeline_context = getattr(getattr(self, "pipeline", None), "context", None)
+        return getattr(pipeline_context, "feature_flags", {}).get("use_new_debug_export", False)
+
+    def _get_debug_export_geometries(self, crs: CRS | None = None):
+        from terrain_extraction.osm_extraction.debug_export import build_debug_layers
+        from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+        grid_index = getattr(self, "grid_index", None)
+        if grid_index is None:
+            return {}
+
+        output_rows = tuple(getattr(self, "output_rows", ()) or ())
+        if not output_rows:
+            output_rows = placements_to_output_rows(tuple(getattr(self, "placements", ())), include_internal=True)
+
+        debug_export = build_debug_layers(
+            features=tuple(getattr(self, "features", ())),
+            topology=getattr(self, "topology", None),
+            routing=getattr(self, "routing", None),
+            occupancy=getattr(self, "occupancy", None),
+            placements=tuple(getattr(self, "placements", ())),
+            output_rows=output_rows,
+            grid_index=grid_index,
+            bounds=tuple(getattr(self, "idx_bbox", (0, 0, grid_index.width - 1, grid_index.height - 1))),
+            stats=getattr(self, "stats", None),
+        )
+        self.debug_export_diagnostics = debug_export.diagnostics
+        final_rows = debug_export.layers.get("final_rows")
+        if final_rows is None or final_rows.empty:
+            return {}
+
+        if crs is not None and final_rows.crs is not None:
+            final_rows = final_rows.to_crs(epsg=crs.to_epsg())
+
+        geometry_dict = {}
+        for name, group in final_rows.groupby("name"):
+            geometry_dict[name] = list(group.geometry)
+        return geometry_dict
     
     def get_geometries(self, crs: CRS | None = None):
+        if self._uses_new_debug_export():
+            return self._get_debug_export_geometries(crs=crs)
+
         self._flush_df_parts()
         if crs is None:
             crs = CRS.from_epsg(4326)
