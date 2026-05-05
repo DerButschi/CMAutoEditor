@@ -18,7 +18,7 @@ Future agents and humans must update this document after each milestone. Record 
 | 1 | Pipeline skeleton and compatibility wrapper | Done | Codex | 2026-05-05 | Added typed skeleton package, headless-compatible import fallback, progress callback context, deterministic RNG owner, and `OSMProcessor.pipeline` compatibility holder. |
 | 2 | Config schema, feature matcher, deterministic seed, and early bug fixes | Done | Codex | 2026-05-05 | Added validated config schema, feature matcher, `path_to_config` compatibility, barn spelling bridge, and non-WGS84 `BoundingBox` fix. |
 | 3 | `GridIndex` and dense `OccupancyModel` | Done | Codex | 2026-05-05 | Added affine grid math, lazy debug grid views, dense layered occupancy arrays, and readable conflict decisions. |
-| 4 | Area rasterizer | Not started | Unassigned | 2026-05-05 | Moves area/default/point placement to new grid and occupancy model. |
+| 4 | Area rasterizer | Done | Codex | 2026-05-05 | Added typed area/default/point rasterization on `GridIndex` and `OccupancyModel`, with deterministic weighted choices and `use_new_area_rasterizer` pipeline flag wiring. |
 | 5 | Network topology and noding | Not started | Unassigned | 2026-05-05 | Adds topology-first line handling and snap tolerance. |
 | 6 | Corridor-limited integer-grid routing | Not started | Unassigned | 2026-05-05 | Replaces full-grid NetworkX routing in the new path. |
 | 7 | Tile catalog assignment and intersection solving | Not started | Unassigned | 2026-05-05 | Replaces per-edge NetworkX tile graphs and validates tile labels. |
@@ -48,6 +48,9 @@ Future agents and humans must update this document after each milestone. Record 
 | 2026-05-05 | Implement `GridIndex` with affine unit axes derived from bbox reference points rather than spatial nearest queries. | This matches the legacy representative grid conventions while keeping snapping in regular-grid math for new hot paths. | Codex |
 | 2026-05-05 | Keep normal, sub-square, and diagonal GeoDataFrame creation lazy and debug/export-oriented. | Milestone 3 must not make GeoDataFrames the normal snapping or conflict mechanism for new code. | Codex |
 | 2026-05-05 | Use dense `OccupancyModel` arrays indexed by `(xidx, yidx)` with `-1` empty sentinels and explicit stronger-priority replacement only when requested. | This preserves deterministic conflict checks, keeps accidental overwrites visible, and aligns with the status assumption that smaller positive priority is the stronger claim. | Codex |
+| 2026-05-05 | Use a strict greater-than-half cell coverage threshold for polygon edge cells in the new area rasterizer. | This mirrors the legacy `> 32` square-meter rule for 8 m cells while moving candidate selection to integer grid windows. | Codex |
+| 2026-05-05 | Keep `use_new_area_rasterizer` default-off and expose it through `ExtractionPipeline.run_area_rasterizer`. | Milestone 4 proves the typed stage in isolation without changing app-facing extraction output before layered output and later pipeline activation milestones. | Codex |
+| 2026-05-05 | Replace legacy random-cluster scratch behavior with seeded fixed-span spatial clusters in the new area rasterizer. | The old helper generated unrelated large random arrays and ignored the cluster data; the new path needs deterministic, spatially correlated choices from the pipeline RNG. | Codex |
 
 ## Contract Changes Requested or Approved
 
@@ -72,6 +75,7 @@ No further contract changes have been requested or approved.
 | 2026-05-05 | 2 | Legacy preprocessing still uses its local tag index and duplicated `get_matched_cm_type` helpers instead of the new `FeatureMatcher` for active output generation. | Milestone 2 introduced the typed schema and matcher while preserving legacy extraction behavior; swapping active matching belongs with later feature-flag activation. | Milestones 4 through 11, as feature classes move to typed records. |
 | 2026-05-05 | 2 | Hard-coded shared tile labels were not changed in this milestone. | Tile assignment semantics are owned by Milestone 7 and need catalog/intersection tests before changing output labels. | Milestone 7 tile catalog assignment and intersection solving. |
 | 2026-05-05 | 3 | `GridIndex` and `OccupancyModel` are implemented foundations but are not yet active in the pipeline. | Milestone 3 adds the shared grid/conflict primitives; feature processors move onto them in later milestones. | Milestones 4 through 9. |
+| 2026-05-05 | 4 | `AreaRasterizer` is implemented behind `use_new_area_rasterizer`, but `OSMProcessor.run_processors` still uses legacy area/default/point helpers by default. | Later milestones still need topology, routing, tile assignment, layered output, and adapter activation before public extraction can fully switch to typed placements. | Milestones 5 through 9. |
 
 ## Test and Validation Results
 
@@ -103,6 +107,11 @@ No further contract changes have been requested or approved.
 | 2026-05-05 | 3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_grid_index.py tests\cm_terrain_extractor\osm_extraction\test_occupancy.py -v` | Passed | 7 passed. Existing dependency deprecation warnings and `.pytest_cache` permission warning remain. |
 | 2026-05-05 | 3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_models.py -q` | Passed | 2 passed. Run because `models.py` and package exports were touched. Existing `.pytest_cache` permission warning remains. |
 | 2026-05-05 | 3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check cm_terrain_extractor_app\terrain_extraction\osm_extraction\grid_index.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\occupancy.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\models.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\__init__.py tests\cm_terrain_extractor\osm_extraction --no-cache` | Failed during cleanup, then passed | Initial run found import-order issues; `ruff --fix` failed with Windows `Zugriff verweigert`, so the equivalent import-order diff was applied manually. Final run: all checks passed. |
+| 2026-05-05 | 4 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_area_rasterizer.py -q` | Failed as expected before implementation | TDD red step: `area_rasterizer.py` and `ExtractionPipeline.run_area_rasterizer` did not exist yet; 7 failures. |
+| 2026-05-05 | 4 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_area_rasterizer.py -v` | Passed | 7 passed. Existing `.pytest_cache` permission warning remains. |
+| 2026-05-05 | 4 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_baseline_invariants.py -q` | Passed | 13 passed. Existing legacy/dependency warnings and `.pytest_cache` permission warning remain. |
+| 2026-05-05 | 4 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_pipeline.py tests\cm_terrain_extractor\test_osm_processor.py -q` | Passed | 14 passed. Run because pipeline and `OSMProcessor` adapter were touched; existing dependency and `.pytest_cache` warnings remain. |
+| 2026-05-05 | 4 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check cm_terrain_extractor_app\terrain_extraction\osm_extraction\area_rasterizer.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\pipeline.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\__init__.py cm_terrain_extractor_app\terrain_extraction\osm_processor.py tests\cm_terrain_extractor\osm_extraction --no-cache` | Failed during cleanup, then passed | Initial run found import-order issues and one unused test import; manual cleanup was applied. Final run: all checks passed. |
 
 ## Known Blockers
 
@@ -123,6 +132,7 @@ No further contract changes have been requested or approved.
 - Existing tests under `tests/cm_terrain_extractor/` must remain passing unless a contract-approved behavior change updates them.
 - Fixture-based tests are preferred over live OSM downloads.
 - Random extraction behavior must become deterministic under an explicit seed.
+- `use_new_area_rasterizer` remains a migration flag and is default-off for app-facing extraction until later output assembly and adapter milestones activate typed placements end to end.
 - Smaller numeric priority currently appears to be the stronger positive placement claim; the new code should name this internally as rank if it clarifies semantics.
 - Default network snap tolerance starts at `1.0 m` unless fixture results justify a status-recorded change.
 - Route deviation starts with `24 m` for major roads, `32 m` for normal routes, and up to `48 m` for minor-route relaxation unless fixture results justify a status-recorded change.

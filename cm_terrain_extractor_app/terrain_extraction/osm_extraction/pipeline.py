@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
+from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import ExtractionResult
+from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.stats import ExtractionStats
 
 ProgressCallback = Callable[[str, float, str | None], None]
@@ -64,6 +67,32 @@ class ExtractionPipeline:
 
     def run(self) -> ExtractionResult:
         return ExtractionResult(stats=ExtractionStats(diagnostics={"mode": "stub"}))
+
+    def run_area_rasterizer(
+        self,
+        *,
+        features: tuple[Any, ...],
+        config: ExtractionConfig,
+        grid_index: GridIndex,
+        occupancy: OccupancyModel | None = None,
+    ) -> ExtractionResult:
+        if not self.context.feature_flags.get("use_new_area_rasterizer", False):
+            return ExtractionResult(diagnostics={"area_rasterizer": "disabled"})
+
+        from terrain_extraction.osm_extraction.area_rasterizer import AreaRasterizer
+
+        occupancy_model = occupancy or OccupancyModel.from_grid_index(grid_index)
+        placements = AreaRasterizer(grid_index, occupancy_model, self.context.rng).rasterize(features, config)
+        self.context.progress("area_rasterization", 1.0, "Area rasterization complete")
+        return ExtractionResult(
+            features=features,
+            placements=placements,
+            stats=ExtractionStats(
+                timings={"area_rasterization": None},
+                counts={"area_rasterizer_placements": len(placements)},
+                diagnostics={"mode": "area_rasterizer"},
+            ),
+        )
 
     def run_legacy(self, processor: LegacyProcessor, osm_data: object) -> ExtractionResult:
         timings: dict[str, float] = {}

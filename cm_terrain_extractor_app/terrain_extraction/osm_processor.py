@@ -52,6 +52,7 @@ class OSMProcessor:
                 profile=profile,
                 bbox=bbox,
                 config_path=path_to_config,
+                feature_flags=self.extraction_config.feature_flags,
             )
         )
         self.idx_bbox = None

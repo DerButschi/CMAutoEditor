@@ -1,3 +1,4 @@
+from terrain_extraction.osm_extraction.area_rasterizer import AreaRasterizer
 from terrain_extraction.osm_extraction.config_schema import (
     ConfigEntry,
     ConfigValidationError,
@@ -29,6 +30,7 @@ from terrain_extraction.osm_extraction.pipeline import (
 from terrain_extraction.osm_extraction.stats import ExtractionStats
 
 __all__ = [
+    "AreaRasterizer",
     "CMType",
     "ConfigEntry",
     "ConfigValidationError",
