@@ -12,6 +12,7 @@ from terrain_extraction.osm_extraction.models import ExtractionResult
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.stats import (
     ExtractionStats,
+    stats_from_building_fitting,
     stats_from_network_routing,
     stats_from_tile_assignment,
 )
@@ -170,6 +171,28 @@ class ExtractionPipeline:
             placements=assignment.placements,
             stats=stats_from_tile_assignment(assignment),
             diagnostics={"tile_assignment": assignment},
+        )
+
+    def run_building_fitter(
+        self,
+        *,
+        features: tuple[Any, ...],
+        catalogs: Mapping[str, Any],
+        grid_index: GridIndex,
+        occupancy: OccupancyModel | None = None,
+    ) -> ExtractionResult:
+        if not self.context.feature_flags.get("use_new_building_fitter", False):
+            return ExtractionResult(diagnostics={"building_fitter": "disabled"})
+
+        from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+
+        fitter = BuildingFitter(grid_index, occupancy=occupancy, rng=self.context.rng)
+        fitting = fitter.fit(features, catalogs=catalogs)
+        self.context.progress("building_fitting", 1.0, "Building fitting complete")
+        return ExtractionResult(
+            placements=fitting.placements,
+            stats=stats_from_building_fitting(fitting),
+            diagnostics={"building_fitting": fitting},
         )
 
     def run_legacy(self, processor: LegacyProcessor, osm_data: object) -> ExtractionResult:

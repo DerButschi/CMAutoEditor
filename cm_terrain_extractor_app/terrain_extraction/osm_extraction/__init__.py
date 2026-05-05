@@ -1,4 +1,10 @@
 from terrain_extraction.osm_extraction.area_rasterizer import AreaRasterizer
+from terrain_extraction.osm_extraction.building_fitter import (
+    BuildingCatalog,
+    BuildingFitter,
+    BuildingFittingResult,
+    BuildingFootprint,
+)
 from terrain_extraction.osm_extraction.config_schema import (
     ConfigEntry,
     ConfigValidationError,
@@ -48,6 +54,10 @@ from terrain_extraction.osm_extraction.tile_assignment import (
 
 __all__ = [
     "AreaRasterizer",
+    "BuildingCatalog",
+    "BuildingFitter",
+    "BuildingFittingResult",
+    "BuildingFootprint",
     "CMType",
     "CompiledTileCatalog",
     "ConfigEntry",

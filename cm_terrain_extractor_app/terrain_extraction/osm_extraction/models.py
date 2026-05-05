@@ -236,6 +236,32 @@ class TileAssignmentResult:
 
 
 @dataclass(frozen=True, slots=True)
+class BuildingFittingResult:
+    placements: tuple[PlacementRecord, ...] = ()
+    failures: tuple[Mapping[str, Any], ...] = ()
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    diagnostics_by_feature: Mapping[str | int, Mapping[str, Any]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "placements", tuple(self.placements))
+        object.__setattr__(self, "failures", tuple(_frozen_mapping(failure) for failure in self.failures))
+        object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
+        object.__setattr__(self, "diagnostics_by_feature", _frozen_mapping(self.diagnostics_by_feature))
+
+    @property
+    def placed_count(self) -> int:
+        return len(self.placements)
+
+    @property
+    def dropped_count(self) -> int:
+        return len(self.failures)
+
+    @property
+    def success(self) -> bool:
+        return not self.failures
+
+
+@dataclass(frozen=True, slots=True)
 class ExtractionResult:
     features: tuple[FeatureRecord, ...] = ()
     placements: tuple[PlacementRecord, ...] = ()

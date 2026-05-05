@@ -54,3 +54,24 @@ def stats_from_tile_assignment(tile_assignment_result: Any) -> ExtractionStats:
         },
         diagnostics={"mode": "tile_assignment", **diagnostics},
     )
+
+
+def stats_from_building_fitting(building_fitting_result: Any) -> ExtractionStats:
+    diagnostics = dict(building_fitting_result.diagnostics)
+    placed = list(building_fitting_result.placements)
+    ious = [placement.diagnostics.get("iou") for placement in placed]
+    centroid_shifts = [placement.diagnostics.get("centroid_shift_m") for placement in placed]
+    numeric_ious = [float(value) for value in ious if value is not None]
+    numeric_shifts = [float(value) for value in centroid_shifts if value is not None]
+    return ExtractionStats(
+        timings={"building_fitting": None},
+        counts={
+            "buildings_placed": building_fitting_result.placed_count,
+            "buildings_dropped": building_fitting_result.dropped_count,
+        },
+        quality={
+            "building_mean_iou": None if not numeric_ious else sum(numeric_ious) / len(numeric_ious),
+            "building_max_centroid_shift_m": None if not numeric_shifts else max(numeric_shifts),
+        },
+        diagnostics={"mode": "building_fitting", **diagnostics},
+    )
