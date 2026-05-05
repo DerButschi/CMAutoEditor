@@ -6,26 +6,54 @@ import geopandas
 import numpy as np
 import pandas
 import pyproj
-import streamlit as st
 import terrain_extraction.osm_utils.processing
 from pyproj.crs import CRS
 from shapely import MultiPolygon, affinity, transform, union_all
 from shapely.geometry import shape
 from terrain_extraction.bbox_utils import BoundingBox
+from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
 from terrain_extraction.osm_utils.grid import get_all_grids
 
 from profiles import get_building_outline_by_df_entry, process_to_building_type
 
+try:
+    import streamlit as st
+except ModuleNotFoundError:
+    st = None
+
+
+class _NullProgress:
+    def progress(self, *args, **kwargs):
+        return self
+
+
+class _NullStreamlit:
+    def progress(self, *args, **kwargs):
+        return _NullProgress()
+
+
+if st is None:
+    st = _NullStreamlit()
+
 
 class OSMProcessor:
     def __init__(self, profile: str, bbox: BoundingBox, path_to_config: str = "default_osm_config.json"):
-        self.path_to_congih = path_to_config
+        self.path_to_config = path_to_config
         with open(path_to_config) as config_file:
             self.config = json.load(config_file)
+        self.extraction_config = ExtractionConfig.from_mapping(self.config)
         self._config_order = {name: idx for idx, name in enumerate(self.config)}
         self._tag_to_config_names = self._build_tag_to_config_names()
         self.profile = profile
         self.bbox = bbox
+        self.pipeline = ExtractionPipeline(
+            ExtractionContext.create(
+                profile=profile,
+                bbox=bbox,
+                config_path=path_to_config,
+            )
+        )
         self.idx_bbox = None
         self.effective_bbox_polygon = None
         self.transformer = None
@@ -98,6 +126,10 @@ class OSMProcessor:
         # self.logger.addHandler(stream_handler)
         # self.logger.addHandler(file_handler)
         # self.logger.debug('Initialization complete.')
+
+    @property
+    def path_to_congih(self):
+        return self.path_to_config
 
     def _build_tag_to_config_names(self):
         tag_to_config_names = {}

@@ -1,11 +1,10 @@
 from collections import OrderedDict
-from . import fortress_italy
-from . import cold_war
-from . import shock_force_2
-from . import black_sea
+
 import numpy as np
-from skimage.draw import polygon2mask
 from shapely import Polygon
+from skimage.draw import polygon2mask
+
+from . import black_sea, cold_war, fortress_italy, shock_force_2
 
 available_profiles = OrderedDict([
     ('Black Sea', 'black_sea'),
@@ -17,6 +16,7 @@ available_profiles = OrderedDict([
 process_to_building_type = {
     'type_from_residential_building_outline': 'residential_buildings',
     'type_from_church_outline': 'churches',
+    'type_from_barn_outline': 'barns',
     'type_from_barn_outlines': 'barns'
 }
 
@@ -101,20 +101,13 @@ def get_building_tokens(building_type, profile='cold_war'):
             mask = polygon2mask((pattern.shape), polygon)
             pattern[mask] = 1
             for row, col in np.argwhere(pattern == 1):
-                if row > 0 and pattern[row - 1, col] == 0:
+                if (
+                    (row > 0 and pattern[row - 1, col] == 0)
+                    or (row < pattern.shape[0] - 1 and pattern[row + 1, col] == 0)
+                    or (col > 0 and pattern[row, col - 1] == 0)
+                    or (col < pattern.shape[1] - 1 and pattern[row, col + 1] == 0)
+                ):
                     pattern[row, col] = 0.5
-                elif row < pattern.shape[0] - 1 and pattern[row + 1, col] == 0:
-                    pattern[row, col] = 0.5
-                elif col > 0 and pattern[row, col - 1] == 0:
-                    pattern[row, col] = 0.5
-                elif col < pattern.shape[1] - 1 and pattern[row, col + 1] == 0:
-                    pattern[row, col] = 0.5
-
-
-                
-                                    
-
-            a = 1
 
         token_dict['pattern'] = pattern
         token_dict['has_modular'] = group['is_modular'].any()

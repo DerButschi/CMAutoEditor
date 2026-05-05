@@ -1,9 +1,16 @@
-from typing import List, Self
-from shapely import Polygon, Point
+from typing import Self
+
 import numpy as np
-from pyproj.crs import CRS
-from terrain_extraction.projection_utils import get_projection_epsg_code_from_bbox, transform_polygon, transform_point
 import pandas
+from pyproj.crs import CRS
+from shapely import Point, Polygon
+from terrain_extraction.projection_utils import (
+    get_projection_epsg_code_from_bbox,
+    transform_point,
+    transform_polygon,
+)
+
+WGS84_CRS = CRS.from_epsg(4326)
 
 def make_polygon_counter_clockwise(polygon: Polygon) -> Polygon:
     if not polygon.exterior.is_ccw:
@@ -11,12 +18,12 @@ def make_polygon_counter_clockwise(polygon: Polygon) -> Polygon:
 
     return polygon
 
-def find_idx_closest_point_in_list(points: List[Point], ref_point: Point) -> int:
+def find_idx_closest_point_in_list(points: list[Point], ref_point: Point) -> int:
     dist = [ref_point.distance(pt) for pt in points]
     min_idx = np.argmin(dist)
     return min_idx
 
-def get_polygon_node_points(polygon: Polygon) -> List[Point]:
+def get_polygon_node_points(polygon: Polygon) -> list[Point]:
     return [Point(*coord) for coord in polygon.exterior.coords][:-1]
 
 
@@ -24,7 +31,7 @@ def find_idx_closest_polygon_node(polygon: Polygon, ref_point: Point) -> int:
     polygon_points = get_polygon_node_points(polygon)
     return find_idx_closest_point_in_list(polygon_points, ref_point)
 
-def permute_list_to_idx(lst: List, start_index: int) -> List:
+def permute_list_to_idx(lst: list, start_index: int) -> list:
     if start_index < 0 or start_index >= len(lst):
         raise ValueError("Invalid start index")
 
@@ -60,10 +67,12 @@ def get_rectangle_rotation_angle(rectangle: Polygon, origin_point: Point, degree
 
 
 class BoundingBox:
-    def __init__(self, polygon: Polygon, crs: CRS = CRS.from_epsg(4326)) -> None:
+    def __init__(self, polygon: Polygon, crs: CRS | None = None) -> None:
+        if crs is None:
+            crs = WGS84_CRS
         orig_polygon_points = get_polygon_node_points(polygon)
-        if not crs.to_epsg() == 4326:
-            self.polygon_wgs84 = transform_polygon(polygon, from_epsg=crs.to_epsg, to_epsg=4326)
+        if crs.to_epsg() != 4326:
+            self.polygon_wgs84 = transform_polygon(polygon, from_epsg=crs.to_epsg(), to_epsg=4326)
         else:
             self.polygon_wgs84 = polygon
 
@@ -81,7 +90,9 @@ class BoundingBox:
 
         self.box_wgs84 = transform_polygon(self.box_utm, self.crs_projected.to_epsg(), 4326)
 
-    def get_box(self, crs: CRS = CRS.from_epsg(4326)) -> Polygon:
+    def get_box(self, crs: CRS | None = None) -> Polygon:
+        if crs is None:
+            crs = WGS84_CRS
         if crs.to_epsg() == 4326:
             return self.box_wgs84
         elif crs.to_epsg() == self.crs_projected.to_epsg():
@@ -89,7 +100,7 @@ class BoundingBox:
         else:
             return transform_polygon(self.box_wgs84, 4326, crs.to_epsg())
         
-    def get_dataframe(self, crs: CRS = CRS.from_epsg(4326)) -> pandas.DataFrame:
+    def get_dataframe(self, crs: CRS | None = None) -> pandas.DataFrame:
         box = self.get_box(crs)
         df = pandas.DataFrame({
             'x': [coord[0] for coord in box.exterior.coords][:-1],
@@ -113,10 +124,10 @@ class BoundingBox:
     def get_area(self):
         return self.box_utm.area
     
-    def get_bounds(self, crs: CRS = CRS.from_epsg(4326)):
+    def get_bounds(self, crs: CRS | None = None):
         return self.get_box(crs).bounds
     
-    def get_coordinates(self, crs: CRS = CRS.from_epsg(4326), xy=True):
+    def get_coordinates(self, crs: CRS | None = None, xy=True):
         box = self.get_box(crs)
         if xy:
             return [(coord[0], coord[1]) for coord in box.exterior.coords]
@@ -128,7 +139,9 @@ class BoundingBox:
         other_box = other.get_box(self.crs_projected)
         return this_box.equals_exact(other_box, tolerance=0.1)
     
-    def get_buffer(self, crs: CRS = CRS.from_epsg(4326), buffer_size: float = 100.0):
+    def get_buffer(self, crs: CRS | None = None, buffer_size: float = 100.0):
+        if crs is None:
+            crs = WGS84_CRS
         return transform_polygon(self.get_box(self.crs_projected).buffer(buffer_size), self.crs_projected.to_epsg(), crs.to_epsg())
 
     def cycle_origin(self):
@@ -139,11 +152,11 @@ class BoundingBox:
         box_points = get_polygon_node_points(self.box_utm)
         return get_rectangle_rotation_angle(self.box_utm, box_points[0])
     
-    def get_origin_point(self, crs: CRS = CRS.from_epsg(4326)):
+    def get_origin_point(self, crs: CRS | None = None):
         box_points = get_polygon_node_points(self.get_box(crs))
         return box_points[0]
     
-    def get_reference_points(self, crs: CRS = CRS.from_epsg(4326)):
+    def get_reference_points(self, crs: CRS | None = None):
         box_points = get_polygon_node_points(self.get_box(crs))
         return box_points[0], box_points[1], box_points[3]
         
