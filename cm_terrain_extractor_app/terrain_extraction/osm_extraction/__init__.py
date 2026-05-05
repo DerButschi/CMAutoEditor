@@ -5,17 +5,21 @@ from terrain_extraction.osm_extraction.config_schema import (
     TagSelector,
 )
 from terrain_extraction.osm_extraction.feature_matcher import FeatureMatcher
+from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
     CMType,
+    ConflictDecision,
     ExtractionResult,
     FeatureRecord,
     GridCell,
     GridKind,
     GridNode,
     LayerKind,
+    OccupancyConflict,
     PlacementRecord,
     ProcessKind,
 )
+from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.pipeline import (
     ExtractionContext,
     ExtractionPipeline,
@@ -28,6 +32,7 @@ __all__ = [
     "CMType",
     "ConfigEntry",
     "ConfigValidationError",
+    "ConflictDecision",
     "ExtractionContext",
     "ExtractionConfig",
     "ExtractionPipeline",
@@ -37,8 +42,11 @@ __all__ = [
     "FeatureRecord",
     "GridCell",
     "GridKind",
+    "GridIndex",
     "GridNode",
     "LayerKind",
+    "OccupancyConflict",
+    "OccupancyModel",
     "PlacementRecord",
     "ProcessKind",
     "ProgressCallback",

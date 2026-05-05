@@ -71,6 +71,26 @@ class GridNode:
 
 
 @dataclass(frozen=True, slots=True)
+class OccupancyConflict:
+    cell: GridCell
+    requested_layer: LayerKind
+    blocking_layer: LayerKind
+    blocking_object_id: str | int
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ConflictDecision:
+    allowed: bool
+    reasons: tuple[str, ...] = ()
+    conflicts: tuple[OccupancyConflict, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "reasons", tuple(self.reasons))
+        object.__setattr__(self, "conflicts", tuple(self.conflicts))
+
+
+@dataclass(frozen=True, slots=True)
 class FeatureRecord:
     feature_id: str | int | None
     source_index: int
