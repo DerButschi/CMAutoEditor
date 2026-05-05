@@ -26,3 +26,19 @@ class ExtractionStats:
             "quality": dict(self.quality),
             "diagnostics": dict(self.diagnostics),
         }
+
+
+def stats_from_network_routing(routing_result: Any) -> ExtractionStats:
+    diagnostics = dict(routing_result.diagnostics)
+    return ExtractionStats(
+        timings={"network_routing": None},
+        counts={
+            "network_routes_succeeded": routing_result.successful_count,
+            "network_routes_failed": routing_result.failed_count,
+        },
+        quality={
+            "network_route_mean_detour_ratio": diagnostics.get("mean_detour_ratio"),
+            "network_route_max_source_line_distance_m": diagnostics.get("max_source_line_distance_m"),
+        },
+        diagnostics={"mode": "network_routing", **diagnostics},
+    )

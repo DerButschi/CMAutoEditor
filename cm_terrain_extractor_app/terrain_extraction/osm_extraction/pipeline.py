@@ -10,7 +10,7 @@ from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import ExtractionResult
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
-from terrain_extraction.osm_extraction.stats import ExtractionStats
+from terrain_extraction.osm_extraction.stats import ExtractionStats, stats_from_network_routing
 
 ProgressCallback = Callable[[str, float, str | None], None]
 
@@ -120,6 +120,33 @@ class ExtractionPipeline:
                 diagnostics={"mode": "network_topology", **dict(topology.diagnostics)},
             ),
             diagnostics={"network_topology": topology},
+        )
+
+    def run_network_router(
+        self,
+        *,
+        topology: Any,
+        grid_index: GridIndex,
+        occupancy: OccupancyModel | None = None,
+        corridor_deviation_m: float = 32.0,
+        minor_relaxation_m: float = 48.0,
+    ) -> ExtractionResult:
+        if not self.context.feature_flags.get("use_new_network_router", False):
+            return ExtractionResult(diagnostics={"network_router": "disabled"})
+
+        from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+        router = NetworkRouter(
+            grid_index=grid_index,
+            occupancy=occupancy,
+            corridor_deviation_m=corridor_deviation_m,
+            minor_relaxation_m=minor_relaxation_m,
+        )
+        routes = router.route(topology)
+        self.context.progress("network_routing", 1.0, "Network routing complete")
+        return ExtractionResult(
+            stats=stats_from_network_routing(routes),
+            diagnostics={"network_router": router, "network_routes": routes},
         )
 
     def run_legacy(self, processor: LegacyProcessor, osm_data: object) -> ExtractionResult:

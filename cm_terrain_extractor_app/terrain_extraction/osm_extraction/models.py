@@ -181,6 +181,45 @@ class TopologyGraph:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteRecord:
+    edge_id: int
+    start_node_id: int
+    end_node_id: int
+    process: ProcessKind
+    config_name: str
+    priority: int
+    nodes: tuple[GridNode, ...] = ()
+    cells: tuple[GridCell, ...] = ()
+    success: bool = True
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "nodes", tuple(self.nodes))
+        object.__setattr__(self, "cells", tuple(self.cells))
+        object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
+
+
+@dataclass(frozen=True, slots=True)
+class NetworkRoutingResult:
+    routes: tuple[RouteRecord, ...] = ()
+    node_anchors: Mapping[int, GridNode] = field(default_factory=dict)
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "routes", tuple(self.routes))
+        object.__setattr__(self, "node_anchors", _frozen_mapping(self.node_anchors))
+        object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
+
+    @property
+    def successful_count(self) -> int:
+        return sum(1 for route in self.routes if route.success)
+
+    @property
+    def failed_count(self) -> int:
+        return sum(1 for route in self.routes if not route.success)
+
+
+@dataclass(frozen=True, slots=True)
 class ExtractionResult:
     features: tuple[FeatureRecord, ...] = ()
     placements: tuple[PlacementRecord, ...] = ()
