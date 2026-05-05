@@ -21,6 +21,7 @@ from terrain_extraction.osm_extraction.models import (
     PlacementRecord,
     ProcessKind,
     RouteRecord,
+    TileAssignmentResult,
     TopologyEdge,
     TopologyGraph,
     TopologyNode,
@@ -39,10 +40,16 @@ from terrain_extraction.osm_extraction.pipeline import (
     noop_progress,
 )
 from terrain_extraction.osm_extraction.stats import ExtractionStats
+from terrain_extraction.osm_extraction.tile_assignment import (
+    CompiledTileCatalog,
+    TileAssigner,
+    TileVariant,
+)
 
 __all__ = [
     "AreaRasterizer",
     "CMType",
+    "CompiledTileCatalog",
     "ConfigEntry",
     "ConfigValidationError",
     "ConflictDecision",
@@ -71,6 +78,9 @@ __all__ = [
     "MoveStep",
     "noop_progress",
     "TagSelector",
+    "TileAssigner",
+    "TileAssignmentResult",
+    "TileVariant",
     "TopologyEdge",
     "TopologyGraph",
     "TopologyNode",

@@ -10,7 +10,11 @@ from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import ExtractionResult
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
-from terrain_extraction.osm_extraction.stats import ExtractionStats, stats_from_network_routing
+from terrain_extraction.osm_extraction.stats import (
+    ExtractionStats,
+    stats_from_network_routing,
+    stats_from_tile_assignment,
+)
 
 ProgressCallback = Callable[[str, float, str | None], None]
 
@@ -147,6 +151,25 @@ class ExtractionPipeline:
         return ExtractionResult(
             stats=stats_from_network_routing(routes),
             diagnostics={"network_router": router, "network_routes": routes},
+        )
+
+    def run_tile_assignment(
+        self,
+        *,
+        routes: tuple[Any, ...],
+        catalogs: Mapping[Any, Any],
+    ) -> ExtractionResult:
+        if not self.context.feature_flags.get("use_new_tile_assignment", False):
+            return ExtractionResult(diagnostics={"tile_assignment": "disabled"})
+
+        from terrain_extraction.osm_extraction.tile_assignment import TileAssigner
+
+        assignment = TileAssigner(catalogs, rng=self.context.rng).assign(routes)
+        self.context.progress("tile_assignment", 1.0, "Tile assignment complete")
+        return ExtractionResult(
+            placements=assignment.placements,
+            stats=stats_from_tile_assignment(assignment),
+            diagnostics={"tile_assignment": assignment},
         )
 
     def run_legacy(self, processor: LegacyProcessor, osm_data: object) -> ExtractionResult:

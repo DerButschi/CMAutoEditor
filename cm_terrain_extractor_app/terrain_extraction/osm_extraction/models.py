@@ -220,6 +220,22 @@ class NetworkRoutingResult:
 
 
 @dataclass(frozen=True, slots=True)
+class TileAssignmentResult:
+    placements: tuple[PlacementRecord, ...] = ()
+    failures: tuple[Mapping[str, Any], ...] = ()
+    diagnostics: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "placements", tuple(self.placements))
+        object.__setattr__(self, "failures", tuple(_frozen_mapping(failure) for failure in self.failures))
+        object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
+
+    @property
+    def success(self) -> bool:
+        return not self.failures
+
+
+@dataclass(frozen=True, slots=True)
 class ExtractionResult:
     features: tuple[FeatureRecord, ...] = ()
     placements: tuple[PlacementRecord, ...] = ()

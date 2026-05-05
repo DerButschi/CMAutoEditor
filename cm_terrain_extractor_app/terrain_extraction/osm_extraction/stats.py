@@ -42,3 +42,15 @@ def stats_from_network_routing(routing_result: Any) -> ExtractionStats:
         },
         diagnostics={"mode": "network_routing", **diagnostics},
     )
+
+
+def stats_from_tile_assignment(tile_assignment_result: Any) -> ExtractionStats:
+    diagnostics = dict(tile_assignment_result.diagnostics)
+    return ExtractionStats(
+        timings={"tile_assignment": None},
+        counts={
+            "tile_assignments_succeeded": len(tile_assignment_result.placements),
+            "tile_assignments_failed": len(tile_assignment_result.failures),
+        },
+        diagnostics={"mode": "tile_assignment", **diagnostics},
+    )
