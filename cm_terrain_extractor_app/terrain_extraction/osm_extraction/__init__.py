@@ -39,6 +39,13 @@ from terrain_extraction.osm_extraction.network_routing import (
 )
 from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+from terrain_extraction.osm_extraction.output_rows import (
+    OutputRowValidationError,
+    append_extent_marker,
+    normalize_output_coordinates,
+    placements_to_output_rows,
+    validate_output_rows,
+)
 from terrain_extraction.osm_extraction.pipeline import (
     ExtractionContext,
     ExtractionPipeline,
@@ -81,6 +88,7 @@ __all__ = [
     "NetworkRoutingResult",
     "OccupancyConflict",
     "OccupancyModel",
+    "OutputRowValidationError",
     "PlacementRecord",
     "ProcessKind",
     "ProgressCallback",
@@ -94,4 +102,8 @@ __all__ = [
     "TopologyEdge",
     "TopologyGraph",
     "TopologyNode",
+    "append_extent_marker",
+    "normalize_output_coordinates",
+    "placements_to_output_rows",
+    "validate_output_rows",
 ]

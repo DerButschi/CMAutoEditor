@@ -195,6 +195,37 @@ class ExtractionPipeline:
             diagnostics={"building_fitting": fitting},
         )
 
+    def run_output_rows(
+        self,
+        *,
+        placements: tuple[Any, ...],
+        bounds: tuple[int | float, int | float, int | float, int | float],
+    ) -> ExtractionResult:
+        if not self.context.feature_flags.get("use_layered_output", False):
+            return ExtractionResult(diagnostics={"output_rows": "disabled"})
+
+        from terrain_extraction.osm_extraction.output_rows import (
+            append_extent_marker,
+            normalize_output_coordinates,
+            placements_to_output_rows,
+            validate_output_rows,
+        )
+
+        internal_rows = placements_to_output_rows(placements, include_internal=True)
+        rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
+        validate_output_rows(rows_with_extent, bounds=bounds)
+        output_rows = normalize_output_coordinates(rows_with_extent, bounds=bounds)
+        self.context.progress("output_assembly", 1.0, "Layered output rows assembled")
+        return ExtractionResult(
+            placements=placements,
+            output_rows=output_rows,
+            stats=ExtractionStats(
+                timings={"output_assembly": None},
+                counts={"output_rows": len(output_rows)},
+                diagnostics={"mode": "layered_output"},
+            ),
+        )
+
     def run_legacy(self, processor: LegacyProcessor, osm_data: object) -> ExtractionResult:
         timings: dict[str, float] = {}
 

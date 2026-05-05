@@ -71,6 +71,7 @@ class OSMProcessor:
         self._occupancy_gdf_parts = []
 
         self.matched_elements = []
+        self.placements = ()
 
         self.processing_stages = {
             "type_from_tag": [(0, "assign_type_from_tag", "by_element")],
@@ -415,6 +416,10 @@ class OSMProcessor:
         # plt.show()
 
     def post_process(self):
+        if self._uses_layered_output():
+            self._get_layered_output_rows()
+            return
+
         self._flush_df_parts()
         # remove invalid entries
         self.df = self.df.drop_duplicates()
@@ -531,6 +536,10 @@ class OSMProcessor:
         return np.nan
 
     def write_to_file(self, output_file_name):
+        if self._uses_layered_output():
+            self._get_layered_output_dataframe().to_csv(output_file_name)
+            return
+
         self._flush_df_parts()
         xmax = self.idx_bbox[2]
         ymax = self.idx_bbox[3]
@@ -548,6 +557,9 @@ class OSMProcessor:
         out_df.to_csv(output_file_name)
 
     def get_output(self):
+        if self._uses_layered_output():
+            return self._get_layered_output_dataframe()
+
         self._flush_df_parts()
         xmax = self.idx_bbox[2]
         ymax = self.idx_bbox[3]
@@ -564,6 +576,33 @@ class OSMProcessor:
         out_df.y = out_df.y - self.idx_bbox[1]
 
         return out_df
+
+    def _uses_layered_output(self):
+        feature_flags = getattr(getattr(self, "extraction_config", None), "feature_flags", {})
+        if feature_flags.get("use_layered_output", False):
+            return True
+        pipeline_context = getattr(getattr(self, "pipeline", None), "context", None)
+        return getattr(pipeline_context, "feature_flags", {}).get("use_layered_output", False)
+
+    def _get_layered_output_rows(self):
+        from terrain_extraction.osm_extraction.output_rows import (
+            append_extent_marker,
+            normalize_output_coordinates,
+            placements_to_output_rows,
+            validate_output_rows,
+        )
+
+        bounds = tuple(self.idx_bbox)
+        internal_rows = placements_to_output_rows(tuple(getattr(self, "placements", ())), include_internal=True)
+        rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
+        validate_output_rows(rows_with_extent, bounds=bounds)
+        return normalize_output_coordinates(rows_with_extent, bounds=bounds)
+
+    def _get_layered_output_dataframe(self):
+        from terrain_extraction.osm_extraction.output_rows import NORMALIZED_OUTPUT_ROW_COLUMNS
+
+        rows = self._get_layered_output_rows()
+        return pandas.DataFrame.from_records(rows, columns=NORMALIZED_OUTPUT_ROW_COLUMNS)
     
     def get_geometries(self, crs: CRS | None = None):
         self._flush_df_parts()
