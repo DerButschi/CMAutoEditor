@@ -1,0 +1,53 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 6001,
+        "tags": {
+          "highway": "residential"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00010, 50.00038],
+          [7.00120, 50.00038]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 6002,
+        "tags": {
+          "waterway": "stream"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00010, 50.00062],
+          [7.00120, 50.00062]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 6003,
+        "tags": {
+          "barrier": "fence"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00065, 50.00015],
+          [7.00065, 50.00090]
+        ]
+      }
+    }
+  ]
+}

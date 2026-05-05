@@ -1,0 +1,84 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 5001,
+        "tags": {
+          "highway": "residential"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00010, 50.00050],
+          [7.00120, 50.00050]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 5002,
+        "tags": {
+          "building": "shed"
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [7.00018, 50.00063],
+            [7.00036, 50.00063],
+            [7.00036, 50.00078],
+            [7.00018, 50.00078],
+            [7.00018, 50.00063]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 5003,
+        "tags": {
+          "building": "shed"
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [7.00052, 50.00062],
+            [7.00070, 50.00062],
+            [7.00070, 50.00077],
+            [7.00052, 50.00077],
+            [7.00052, 50.00062]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 5004,
+        "tags": {
+          "building": "shed"
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [7.00087, 50.00062],
+            [7.00108, 50.00062],
+            [7.00108, 50.00080],
+            [7.00087, 50.00080],
+            [7.00087, 50.00062]
+          ]
+        ]
+      }
+    }
+  ]
+}

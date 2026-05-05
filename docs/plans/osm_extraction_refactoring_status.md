@@ -14,7 +14,7 @@ Future agents and humans must update this document after each milestone. Record 
 
 | Milestone | Name | Status | Owner | Last updated | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 0 | Baseline fixtures, invariant tests, benchmark runner, and metrics JSON | Not started | Unassigned | 2026-05-05 | Must establish OSM-specific TDD fixtures before algorithm changes. |
+| 0 | Baseline fixtures, invariant tests, benchmark runner, and metrics JSON | Done | Codex | 2026-05-05 | Added offline fixtures, invariant tests, and benchmark JSON metrics. |
 | 1 | Pipeline skeleton and compatibility wrapper | Not started | Unassigned | 2026-05-05 | Must preserve `OSMProcessor` public surface. |
 | 2 | Config schema, feature matcher, deterministic seed, and early bug fixes | Not started | Unassigned | 2026-05-05 | Covers known current drift including barn process spelling and `BoundingBox` EPSG bug. |
 | 3 | `GridIndex` and dense `OccupancyModel` | Not started | Unassigned | 2026-05-05 | Introduces affine grid math and explicit conflict policy. |
@@ -38,6 +38,9 @@ Future agents and humans must update this document after each milestone. Record 
 | 2026-05-05 | Create the new internal engine under `cm_terrain_extractor_app/terrain_extraction/osm_extraction/`. | The source outline recommends this package split and it keeps migration separate from legacy helpers. | User |
 | 2026-05-05 | Put new OSM extraction tests under `tests/cm_terrain_extractor/osm_extraction/`. | The repository now has an active `tests/cm_terrain_extractor/` suite; the old no-test-suite claim is stale. | Codex |
 | 2026-05-05 | Treat rail debug/export as a revalidation target rather than a confirmed current defect. | Current `get_geometries` has generic non-building handling, so the outline's rail concern needs a test before code changes. | Codex |
+| 2026-05-05 | Keep Milestone 0 fixtures WGS84-only. | The non-WGS84 `BoundingBox` constructor bug is already assigned to Milestone 2, so baseline fixtures avoid that unrelated known defect. | Codex |
+| 2026-05-05 | Seed legacy RNG only inside the benchmark runner and record it in diagnostics. | Legacy processors call `np.random.default_rng()` without an injected seed; the runner needs repeatable baseline replay without changing app behavior. | Codex |
+| 2026-05-05 | Use `building=shed` for Milestone 0 village/collision fixtures and report source geometry building-line intersections. | Synthetic outline-building tags routed into the legacy building outline collector and aborted the Windows process in Shapely before Python could catch an exception; algorithm replacement is out of scope for Milestone 0. | Codex |
 
 ## Contract Changes Requested or Approved
 
@@ -55,6 +58,8 @@ No further contract changes have been requested or approved.
 | 2026-05-05 | Current code | Core OSM preprocessing imports Streamlit and creates progress bars. | Existing implementation predates the headless pipeline boundary. | Milestone 1 progress callback and compatibility wrapper. |
 | 2026-05-05 | Current code | Current OSM processing uses `matched_elements`, `processing_stages`, GeoDataFrame grids, `occupancy_gdf`, and NetworkX full-grid routing. | These are the main refactor targets identified by the outline and current-code inspection. | Milestones 1 through 9. |
 | 2026-05-05 | Current code | Known drift includes `path_to_congih`, barn process spelling mismatch, non-WGS84 `BoundingBox` EPSG bug, duplicate `get_matched_cm_type`, hard-coded shared tile labels, and NetworkX routing. | These were confirmed or revalidated while preparing the planning documents. | Milestones 2, 6, and 7. |
+| 2026-05-05 | 0 | Benchmark stage timings are approximate legacy wrapper timings. | Current processing does not expose per-stage structured timings; Milestone 0 records `preprocess_osm_data`, `run_processors`, `post_process`, `output_assembly`, and null placeholders for future stage timings. | Milestone 1 stats/pipeline boundary. |
+| 2026-05-05 | 0 | Legacy outline-building synthetic fixtures can abort the Windows process in Shapely during `collect_building_geometries`. | The crash occurs before a catchable Python exception and Milestone 0 cannot refactor building algorithms. | Milestone 8 building fitter v2, with earlier guard tests if needed. |
 
 ## Test and Validation Results
 
@@ -67,6 +72,12 @@ No further contract changes have been requested or approved.
 | 2026-05-05 | Planning docs | `Select-String -Path docs\plans\osm_extraction_refactoring_*.md -Pattern "authoritative","contract","TDD","pytest","ruff","Dependency Graph","Blockers","Status"` | Passed | Confirmed required keywords are present across the OSM planning docs. |
 | 2026-05-05 | Planning docs | `Select-String -Path docs\plans\osm_extraction_refactoring_exec_plan.md -Pattern "Milestone 0","Milestone 11","C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe"` | Failed due invocation | PowerShell parsed the literal Windows path as a regex and rejected `\U` as an escape sequence. |
 | 2026-05-05 | Planning docs | `Select-String -SimpleMatch -Path docs\plans\osm_extraction_refactoring_exec_plan.md -Pattern "Milestone 0","Milestone 11","C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe"` | Passed | Equivalent literal search confirmed Milestone 0, Milestone 11, and the approved Conda pytest path are present. |
+| 2026-05-05 | 0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_baseline_invariants.py -q` | Failed as expected before implementation | TDD red step: collection failed because `cm_terrain_extractor_app.terrain_extraction.osm_extraction_benchmark` did not exist yet. |
+| 2026-05-05 | 0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_baseline_invariants.py -v` | Failed during development | Initial outline-building fixtures reached legacy `collect_building_geometries` and produced a Windows fatal exception in Shapely; fixtures were adjusted to avoid outline processing in this baseline milestone. |
+| 2026-05-05 | 0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_baseline_invariants.py -v` | Passed | 13 passed. Warnings are from existing GeoPandas/Pandas/legacy processing paths plus `.pytest_cache` permission warning. |
+| 2026-05-05 | 0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\python.exe -m cm_terrain_extractor_app.terrain_extraction.osm_extraction_benchmark --fixture crossroads --profile cold_war --config default_osm_config.json --seed 123` | Passed | Emitted metrics JSON with `timings`, `counts`, `quality`, and `diagnostics`; legacy warnings went to stderr. |
+| 2026-05-05 | 0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check tests\cm_terrain_extractor\osm_extraction\test_baseline_invariants.py --fix --no-cache` | Failed due environment | Ruff could not rewrite the file in-place: `Zugriff verweigert (os error 5)`. The import order was fixed manually. |
+| 2026-05-05 | 0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check cm_terrain_extractor_app\terrain_extraction\osm_extraction_benchmark.py tests\cm_terrain_extractor\osm_extraction --no-cache` | Passed | All checks passed after manual fixes. |
 
 ## Known Blockers
 
@@ -78,6 +89,7 @@ No further contract changes have been requested or approved.
 | 2026-05-05 | Current building process mapping disagrees on barn process spelling. | Barn outlines may be processed but not reconstructed in debug/export paths. | Fix with config/profile tests in Milestone 2. |
 | 2026-05-05 | NetworkX full-grid routing is likely the largest runtime risk. | Large or dense extracts may be slow or memory-heavy until routing is replaced. | Milestone 6 after topology and occupancy foundations. |
 | 2026-05-05 | Windows sandbox cache/temp permissions may interrupt pytest or ruff. | Validation can fail before executing tests. | Retry once with `--basetemp` or `--no-cache`; record unverified results after two environment failures. |
+| 2026-05-05 | Synthetic outline-building fixtures can abort the process in legacy building outline collection. | Milestone 0 cannot safely baseline `building=house` or `building=barn` outline paths in this environment. | Keep using non-outline building fixtures for baseline; add guarded outline/building-fitter coverage in Milestone 8 or earlier if the implementation touches that path. |
 
 ## Current Working Assumptions
 

@@ -1,0 +1,26 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 1001,
+        "tags": {
+          "landuse": "forest"
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [7.00020, 50.00020],
+            [7.00090, 50.00020],
+            [7.00090, 50.00080],
+            [7.00020, 50.00080],
+            [7.00020, 50.00020]
+          ]
+        ]
+      }
+    }
+  ]
+}

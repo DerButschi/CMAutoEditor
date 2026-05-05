@@ -1,0 +1,42 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 4001,
+        "tags": {
+          "highway": "residential"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00010, 50.00052],
+          [7.00110, 50.00052]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 4002,
+        "tags": {
+          "building": "shed"
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [7.00048, 50.00043],
+            [7.00072, 50.00043],
+            [7.00072, 50.00061],
+            [7.00048, 50.00061],
+            [7.00048, 50.00043]
+          ]
+        ]
+      }
+    }
+  ]
+}

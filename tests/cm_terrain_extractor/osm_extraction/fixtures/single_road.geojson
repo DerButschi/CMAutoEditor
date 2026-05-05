@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 2001,
+        "tags": {
+          "highway": "residential"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00010, 50.00050],
+          [7.00045, 50.00072],
+          [7.00110, 50.00070]
+        ]
+      }
+    }
+  ]
+}
