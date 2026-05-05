@@ -491,7 +491,7 @@ class OSMProcessor:
             if (
                 cm_type.get('menu') == menu
                 and cm_type.get('cat1') == cat1
-                and (cat2 not in cm_type or ('cat2' in cm_type and cm_type['cat2'] == cat2))
+                and ('cat2' not in cm_type or cm_type['cat2'] == cat2)
             ):
                 return cidx
 
@@ -536,7 +536,7 @@ class OSMProcessor:
         self._flush_df_parts()
         if crs is None:
             crs = CRS.from_epsg(4326)
-        gdf = self.gdf.to_crs(epsg=crs.to_epsg())
+        grid_gdf = self.gdf.to_crs(epsg=crs.to_epsg())
         sgdf = self.sub_square_grid_gdf
         dgdf = self.sub_square_grid_diagonal_gdf
 
@@ -546,18 +546,14 @@ class OSMProcessor:
             if name in ['default_ground', 'default_foliage']:
                 continue
             geometry_dict[name] = []
-            is_linear = False
             is_building = False
             for process in self.config[name]['process']:
-                if process in ['stream_tiles', 'road_tiles', 'fence_tiles']:
-                    is_linear = True
-                    break
-                elif process.endswith('outline'):
+                if process.endswith('outline'):
                     is_building = True
                     break
             
-            if not (is_building or is_linear):
-                df = self.df[self.df.name == name].merge(gdf.loc[:, ['xidx', 'yidx', 'geometry']], on=['xidx', 'yidx'])
+            if not is_building:
+                df = self.df[self.df.name == name].merge(grid_gdf.loc[:, ['xidx', 'yidx', 'geometry']], on=['xidx', 'yidx'])
                 if len(df) == 0:
                     continue
                 geometry = union_all(df.geometry)
@@ -575,11 +571,15 @@ class OSMProcessor:
                     for group_name, group in self.df[self.df.name == name].groupby(by=["menu", "cat1", "cat2", "direction"]):
                         outline, is_diagonal = get_building_outline_by_df_entry(building_type, *group_name)
                         outline = affinity.rotate(outline, self.bbox.get_rotation_angle(), origin=(0,0))
-                        merged_group = group.merge(sgdf if is_diagonal else dgdf, on=['xidx', 'yidx'], suffixes=(None, '_y'))
+                        merged_group = group.merge(dgdf if is_diagonal else sgdf, on=['xidx', 'yidx'], suffixes=(None, '_y'))
                         merged_group.geometry = merged_group.geometry.apply(lambda x: x.centroid)
                         merged_group.geometry = merged_group.geometry.apply(lambda x, outline=outline: affinity.translate(outline, xoff=x.x, yoff=x.y))
-                        gdf = geopandas.GeoDataFrame(merged_group).set_crs(self.bbox.crs_projected).to_crs(epsg=crs.to_epsg())
-                        geometry = union_all(gdf.geometry)
+                        building_gdf = geopandas.GeoDataFrame(
+                            merged_group.drop(columns='geometry'),
+                            geometry=list(merged_group.geometry),
+                            crs=self.bbox.crs_projected,
+                        ).to_crs(epsg=crs.to_epsg())
+                        geometry = union_all(building_gdf.geometry)
                         if geometry.geom_type == 'MultiPolygon':
                             geometry_dict[name].extend(list(geometry.geoms))
                         elif geometry.geom_type == 'Polygon':

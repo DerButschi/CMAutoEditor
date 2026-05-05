@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
+import geopandas as gpd
 import pandas as pd
 from pyproj.crs import CRS
+from shapely import GeometryCollection, LineString, Point, Polygon
 
 APP_DIR = Path(__file__).parents[2] / "cm_terrain_extractor_app"
 if str(APP_DIR) not in sys.path:
@@ -239,3 +242,223 @@ def test_grid_cell_indices_match_exact_pairs() -> None:
     )
 
     assert _get_grid_indices_for_cells(gdf, [(1, 1), (2, 2)]).tolist() == [10, 13]
+
+
+def test_cm_type_rank_distinguishes_cat2_values() -> None:
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    processor = OSMProcessor.__new__(OSMProcessor)
+    processor.config = {
+        "foliage": {
+            "cm_types": [
+                {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 1"},
+                {"menu": "Foliage", "cat1": "Tree A", "cat2": "density 2"},
+            ],
+        }
+    }
+
+    assert processor._get_cm_type_rank("foliage", "Foliage", "Tree A", "density 2") == 1
+
+
+def test_get_geometries_returns_building_geometry_from_diagonal_grid(monkeypatch) -> None:
+    from terrain_extraction import osm_processor as osm_processor_module
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    processor = OSMProcessor.__new__(OSMProcessor)
+    processor._df_parts = []
+    processor.df = pd.DataFrame(
+        [
+            {
+                "xidx": 0.5,
+                "yidx": 0.0,
+                "menu": "Buildings",
+                "cat1": "House",
+                "cat2": "Building 1",
+                "direction": "Direction 1",
+                "name": "houses",
+            }
+        ]
+    )
+    processor.config = {"houses": {"process": ["type_from_residential_building_outline"]}}
+    processor.bbox = SimpleNamespace(
+        crs_projected=CRS.from_epsg(4326),
+        get_rotation_angle=lambda: 0,
+    )
+    processor.gdf = gpd.GeoDataFrame(
+        {"xidx": [0], "yidx": [0]},
+        geometry=[Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
+        crs="EPSG:4326",
+    )
+    processor.sub_square_grid_gdf = gpd.GeoDataFrame(
+        {"xidx": [99], "yidx": [99]},
+        geometry=[Point(99, 99).buffer(1)],
+        crs="EPSG:4326",
+    )
+    processor.sub_square_grid_diagonal_gdf = gpd.GeoDataFrame(
+        {"xidx": [0.5], "yidx": [0.0]},
+        geometry=[Point(10, 10).buffer(1)],
+        crs="EPSG:4326",
+    )
+    monkeypatch.setitem(
+        osm_processor_module.process_to_building_type,
+        "type_from_residential_building_outline",
+        "residential_buildings",
+    )
+    monkeypatch.setattr(
+        osm_processor_module,
+        "get_building_outline_by_df_entry",
+        lambda *args: (Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]), True),
+    )
+    monkeypatch.setattr(
+        osm_processor_module.affinity,
+        "rotate",
+        lambda geometry, *args, **kwargs: geometry,
+    )
+    monkeypatch.setattr(
+        osm_processor_module.affinity,
+        "translate",
+        lambda geometry, *args, **kwargs: geometry,
+    )
+
+    geometries = processor.get_geometries(crs=CRS.from_epsg(4326))
+
+    assert len(geometries["houses"]) == 1
+
+
+def test_get_geometries_returns_linear_feature_cells() -> None:
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    processor = OSMProcessor.__new__(OSMProcessor)
+    processor._df_parts = []
+    processor.df = pd.DataFrame([{"xidx": 0, "yidx": 0, "name": "road"}])
+    processor.config = {"road": {"process": ["road_tiles"]}}
+    processor.bbox = SimpleNamespace(crs_projected=CRS.from_epsg(4326))
+    processor.gdf = gpd.GeoDataFrame(
+        {"xidx": [0], "yidx": [0]},
+        geometry=[Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])],
+        crs="EPSG:4326",
+    )
+    processor.sub_square_grid_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+    processor.sub_square_grid_diagonal_gdf = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+
+    geometries = processor.get_geometries(crs=CRS.from_epsg(4326))
+
+    assert len(geometries["road"]) == 1
+
+
+def test_collect_network_data_keeps_linestrings_from_geometry_collection() -> None:
+    from terrain_extraction.osm_utils.processing import collect_network_data
+
+    processor = SimpleNamespace(
+        effective_bbox_polygon=Polygon([(-1, -1), (2, -1), (2, 2), (-1, 2)]),
+        network_graphs={},
+    )
+    element_entry = {
+        "name": "road",
+        "idx": 3,
+        "geometry": GeometryCollection(
+            [
+                LineString([(0, 0), (1, 1)]),
+                Point(0, 1),
+            ]
+        ),
+    }
+
+    collect_network_data(processor, {}, element_entry)
+
+    lines = processor.network_graphs["road"]["lines"]
+    assert lines.element_idx.tolist() == [3]
+    assert lines.geometry.iloc[0].equals(LineString([(0, 0), (1, 1)]))
+
+
+def test_create_line_graph_does_not_emit_query_bulk_future_warning() -> None:
+    from terrain_extraction.osm_utils.processing import create_line_graph
+
+    lines = gpd.GeoDataFrame(
+        {"element_idx": [0, 1]},
+        geometry=[
+            LineString([(0, 0), (1, 1)]),
+            LineString([(0, 1), (1, 0)]),
+        ],
+    )
+    processor = SimpleNamespace(network_graphs={"road": {"lines": lines}})
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        create_line_graph(
+            processor,
+            {"road": {"priority": 1}},
+            "road",
+            tqdm_string="test",
+        )
+
+    assert processor.network_graphs["road"]["line_graph"].number_of_edges() > 0
+
+
+def test_get_matched_squares_does_not_emit_query_bulk_future_warning() -> None:
+    from terrain_extraction.osm_utils.processing import _get_matched_squares
+
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    processor = SimpleNamespace(
+        sub_square_grid_gdf=gpd.GeoDataFrame(
+            {"xidx": [0], "yidx": [0]},
+            geometry=[square],
+        ),
+        sub_square_grid_diagonal_gdf=gpd.GeoDataFrame(
+            {"xidx": [0.5], "yidx": [0.0]},
+            geometry=[Point(0.5, 0.5).buffer(0.5)],
+        ),
+        occupancy_gdf=gpd.GeoDataFrame(
+            {"priority": [10], "name": ["other"]},
+            geometry=[Polygon([(2, 2), (3, 2), (3, 3), (2, 3)])],
+        ),
+        _flush_occupancy_gdf_parts=lambda: None,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        squares = _get_matched_squares(processor, 1, square, diagonal=False)
+
+    assert squares[["xidx", "yidx"]].to_dict("records") == [{"xidx": 0, "yidx": 0}]
+
+
+def test_process_building_outlines_does_not_touch_matplotlib_when_debug_disabled(monkeypatch) -> None:
+    from terrain_extraction.osm_utils import processing
+
+    square = Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
+    processor = SimpleNamespace(
+        building_outlines={"houses": {}},
+        _flush_occupancy_gdf_parts=lambda: None,
+        gdf=gpd.GeoDataFrame(geometry=[square]),
+        occupancy_gdf=gpd.GeoDataFrame(
+            {"priority": [], "name": []},
+            geometry=[],
+        ),
+        sub_square_grid_diagonal_gdf=gpd.GeoDataFrame(
+            {"xidx": [0.5], "yidx": [0.0]},
+            geometry=[Point(0.5, 0.5).buffer(0.5)],
+        ),
+        sub_square_grid_gdf=gpd.GeoDataFrame(
+            {"xidx": [0], "yidx": [0]},
+            geometry=[square],
+        ),
+        profile="cold_war",
+    )
+    monkeypatch.setattr(
+        processing,
+        "get_building_tiles",
+        lambda building_type, profile: pd.DataFrame(),
+    )
+    monkeypatch.setattr(
+        processing.plt,
+        "gca",
+        lambda: (_ for _ in ()).throw(AssertionError("debug plotting should be disabled")),
+    )
+
+    processing.process_building_outlines(
+        processor,
+        {"houses": {"priority": 1}},
+        "houses",
+        "residential_buildings",
+        "test",
+    )

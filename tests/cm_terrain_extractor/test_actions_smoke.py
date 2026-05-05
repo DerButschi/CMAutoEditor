@@ -81,7 +81,7 @@ def test_load_osm_data_from_uploaded_bytes_reads_geojson() -> None:
     ) == payload
 
 
-def test_download_osm_data_uses_osmnx_tags_and_drops_legacy_columns(monkeypatch) -> None:
+def test_download_osm_data_uses_active_matching_osmnx_tags_and_drops_legacy_columns(monkeypatch) -> None:
     from cm_terrain_extractor_app.app_core import actions
 
     class FakeBBox:
@@ -107,8 +107,6 @@ def test_download_osm_data_uses_osmnx_tags_and_drops_legacy_columns(monkeypatch)
         assert polygon == "polygon"
         assert tags == {
             "highway": ["residential"],
-            "surface": ["paved"],
-            "access": ["private"],
         }
         return fake_frame
 
@@ -121,7 +119,11 @@ def test_download_osm_data_uses_osmnx_tags_and_drops_legacy_columns(monkeypatch)
                 "tags": [["highway", "residential"]],
                 "exclude_tags": [["surface", "paved"]],
                 "required_tags": [["access", "private"]],
-            }
+            },
+            "inactive": {
+                "active": False,
+                "tags": [["landuse", "forest"]],
+            },
         },
     ) == {"type": "FeatureCollection", "features": []}
     assert fake_frame.dropped == ["ways", "nodes"]

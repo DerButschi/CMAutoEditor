@@ -487,7 +487,7 @@ def search_path2(osm_processor, config, name):  # noqa: C901, PLR0915
         if len(squares) > 0:
             square_graph.add_edge(squares[0], squares[-1], squares=squares, element_idx=edge_data['element_idx'], from_node_to_node=[squares[0], squares[-1]])
         else:
-            logger.warn(f'Could not find valid squares for edge {edge[0]} - {edge[1]}.')
+            logger.warning(f'Could not find valid squares for edge {edge[0]} - {edge[1]}.')
 
 
     # plt.show()

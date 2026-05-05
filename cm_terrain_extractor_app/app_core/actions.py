@@ -66,9 +66,12 @@ def process_osm_data(
 def _build_osmnx_tag_dict(config: dict) -> dict[str, list[Any]]:
     tag_dict: dict[str, list[Any]] = {}
     for config_entry in config.values():
-        for tag_entry in ("tags", "exclude_tags", "required_tags"):
-            for key, value in config_entry.get(tag_entry, []):
-                tag_dict.setdefault(key, []).append(value)
+        if not config_entry.get("active", True):
+            continue
+        for key, value in config_entry.get("tags", []):
+            values = tag_dict.setdefault(key, [])
+            if value not in values:
+                values.append(value)
     return tag_dict
 
 

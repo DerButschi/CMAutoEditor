@@ -26,7 +26,7 @@ import pandas
 from matplotlib.collections import PolyCollection
 from shapely import unary_union
 from shapely.affinity import rotate, scale, translate
-from shapely.geometry import (LineString, MultiLineString, MultiPoint,
+from shapely.geometry import (GeometryCollection, LineString, MultiLineString, MultiPoint,
                               MultiPolygon, Point, Polygon)
 from shapely.ops import snap, split, substring
 
@@ -39,6 +39,11 @@ from .path_search import (_get_closest_node_in_gdf, _remove_nodes_from_gdf,
                           search_path)
 
 DRAW_DEBUG_PLOTS = False
+
+
+def _spatial_query_pairs(indexed_geometry, query_geometry, predicate):
+    return indexed_geometry.sindex.query(query_geometry, predicate=predicate)
+
 
 road_direction_dict = {
     (0, 1): 'u',
@@ -320,7 +325,7 @@ def create_line_graph(osm_processor, config, name, tqdm_string):
         if not (key == name or 1 <= config[key]['priority'] <= config[name]['priority']):
             continue
         other_lines = osm_processor.network_graphs[key]['lines']
-        lines_intersecting = other_lines.geometry.sindex.query_bulk(lines.geometry, 'intersects')
+        lines_intersecting = _spatial_query_pairs(other_lines.geometry, lines.geometry, 'intersects')
         lines_intersecting_dict[key] = lines_intersecting
 
     for line_idx in range(len(lines)):
@@ -371,7 +376,7 @@ def create_line_graph(osm_processor, config, name, tqdm_string):
                 p2 = Point(ls_split.coords[-1])
                 line_graph.add_edge((p1.x, p1.y), (p2.x, p2.y), ls=ls_split, element_idx=lines.iloc[line_idx].element_idx, from_node_to_node=[(p1.x, p1.y), (p2.x, p2.y)])
             else:
-                logger.warn('LineString split was of type {}.'.format(type(ls_split)))
+                logger.warning('LineString split was of type {}.'.format(type(ls_split)))
 
     if DRAW_DEBUG_PLOTS:
         draw_line_graph(line_graph, show=True)
@@ -595,10 +600,10 @@ def assign_type_randomly_for_each_square(osm_processor, config, element_entry):
 def assign_type_at_linear_feature(osm_processor, config, name, tqdm_string):
     logger = logging.getLogger('osm2cm')
     if not "modifiers" in config[name]:
-        logger.warn('Process \'type_from_linear\' requires modifiers, key was not found for {}, though.'.format(name))
+        logger.warning('Process \'type_from_linear\' requires modifiers, key was not found for {}, though.'.format(name))
         return
     if not "linear_name" in config[name]['modifiers']:
-        logger.warn('Process \'type_from_linear\' requires modifier \'linear_name\', modifier was not found for {}, though.'.format(name))
+        logger.warning('Process \'type_from_linear\' requires modifier \'linear_name\', modifier was not found for {}, though.'.format(name))
         return
 
     cm_types = config[name]['cm_types']
@@ -739,7 +744,7 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df, tqdm_string):
         node2_id = edge[1]
         squares = square_graph.edges[edge]['squares']
         if not _check_if_squares_are_valid(squares):
-            logging.warn('Squares of edge {} -> {} ({}) are invalid'.format(*edge))
+            logger.warning('Squares of edge {} -> {} ({}) are invalid'.format(*edge))
             continue
 
         other_node1_neighbors = [neighbor for neighbor in nx.neighbors(square_graph, node1_id) if neighbor != node2_id or node1_id == node2_id]
@@ -888,7 +893,7 @@ def assign_tiles_to_network(osm_processor, config, name, tile_df, tqdm_string):
         cm_type = get_matched_cm_type(config, element_entry)
 
         if cm_type is None:
-            print('Warning: Could not find matching CM type for path elements between {} and {}.'.format(node1_id, node2_id))
+            logger.warning('Could not find matching CM type for path elements between {} and {}.'.format(node1_id, node2_id))
             continue
 
         for idx in range(len(path)):
@@ -944,23 +949,15 @@ def remove_duplicate_linestring_coordinates(ls):
             pass
     return linestrings
 
-def collect_network_data(osm_processor, config, element_entry):
-    logger = logging.getLogger('osm2cm')
-    name = element_entry['name']
-    if element_entry['name'] not in osm_processor.network_graphs:
-        osm_processor.network_graphs[name] = {}
 
-    geometry = element_entry['geometry']
-    geometry = osm_processor.effective_bbox_polygon.intersection(geometry)
-
+def _network_linestrings_from_geometry(geometry):
     linestrings = []
-    if type(geometry) == LineString:
-        ls = geometry 
-        linestrings = remove_duplicate_linestring_coordinates(ls)
-    elif type(geometry) == MultiLineString:
+    if isinstance(geometry, LineString):
+        linestrings.extend(remove_duplicate_linestring_coordinates(geometry))
+    elif isinstance(geometry, MultiLineString):
         for ls in geometry.geoms:
             linestrings.extend(remove_duplicate_linestring_coordinates(ls))
-    elif type(geometry) == Polygon:
+    elif isinstance(geometry, Polygon):
         exterior_ls = LineString(geometry.exterior.coords)
         # closed rings don't work with the rest of the tooling...
         # linestrings.extend(remove_duplicate_linestring_coordinates(substring(exterior_ls, 0, 0.5, normalized=True)))
@@ -971,9 +968,25 @@ def collect_network_data(osm_processor, config, element_entry):
         linestrings.extend(remove_duplicate_linestring_coordinates(exterior_ls))
         for interior in geometry.interiors:
             linestrings.extend(remove_duplicate_linestring_coordinates(interior))
+    elif isinstance(geometry, GeometryCollection):
+        for geom in geometry.geoms:
+            linestrings.extend(_network_linestrings_from_geometry(geom))
 
-    else:
-        logger.warn('Network geometry should be LineString but found {}.'.format(type(geometry)))
+    return linestrings
+
+
+def collect_network_data(osm_processor, config, element_entry):
+    logger = logging.getLogger('osm2cm')
+    name = element_entry['name']
+    if element_entry['name'] not in osm_processor.network_graphs:
+        osm_processor.network_graphs[name] = {}
+
+    geometry = element_entry['geometry']
+    geometry = osm_processor.effective_bbox_polygon.intersection(geometry)
+
+    linestrings = _network_linestrings_from_geometry(geometry)
+    if len(linestrings) == 0:
+        logger.warning('Network geometry should contain LineStrings but found {}.'.format(type(geometry)))
         return
 
     if len(linestrings) > 0:
@@ -999,7 +1012,7 @@ def collect_building_outlines(osm_processor, config, element_entry):
             if type(geom) == Polygon:
                 collect_building_geometries(osm_processor, geom, element_entry)
             else:
-                logger.deubg('Multipolygon of building contains unsupported geometry of type {}'.format(type(geom)))
+                logger.debug('Multipolygon of building contains unsupported geometry of type {}'.format(type(geom)))
     elif type(geometry) == Polygon:
         collect_building_geometries(osm_processor, geometry, element_entry)
     else:
@@ -1071,22 +1084,23 @@ def process_building_outlines(osm_processor, config, name, building_type, tqdm_s
     diagonal_bounds = [diag_grid_gdf.xidx.min(), diag_grid_gdf.yidx.min(), diag_grid_gdf.xidx.max(), diag_grid_gdf.yidx.max()]
     square_bounds = [grid_gdf.xidx.min(), grid_gdf.yidx.min(), grid_gdf.xidx.max(), grid_gdf.yidx.max()]
 
-    grid_vertices = []
-    for g in osm_processor.gdf.geometry.values:
-        grid_vertices.append([coord for coord in g.exterior.coords])
-    occupancy_vertices = []
-    for g in osm_processor.occupancy_gdf.geometry.values:
-        occupancy_vertices.append([coord for coord in g.exterior.coords])
-
     buildings = get_building_tiles(building_type, osm_processor.profile)
 
-    # plt.figure()
-    # plt.axis('equal')
-    ax = plt.gca()
-    grid_collection = PolyCollection(grid_vertices, closed=False, edgecolor='k')
-    occupancy_collection = PolyCollection(occupancy_vertices, closed=False, edgecolor='g', facecolor='g')
-    ax.add_collection(grid_collection)
-    ax.add_collection(occupancy_collection)
+    if DRAW_DEBUG_PLOTS:
+        grid_vertices = []
+        for g in osm_processor.gdf.geometry.values:
+            grid_vertices.append([coord for coord in g.exterior.coords])
+        occupancy_vertices = []
+        for g in osm_processor.occupancy_gdf.geometry.values:
+            occupancy_vertices.append([coord for coord in g.exterior.coords])
+
+        # plt.figure()
+        # plt.axis('equal')
+        ax = plt.gca()
+        grid_collection = PolyCollection(grid_vertices, closed=False, edgecolor='k')
+        occupancy_collection = PolyCollection(occupancy_vertices, closed=False, edgecolor='g', facecolor='g')
+        ax.add_collection(grid_collection)
+        ax.add_collection(occupancy_collection)
     for element_idx, outline_entry in raw_outlines.items():
         # plt.plot(*outline_entry[0].exterior.xy, '-m')
         # plt.text(outline_entry[0].centroid.x, outline_entry[0].centroid.y, str(element_idx), color='m')
@@ -1241,10 +1255,15 @@ def _get_matched_squares(osm_processor, priority, geometry, diagonal, min_square
         diamonds = diag_grid_gdf.geometry
         idx = diamonds.sindex.query(geometry, predicate='intersects')
         intersecting_diamonds = diamonds.iloc[idx].geometry
-        oidx = osm_processor.occupancy_gdf.loc[(osm_processor.occupancy_gdf.priority <= priority)].sindex.query_bulk(intersecting_diamonds.geometry, predicate='intersects')
+        occupied_gdf = osm_processor.occupancy_gdf.loc[(osm_processor.occupancy_gdf.priority <= priority)]
+        oidx = _spatial_query_pairs(
+            occupied_gdf.geometry,
+            intersecting_diamonds.geometry,
+            'intersects',
+        )
         area_oidx = []
         for oi in range(len(oidx[0])):
-            if intersecting_diamonds.iloc[oidx[0][oi]].intersection(osm_processor.occupancy_gdf.iloc[oidx[1][oi]].geometry).area > 0.0:
+            if intersecting_diamonds.iloc[oidx[0][oi]].intersection(occupied_gdf.iloc[oidx[1][oi]].geometry).area > 0.0:
                 area_oidx.append(oidx[0][oi])
 
         intersecting_diamonds = intersecting_diamonds.drop(intersecting_diamonds.iloc[area_oidx].index)
@@ -1256,10 +1275,15 @@ def _get_matched_squares(osm_processor, priority, geometry, diagonal, min_square
         squares = square_grid_gdf.geometry
         idx = squares.sindex.query(geometry, predicate='intersects')
         intersecting_squares = intersecting_squares = squares.iloc[idx]
-        oidx = osm_processor.occupancy_gdf.loc[(osm_processor.occupancy_gdf.priority <= priority)].sindex.query_bulk(intersecting_squares.geometry, predicate='intersects')
+        occupied_gdf = osm_processor.occupancy_gdf.loc[(osm_processor.occupancy_gdf.priority <= priority)]
+        oidx = _spatial_query_pairs(
+            occupied_gdf.geometry,
+            intersecting_squares.geometry,
+            'intersects',
+        )
         area_oidx = []
         for oi in range(len(oidx[0])):
-            if intersecting_squares.iloc[oidx[0][oi]].intersection(osm_processor.occupancy_gdf.iloc[oidx[1][oi]].geometry).area > 0.0:
+            if intersecting_squares.iloc[oidx[0][oi]].intersection(occupied_gdf.iloc[oidx[1][oi]].geometry).area > 0.0:
                 area_oidx.append(oidx[0][oi])
 
         intersecting_squares = intersecting_squares.drop(intersecting_squares.iloc[area_oidx].index)

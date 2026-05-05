@@ -24,6 +24,12 @@ hiddenimports += collect_submodules('cm_terrain_extractor_app.map_view')
 hiddenimports += collect_submodules('cm_terrain_extractor_app.streamlit_ui')
 hiddenimports += collect_submodules('profiles')
 
+excludes = [
+    'skimage.io',
+    'skimage.io._plugins',
+    'skimage.viewer',
+]
+
 
 a = Analysis(
     ['cm_terrain_extractor_app/cm_terrain_extractor_app.py'],
@@ -56,7 +62,7 @@ a = Analysis(
     hookspath=['./hooks'],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -74,7 +80,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=True,
