@@ -91,6 +91,36 @@ def test_occupancy_tracks_rank_and_allows_explicit_stronger_replacement() -> Non
     assert "weak" not in occupancy.metadata
 
 
+def test_prechecked_placement_uses_filtered_placeable_cells() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, LayerKind
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    occupancy = OccupancyModel(width=3, height=1)
+    weak = _placement(LayerKind.FOLIAGE, [GridCell(0, 0)], priority=20, feature_id="weak")
+    strong_cells = (GridCell(0, 0), GridCell(1, 0), GridCell(3, 0))
+    strong = _placement(LayerKind.FOLIAGE, strong_cells[:2], priority=5, feature_id="strong")
+
+    occupancy.place(weak, object_id="weak")
+    placeable = occupancy.placeable_cells(
+        strong_cells,
+        layer=LayerKind.FOLIAGE,
+        priority=5,
+        allow_replace=True,
+    )
+
+    assert placeable == strong_cells[:2]
+    replaced_object_ids = set()
+    assert occupancy.place_prechecked(
+        strong,
+        object_id="strong",
+        allow_replace=True,
+        replaced_object_ids=replaced_object_ids,
+    ).allowed is True
+    assert occupancy.object_id_at(LayerKind.FOLIAGE, GridCell(0, 0)) == "strong"
+    assert replaced_object_ids == {"weak"}
+    assert "weak" not in occupancy.metadata
+
+
 def test_occupancy_rejects_out_of_bounds_cells_before_array_access() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, LayerKind
     from terrain_extraction.osm_extraction.occupancy import OccupancyModel

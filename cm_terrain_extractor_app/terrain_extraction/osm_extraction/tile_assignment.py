@@ -121,7 +121,8 @@ class TileAssigner:
     def assign(self, routes: Sequence[RouteRecord]) -> TileAssignmentResult:
         successful_routes = tuple(route for route in routes if route.success and route.nodes)
         node_directions = _incident_directions_by_process(successful_routes)
-        intersection_cells = self._intersection_cells(node_directions)
+        node_cells = _incident_cells_by_process(successful_routes)
+        intersection_cells = self._intersection_cells(node_directions, node_cells)
 
         placements: list[PlacementRecord] = []
         failures: list[Mapping[str, Any]] = []
@@ -130,7 +131,7 @@ class TileAssigner:
         for (process, node), required_directions in sorted(node_directions.items(), key=_node_direction_sort_key):
             if len(required_directions) < 3:
                 continue
-            cell = GridCell(node.xidx, node.yidx)
+            cell = _intersection_cell_for_node(node, node_cells.get((process, node), ()))
             placement = self._placement_for(
                 process=process,
                 cell=cell,
@@ -181,9 +182,10 @@ class TileAssigner:
     def _intersection_cells(
         self,
         node_directions: Mapping[tuple[ProcessKind, GridNode], set[str]],
+        node_cells: Mapping[tuple[ProcessKind, GridNode], set[GridCell]],
     ) -> set[tuple[ProcessKind, GridCell]]:
         return {
-            (process, GridCell(node.xidx, node.yidx))
+            (process, _intersection_cell_for_node(node, node_cells.get((process, node), ())))
             for (process, node), directions in node_directions.items()
             if len(directions) >= 3
         }
@@ -346,6 +348,22 @@ def _incident_directions_by_process(routes: Sequence[RouteRecord]) -> dict[tuple
             directions.setdefault((route.process, start), set()).add(direction)
             directions.setdefault((route.process, end), set()).add(_OPPOSITE_DIRECTIONS[direction])
     return directions
+
+
+def _incident_cells_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[ProcessKind, GridNode], set[GridCell]]:
+    cells: dict[tuple[ProcessKind, GridNode], set[GridCell]] = {}
+    for route in routes:
+        for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False)):
+            cell = route.cells[step_index] if step_index < len(route.cells) else _cell_for_step(start, end)
+            cells.setdefault((route.process, start), set()).add(cell)
+            cells.setdefault((route.process, end), set()).add(cell)
+    return cells
+
+
+def _intersection_cell_for_node(node: GridNode, incident_cells: Iterable[GridCell]) -> GridCell:
+    preferred = GridCell(node.xidx, node.yidx)
+    cells = tuple(sorted(incident_cells, key=lambda cell: (cell.xidx, cell.yidx)))
+    return preferred if preferred in cells or not cells else cells[-1]
 
 
 def _cell_for_step(start: GridNode, end: GridNode) -> GridCell:

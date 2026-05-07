@@ -5,7 +5,7 @@ import numpy as np
 import pandas
 import pyproj
 from pyproj.crs import CRS
-from shapely import MultiPolygon, affinity, transform, union_all
+from shapely import affinity, transform, union_all
 from shapely.geometry import shape
 from terrain_extraction.bbox_utils import BoundingBox
 from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
@@ -21,7 +21,6 @@ from terrain_extraction.osm_extraction.models import (
 )
 from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
 from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
-from terrain_extraction.osm_utils.grid import get_all_grids
 
 from profiles import get_building_outline_by_df_entry, get_building_tiles, process_to_building_type
 from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
@@ -199,25 +198,21 @@ class OSMProcessor:
         n_bins_x = np.floor((p0.distance(p1)) / 8).astype(int)
         n_bins_y = np.floor((p0.distance(p2)) / 8).astype(int)
 
-        xmin, ymin = p0.x, p0.y
-        xmax = xmin + n_bins_x * 8
-        ymax = ymin + n_bins_y * 8
-        rotation_angle = bbox.get_rotation_angle()
-        
-        grid_gdf, diagonal_grid_gdf, sub_square_grid_gdf = get_all_grids(xmin, ymin, xmax, ymax, n_bins_x, n_bins_y, 
-                                                                         rotation_angle=rotation_angle, rotation_center=[p0.x, p0.y])
-        self.gdf = grid_gdf
-        self.sub_square_grid_diagonal_gdf = diagonal_grid_gdf
-        self.sub_square_grid_gdf = sub_square_grid_gdf
+        xidx = np.repeat(np.arange(n_bins_x, dtype=np.int32), n_bins_y)
+        yidx = np.tile(np.arange(n_bins_y, dtype=np.int32), n_bins_x)
+        self.gdf = pandas.DataFrame({"xidx": xidx, "yidx": yidx})
+        self.sub_square_grid_diagonal_gdf = geopandas.GeoDataFrame(geometry=[], crs=bbox.crs_projected)
+        self.sub_square_grid_gdf = geopandas.GeoDataFrame(geometry=[], crs=bbox.crs_projected)
 
-        self.gdf = self.gdf.set_crs(epsg=bbox.crs_projected.to_epsg())
-        self.sub_square_grid_gdf = self.sub_square_grid_gdf.set_crs(epsg=bbox.crs_projected.to_epsg())
-        self.sub_square_grid_diagonal_gdf = self.sub_square_grid_diagonal_gdf.set_crs(epsg=bbox.crs_projected.to_epsg())
+        p3 = (p1.x + p2.x - p0.x, p1.y + p2.y - p0.y)
+        self.effective_bbox_polygon = shape(
+            {
+                "type": "Polygon",
+                "coordinates": [[(p0.x, p0.y), (p1.x, p1.y), p3, (p2.x, p2.y), (p0.x, p0.y)]],
+            }
+        )
 
-        grid_polygons = MultiPolygon(self.gdf.geometry.values)
-        self.effective_bbox_polygon = grid_polygons.buffer(0)
-
-        self.idx_bbox = [0, 0, self.gdf.xidx.max(), self.gdf.yidx.max()]
+        self.idx_bbox = [0, 0, n_bins_x - 1, n_bins_y - 1]
 
     def _get_geometry(self, geojson_geometry):
         try:
@@ -254,14 +249,12 @@ class OSMProcessor:
         total_features = len(osm_data['features'])
         progress_update_stride = max(1, total_features // 10)
         for eidx, element in enumerate(osm_data.features):
-            element_tags = {}
-            if 'tags' in element.properties:
-                element_tags = element.properties['tags']
+            element_properties = dict(element.properties or {})
+            if isinstance(element_properties.get('tags'), dict):
+                element_tags = element_properties['tags']
             else:
-                element_tags = element.properties
-            element_id = None
-            if 'id' in element.properties:
-                element_id = element.properties["id"]
+                element_tags = element_properties
+            element_id = element_properties.get("id")
 
             matching_names = self._get_matching_config_names(element_tags, element_id)
             if len(matching_names) == 0:
@@ -460,7 +453,7 @@ class OSMProcessor:
             )
             placements.extend(building_result.placements)
 
-        self.placements = tuple(placements)
+        self.placements = self._resolve_output_layer_conflicts(tuple(placements))
         output_result = self.pipeline.run_output_rows(
             placements=self.placements,
             bounds=tuple(self.idx_bbox),
@@ -617,6 +610,52 @@ class OSMProcessor:
                 else f"{placement.config_name}:{placement.cells[0].xidx}:{placement.cells[0].yidx}"
             )
             occupancy.place(placement, object_id=object_id, allow_replace=False)
+
+    @staticmethod
+    def _resolve_output_layer_conflicts(placements):
+        winners_by_cell = {}
+        for placement_idx, placement in enumerate(placements):
+            for cell in placement.cells:
+                key = (placement.layer, cell)
+                winner = winners_by_cell.get(key)
+                candidate = (OSMProcessor._output_priority_key(placement), placement_idx)
+                if winner is None or candidate < winner[0]:
+                    winners_by_cell[key] = (candidate, placement)
+
+        resolved = []
+        for placement in placements:
+            cells = tuple(
+                cell
+                for cell in placement.cells
+                if winners_by_cell.get((placement.layer, cell), (None, None))[1] is placement
+            )
+            if not cells:
+                continue
+            if cells == placement.cells:
+                resolved.append(placement)
+                continue
+            resolved.append(
+                PlacementRecord(
+                    layer=placement.layer,
+                    grid_kind=placement.grid_kind,
+                    cells=cells,
+                    config_name=placement.config_name,
+                    feature_id=placement.feature_id,
+                    priority=placement.priority,
+                    cm_type=placement.cm_type,
+                    score=placement.score,
+                    diagnostics=placement.diagnostics,
+                )
+            )
+        return tuple(resolved)
+
+    @staticmethod
+    def _output_priority_key(placement):
+        if placement.priority > 0:
+            return 0, placement.priority
+        if placement.priority > -999:
+            return 1, -placement.priority
+        return 2, 0
 
     def post_process(self):
         if self._uses_layered_output():

@@ -182,6 +182,8 @@ class NetworkRouter:
         open_heap = [(self._heuristic(start, goal), 0.0, start_state)]
         best_cost = {start_state: 0.0}
         came_from: dict[tuple[int, int, str], tuple[int, int, str] | None] = {start_state: None}
+        distance_cache: dict[GridNode, float] = {}
+        blocked_cache: dict[GridCell, bool] = {}
         blocked_cells_considered = 0
         soft_crossings = 0
 
@@ -202,11 +204,17 @@ class NetworkRouter:
                 neighbor = GridNode(current.xidx + step.dx, current.yidx + step.dy)
                 if not self._node_in_bounds(neighbor):
                     continue
-                if neighbor != goal and neighbor != start and not self._node_in_corridor(neighbor, line, corridor_m, window):
+                if neighbor != goal and neighbor != start and not self._cached_node_in_corridor(
+                    neighbor,
+                    line,
+                    corridor_m,
+                    window,
+                    distance_cache,
+                ):
                     continue
 
                 traversed_cell = self._cell_for_step(current, neighbor)
-                blocked = self._cell_is_blocked(traversed_cell, layer)
+                blocked = self._cached_cell_is_blocked(traversed_cell, layer, blocked_cache)
                 if blocked:
                     blocked_cells_considered += 1
                     if not allow_soft_crossing:
@@ -214,7 +222,11 @@ class NetworkRouter:
                     soft_crossings += 1
 
                 turn_cost = 0.15 if incoming_direction and incoming_direction != step.direction else 0.0
-                distance_cost = self._node_source_distance(neighbor, line) / max(self.grid_index.cell_size_m, 1.0) * 0.1
+                distance_cost = (
+                    self._cached_node_source_distance(neighbor, line, distance_cache)
+                    / max(self.grid_index.cell_size_m, 1.0)
+                    * 0.1
+                )
                 soft_cost = 25.0 if blocked else 0.0
                 next_cost = cost_so_far + 1.0 + turn_cost + distance_cost + soft_cost
                 next_state = (neighbor.xidx, neighbor.yidx, step.direction)
@@ -273,7 +285,7 @@ class NetworkRouter:
         soft_crossings: int,
         degrees: Mapping[int, int],
     ) -> RouteRecord:
-        cells = _dedupe_consecutive(tuple(self._cell_for_step(start, end) for start, end in zip(nodes, nodes[1:], strict=False)))
+        cells = tuple(self._cell_for_step(start, end) for start, end in zip(nodes, nodes[1:], strict=False))
         route_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
         source_length = edge.geometry.length
         diagnostics = {
@@ -353,12 +365,37 @@ class NetworkRouter:
             return False
         return self._node_source_distance(node, line) <= corridor_m + 1e-9
 
+    def _cached_node_in_corridor(
+        self,
+        node: GridNode,
+        line: LineString,
+        corridor_m: float,
+        window: tuple[int, int, int, int],
+        distance_cache: dict[GridNode, float],
+    ) -> bool:
+        min_xidx, min_yidx, max_xidx, max_yidx = window
+        if not (min_xidx <= node.xidx <= max_xidx and min_yidx <= node.yidx <= max_yidx):
+            return False
+        return self._cached_node_source_distance(node, line, distance_cache) <= corridor_m + 1e-9
+
     def _node_source_distance(self, node: GridNode, line: LineString) -> float:
         point = self.grid_index.projected_from_local(
             node.xidx * self.grid_index.cell_size_m,
             node.yidx * self.grid_index.cell_size_m,
         )
         return point.distance(line)
+
+    def _cached_node_source_distance(
+        self,
+        node: GridNode,
+        line: LineString,
+        distance_cache: dict[GridNode, float],
+    ) -> float:
+        distance = distance_cache.get(node)
+        if distance is None:
+            distance = self._node_source_distance(node, line)
+            distance_cache[node] = distance
+        return distance
 
     def _cell_for_step(self, start: GridNode, end: GridNode) -> GridCell:
         if start.xidx != end.xidx:
@@ -384,6 +421,18 @@ class NetworkRouter:
             score=1.0,
         )
         return not self.occupancy.can_place(placement).allowed
+
+    def _cached_cell_is_blocked(
+        self,
+        cell: GridCell,
+        layer: LayerKind,
+        blocked_cache: dict[GridCell, bool],
+    ) -> bool:
+        blocked = blocked_cache.get(cell)
+        if blocked is None:
+            blocked = self._cell_is_blocked(cell, layer)
+            blocked_cache[cell] = blocked
+        return blocked
 
     def _node_in_bounds(self, node: GridNode) -> bool:
         return 0 <= node.xidx <= self.grid_index.width and 0 <= node.yidx <= self.grid_index.height
@@ -447,13 +496,3 @@ def _normalize_direction_token(value: Any) -> set[str]:
         if direction in _DIRECTION_STEPS:
             directions.add(direction)
     return directions
-
-
-def _dedupe_consecutive(cells: tuple[GridCell, ...]) -> tuple[GridCell, ...]:
-    deduped = []
-    previous = None
-    for cell in cells:
-        if cell != previous:
-            deduped.append(cell)
-        previous = cell
-    return tuple(deduped)

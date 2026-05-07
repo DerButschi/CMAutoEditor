@@ -98,6 +98,18 @@ def test_routes_around_blocked_occupancy_inside_corridor() -> None:
     assert route.diagnostics["blocked_cells_considered"] >= 1
 
 
+def test_boundary_route_preserves_one_cell_per_step_after_clamping() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edge = _edge(0, (0, (76 * 8, 175 * 8)), (1, (77 * 8, 176 * 8)))
+    route = NetworkRouter(grid_index=_grid(width=100, height=176), corridor_deviation_m=16.0).route(_graph((edge,))).routes[0]
+
+    assert route.success
+    assert [node.yidx for node in route.nodes] == [175, 176, 176]
+    assert route.cells == (GridCell(76, 175), GridCell(76, 175))
+
+
 def test_incident_edges_share_one_integer_anchor() -> None:
     from terrain_extraction.osm_extraction.models import (
         ProcessKind,

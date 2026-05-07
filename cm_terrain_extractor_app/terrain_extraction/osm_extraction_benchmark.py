@@ -307,7 +307,7 @@ def _count_source_building_linear_intersections(fixture_data: dict[str, Any]) ->
     buildings = []
     linear_features = []
     for feature in fixture_data.get("features", []):
-        properties = feature.get("properties", {})
+        properties = feature.get("properties") or {}
         tags = properties.get("tags", properties)
         geometry = shape(feature["geometry"])
         if "building" in tags:

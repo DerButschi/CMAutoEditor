@@ -140,6 +140,41 @@ def test_post_process_resolves_duplicate_priorities_and_cm_rank() -> None:
     ]
 
 
+def test_layered_output_conflicts_keep_positive_priority_winner() -> None:
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        GridCell,
+        GridKind,
+        LayerKind,
+        PlacementRecord,
+    )
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    cell = GridCell(209, 196)
+    stream = PlacementRecord(
+        layer=LayerKind.LINEAR_SURFACE,
+        grid_kind=GridKind.NORMAL,
+        cells=(cell,),
+        config_name="stream",
+        feature_id="stream-1",
+        priority=-1,
+        cm_type=CMType(menu="Roads", cat1="Stream"),
+        score=1.0,
+    )
+    road = PlacementRecord(
+        layer=LayerKind.LINEAR_SURFACE,
+        grid_kind=GridKind.NORMAL,
+        cells=(cell,),
+        config_name="road",
+        feature_id="road-1",
+        priority=4,
+        cm_type=CMType(menu="Roads", cat1="Paved"),
+        score=1.0,
+    )
+
+    assert OSMProcessor._resolve_output_layer_conflicts((stream, road)) == (road,)
+
+
 class _FeatureCollection:
     def __init__(self, features: list[SimpleNamespace]) -> None:
         self.features = features

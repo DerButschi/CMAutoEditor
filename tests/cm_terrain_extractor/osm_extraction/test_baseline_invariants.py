@@ -7,6 +7,7 @@ import pytest
 
 from cm_terrain_extractor_app.terrain_extraction.osm_extraction_benchmark import (
     FIXTURE_DIR,
+    _count_source_building_linear_intersections,
     run_fixture,
 )
 
@@ -55,6 +56,17 @@ def test_road_building_collision_is_prevented_or_reported() -> None:
     quality = result.stats["quality"]
 
     assert quality["building_linear_collisions"] == 0 or quality["reported_collision_cells"] > 0
+
+
+def test_source_intersection_counter_accepts_null_properties() -> None:
+    fixture = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": None, "geometry": {"type": "Point", "coordinates": [0, 0]}},
+        ],
+    }
+
+    assert _count_source_building_linear_intersections(fixture) == 0
 
 
 def test_same_seed_produces_stable_fixture_output() -> None:

@@ -168,13 +168,11 @@ class AreaRasterizer:
         diagnostics: dict[str, Any],
     ) -> None:
         layer = self._layer_for(feature.process, entry, cm_type)
-        placeable_cells = tuple(
-            cell
-            for cell in cells
-            if self.occupancy.can_place(
-                self._placement(feature, entry, cm_type, layer, (cell,), diagnostics),
-                allow_replace=True,
-            ).allowed
+        placeable_cells = self.occupancy.placeable_cells(
+            cells,
+            layer=layer,
+            priority=entry.priority,
+            allow_replace=True,
         )
         if not placeable_cells:
             return
@@ -185,10 +183,17 @@ class AreaRasterizer:
             else f"{entry.name}:{feature.source_index}:{placeable_cells[0].xidx}:{placeable_cells[0].yidx}"
         )
         placement = self._placement(feature, entry, cm_type, layer, placeable_cells, diagnostics)
-        decision = self.occupancy.place(placement, object_id=resolved_object_id, allow_replace=True)
+        replaced_object_ids: set[str | int] = set()
+        decision = self.occupancy.place_prechecked(
+            placement,
+            object_id=resolved_object_id,
+            allow_replace=True,
+            replaced_object_ids=replaced_object_ids,
+        )
         if decision.allowed:
             accepted[resolved_object_id] = placement
-            self._drop_replaced_placements(accepted)
+            for replaced_object_id in replaced_object_ids:
+                accepted.pop(replaced_object_id, None)
 
     def _placement(
         self,

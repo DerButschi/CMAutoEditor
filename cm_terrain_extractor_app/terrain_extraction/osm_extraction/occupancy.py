@@ -86,6 +86,20 @@ class OccupancyModel:
             reasons.extend(conflict.reason for conflict in conflicts)
         return ConflictDecision(allowed=not reasons and not conflicts, reasons=tuple(reasons), conflicts=tuple(conflicts))
 
+    def placeable_cells(
+        self,
+        cells: Iterable[GridCell],
+        *,
+        layer: LayerKind,
+        priority: int,
+        allow_replace: bool = False,
+    ) -> tuple[GridCell, ...]:
+        return tuple(
+            cell
+            for cell in cells
+            if self._contains(cell) and not self._cell_conflicts(cell, layer, priority, allow_replace)
+        )
+
     def place(
         self,
         placement: PlacementRecord,
@@ -111,6 +125,29 @@ class OccupancyModel:
             self.ranks[placement.layer][cell.xidx, cell.yidx] = placement.priority
         self.metadata[object_id] = self._metadata_for(placement, metadata)
         return decision
+
+    def place_prechecked(
+        self,
+        placement: PlacementRecord,
+        *,
+        object_id: str | int | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        allow_replace: bool = False,
+        replaced_object_ids: set[str | int] | None = None,
+    ) -> ConflictDecision:
+        if object_id is None:
+            object_id = placement.feature_id if placement.feature_id is not None else self._next_internal_id
+        if allow_replace:
+            replaced = self._release_replaceable_conflicts(placement)
+            if replaced_object_ids is not None:
+                replaced_object_ids.update(replaced)
+
+        internal_id = self._ensure_internal_id(object_id)
+        for cell in placement.cells:
+            self.occupied[placement.layer][cell.xidx, cell.yidx] = internal_id
+            self.ranks[placement.layer][cell.xidx, cell.yidx] = placement.priority
+        self.metadata[object_id] = self._metadata_for(placement, metadata)
+        return ConflictDecision(allowed=True)
 
     def release(self, object_id: str | int) -> bool:
         internal_id = self._object_to_internal_id.get(object_id)
@@ -188,7 +225,7 @@ class OccupancyModel:
             return False
         return priority < self.ranks[blocking_layer][cell.xidx, cell.yidx]
 
-    def _release_replaceable_conflicts(self, placement: PlacementRecord) -> None:
+    def _release_replaceable_conflicts(self, placement: PlacementRecord) -> set[str | int]:
         object_ids = set()
         for cell in placement.cells:
             internal_id = int(self.occupied[placement.layer][cell.xidx, cell.yidx])
@@ -196,6 +233,7 @@ class OccupancyModel:
                 object_ids.add(self._internal_id_to_object[internal_id])
         for object_id in object_ids:
             self.release(object_id)
+        return object_ids
 
     def _ensure_internal_id(self, object_id: str | int) -> int:
         if object_id in self._object_to_internal_id:

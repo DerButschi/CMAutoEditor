@@ -70,6 +70,50 @@ def test_intersection_anchor_uses_one_tile_with_unioned_directions() -> None:
     assert intersection[0].diagnostics["required_directions"] == ("E", "N", "S", "W")
 
 
+def test_boundary_intersection_uses_adjacent_route_cell() -> None:
+    from terrain_extraction.osm_extraction.models import (
+        GridCell,
+        GridNode,
+        ProcessKind,
+        RouteRecord,
+    )
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    records = (
+        {"direction": 0, "row": 0, "col": 0, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+        {"direction": 1, "row": 0, "col": 1, "u": (2, 3), "d": (2, 3), "l": (2, 3), "cost": 1.0},
+    )
+    catalog = CompiledTileCatalog.from_records(records, process=ProcessKind.ROAD)
+    boundary_node = GridNode(3, 1)
+    horizontal = RouteRecord(
+        edge_id=0,
+        start_node_id=0,
+        end_node_id=1,
+        process=ProcessKind.ROAD,
+        config_name="primary",
+        priority=1,
+        nodes=(GridNode(2, 1), boundary_node),
+        cells=(GridCell(2, 1),),
+    )
+    vertical = RouteRecord(
+        edge_id=1,
+        start_node_id=2,
+        end_node_id=3,
+        process=ProcessKind.ROAD,
+        config_name="primary",
+        priority=1,
+        nodes=(GridNode(3, 0), boundary_node, GridNode(3, 2)),
+        cells=(GridCell(2, 0), GridCell(2, 1)),
+    )
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign((horizontal, vertical))
+
+    intersections = [placement for placement in result.placements if placement.diagnostics.get("intersection")]
+    assert len(intersections) == 1
+    assert intersections[0].cells == (GridCell(2, 1),)
+    assert all(cell.xidx <= 2 for placement in result.placements for cell in placement.cells)
+
+
 def test_process_specific_tile_labels_are_generated_for_linear_catalogs() -> None:
     from terrain_extraction.osm_extraction.models import ProcessKind
     from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
