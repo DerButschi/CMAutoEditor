@@ -10,7 +10,7 @@ Each active OSM config entry is keyed by name and must include:
 | --- | --- | --- |
 | `tags` | list of `[key, value]` pairs | Candidate selector. Any listed pair may match. |
 | `process` | list of legacy process strings | Compiled to `ProcessKind`. Unknown process values fail validation. |
-| `priority` | integer | Placement rank; smaller positive values are stronger. |
+| `priority` | integer | Placement rank; smaller positive values are strongest; zero/negative values are weaker than positive values, with defaults weakest. |
 | `cm_types` | list of objects | CM AutoEditor type candidates. Each real candidate needs `menu` and `cat1`. |
 
 Optional fields:
@@ -31,7 +31,7 @@ Optional fields:
 | Legacy process | ProcessKind | Active owner |
 | --- | --- | --- |
 | `type_from_tag` | `AREA` | `AreaRasterizer` |
-| `type_random_area` | `AREA` | `AreaRasterizer` weighted choices |
+| `type_random_area` | `AREA` | `AreaRasterizer` one weighted choice per source feature |
 | `type_random_individual` | `RANDOM` | `AreaRasterizer` per-cell choices |
 | `type_random_clusters` | `RANDOM` | `AreaRasterizer` seeded spatial clusters |
 | `single_object_random` | `POINT` | `AreaRasterizer` point placement |
@@ -60,7 +60,7 @@ Optional fields:
 | `weight` | Optional weighted random choice weight. Defaults to `1.0`. |
 | `dummy` | Optional true value meaning "choose nothing" in weighted choices. |
 
-Weighted choices are made with the pipeline RNG. Fixture and benchmark runs should set an explicit seed when deterministic replay is required.
+Weighted choices are made with the pipeline RNG. `type_random_area` chooses one `cm_type` for the entire source feature, matching the legacy crop/field behavior; `type_random_individual` chooses independently per occupied grid cell. Fixture and benchmark runs should set an explicit seed when deterministic replay is required.
 
 ## Modifiers
 
@@ -70,6 +70,7 @@ Known modifier patterns:
 | --- | --- | --- |
 | `linear_name` | `type_from_linear` | Source placement config name whose cells receive the derived placement. |
 | `stride_x`, `stride_y` | random area compatibility | Optional spacing filter retained from old configs. |
+| `border_size`, `is_core` | area compatibility | Optional inward buffer, in 8 m cells, before area rasterization. |
 
 New modifiers should be validated in `config_schema.py` when they become part of a stable processor contract. Processor-only experimental keys should be documented here once they affect output semantics.
 

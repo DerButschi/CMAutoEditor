@@ -91,6 +91,29 @@ def test_occupancy_tracks_rank_and_allows_explicit_stronger_replacement() -> Non
     assert "weak" not in occupancy.metadata
 
 
+def test_replacement_priority_keeps_default_and_negative_layers_below_zero_priority() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, LayerKind
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    occupancy = OccupancyModel(width=2, height=1)
+    forest_cell = GridCell(0, 0)
+    grass_cell = GridCell(1, 0)
+    forest_ground = _placement(LayerKind.GROUND, [forest_cell], priority=0, feature_id="forest")
+    weak_overlay = _placement(LayerKind.GROUND, [forest_cell], priority=-1, feature_id="weak-overlay")
+    default_ground = _placement(LayerKind.GROUND, [forest_cell], priority=-999, feature_id="default")
+    strong_ground = _placement(LayerKind.GROUND, [grass_cell], priority=1, feature_id="strong")
+    neutral_ground = _placement(LayerKind.GROUND, [grass_cell], priority=0, feature_id="neutral")
+
+    assert occupancy.place(forest_ground, object_id="forest").allowed is True
+    assert not occupancy.can_place(weak_overlay, allow_replace=True).allowed
+    assert not occupancy.can_place(default_ground, allow_replace=True).allowed
+    assert occupancy.object_id_at(LayerKind.GROUND, forest_cell) == "forest"
+
+    assert occupancy.place(neutral_ground, object_id="neutral").allowed is True
+    assert occupancy.place(strong_ground, object_id="strong", allow_replace=True).allowed is True
+    assert occupancy.object_id_at(LayerKind.GROUND, grass_cell) == "strong"
+
+
 def test_prechecked_placement_uses_filtered_placeable_cells() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, LayerKind
     from terrain_extraction.osm_extraction.occupancy import OccupancyModel

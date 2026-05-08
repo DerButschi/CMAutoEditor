@@ -264,6 +264,50 @@ def test_preprocess_throttles_progress_updates(monkeypatch) -> None:
     assert progress_values[-1] == 1.0
 
 
+def test_typed_features_are_clipped_to_effective_bbox() -> None:
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    processor = OSMProcessor.__new__(OSMProcessor)
+    processor.extraction_config = ExtractionConfig.from_mapping(
+        {
+            "field": {
+                "tags": [["landuse", "field"]],
+                "cm_types": [{"menu": "Ground 3", "cat1": "Crop 1"}],
+                "process": ["type_from_tag"],
+                "priority": 1,
+            },
+            "bench": {
+                "tags": [["amenity", "bench"]],
+                "cm_types": [{"menu": "Flavor Objects 1", "cat1": "Bench"}],
+                "process": ["single_object_random"],
+                "priority": 1,
+            },
+        }
+    )
+    processor.effective_bbox_polygon = Polygon([(0, 0), (16, 0), (16, 16), (0, 16)])
+    processor.matched_elements = [
+        {
+            "element": SimpleNamespace(properties={"id": "field-1", "landuse": "field"}),
+            "geometry": Polygon([(8, 0), (24, 0), (24, 8), (8, 8)]),
+            "name": "field",
+            "idx": 0,
+        },
+        {
+            "element": SimpleNamespace(properties={"id": "bench-1", "amenity": "bench"}),
+            "geometry": Point(24, 24),
+            "name": "bench",
+            "idx": 1,
+        },
+    ]
+
+    features = processor._typed_features_from_matched_elements()
+
+    assert len(features) == 1
+    assert features[0].feature_id == "field-1"
+    assert features[0].geometry.bounds == (8.0, 0.0, 16.0, 8.0)
+
+
 def test_grid_cell_indices_match_exact_pairs() -> None:
     from terrain_extraction.osm_utils.processing import _get_grid_indices_for_cells
 

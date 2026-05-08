@@ -55,7 +55,12 @@ class AreaRasterizer:
         entry: ConfigEntry,
         accepted: dict[str | int, PlacementRecord],
     ) -> None:
-        cells, diagnostics = self._candidate_cells(feature.geometry)
+        geometry = self._geometry_for_entry(feature.geometry, entry)
+        if geometry.is_empty:
+            return
+
+        cells, diagnostics = self._candidate_cells(geometry)
+        cells = self._apply_cell_modifiers(cells, entry)
         if not cells:
             return
 
@@ -66,6 +71,13 @@ class AreaRasterizer:
                     continue
                 object_id = f"{feature.feature_id}:{cell.xidx}:{cell.yidx}:{index}"
                 self._accept_cells(feature, entry, cm_type, (cell,), accepted, object_id, diagnostics)
+            return
+
+        if self._uses_feature_random(entry):
+            cm_type = self.choose_weighted_cm_type(entry.cm_types)
+            if cm_type is None:
+                return
+            self._accept_cells(feature, entry, cm_type, tuple(cells), accepted, feature.feature_id, diagnostics)
             return
 
         if self._uses_clustered_random(entry):
@@ -148,8 +160,18 @@ class AreaRasterizer:
 
     def _geometry_window(self, geometry: BaseGeometry) -> tuple[int, int, int, int] | None:
         min_x, min_y, max_x, max_y = geometry.bounds
-        min_cell = self.grid_index.projected_to_cell(min_x, min_y)
-        max_cell = self.grid_index.projected_to_cell(max_x, max_y)
+        local_corners = [
+            self.grid_index.local_from_projected(x, y)
+            for x, y in ((min_x, min_y), (min_x, max_y), (max_x, min_y), (max_x, max_y))
+        ]
+        min_cell = GridCell(
+            int(np.floor(min(local_x for local_x, _local_y in local_corners) / self.grid_index.cell_size_m + 1e-9)),
+            int(np.floor(min(local_y for _local_x, local_y in local_corners) / self.grid_index.cell_size_m + 1e-9)),
+        )
+        max_cell = GridCell(
+            int(np.floor(max(local_x for local_x, _local_y in local_corners) / self.grid_index.cell_size_m + 1e-9)),
+            int(np.floor(max(local_y for _local_x, local_y in local_corners) / self.grid_index.cell_size_m + 1e-9)),
+        )
         return self.grid_index.clipped_cell_window(
             min(min_cell.xidx, max_cell.xidx),
             min(min_cell.yidx, max_cell.yidx),
@@ -242,6 +264,30 @@ class AreaRasterizer:
             return None
         return selected
 
+    def _geometry_for_entry(self, geometry: BaseGeometry, entry: ConfigEntry) -> BaseGeometry:
+        if entry.modifiers.get("is_core") and "border_size" in entry.modifiers:
+            return geometry.buffer(-float(entry.modifiers["border_size"]) * self.grid_index.cell_size_m)
+        return geometry
+
+    @staticmethod
+    def _apply_cell_modifiers(cells: list[GridCell], entry: ConfigEntry) -> list[GridCell]:
+        if not cells:
+            return cells
+        stride_x = entry.modifiers.get("stride_x")
+        stride_y = entry.modifiers.get("stride_y")
+        if stride_x is None and stride_y is None:
+            return cells
+
+        min_xidx = min(cell.xidx for cell in cells)
+        min_yidx = min(cell.yidx for cell in cells)
+        stride_x = 1 if stride_x is None else max(1, int(stride_x))
+        stride_y = 1 if stride_y is None else max(1, int(stride_y))
+        return [
+            cell
+            for cell in cells
+            if (cell.xidx - min_xidx) % stride_x == 0 and (cell.yidx - min_yidx) % stride_y == 0
+        ]
+
     def _matched_or_first_cm_type(self, entry: ConfigEntry, tags: dict[str, Any] | Any) -> CMType | None:
         for index, raw_cm_type in enumerate(entry.raw_cm_types):
             selector = TagSelector.from_raw(raw_cm_type.get("tags", ()), field_name=f"{entry.name}.cm_types.tags")
@@ -270,7 +316,11 @@ class AreaRasterizer:
 
     @staticmethod
     def _uses_individual_random(entry: ConfigEntry) -> bool:
-        return any(process in {"type_random_area", "type_random_individual"} for process in entry.legacy_processes)
+        return "type_random_individual" in entry.legacy_processes
+
+    @staticmethod
+    def _uses_feature_random(entry: ConfigEntry) -> bool:
+        return "type_random_area" in entry.legacy_processes
 
     @staticmethod
     def _uses_clustered_random(entry: ConfigEntry) -> bool:

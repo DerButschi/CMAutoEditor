@@ -121,12 +121,14 @@ class BuildingFitter:
         rng: np.random.Generator | None = None,
         max_candidates_per_building: int = _DEFAULT_MAX_CANDIDATES,
         local_shift_cells: int = 1,
+        modular_area_threshold: float = 1.0,
     ) -> None:
         self.grid_index = grid_index
         self.occupancy = occupancy or OccupancyModel.from_grid_index(grid_index)
         self.rng = rng or np.random.default_rng(0)
         self.max_candidates_per_building = max_candidates_per_building
         self.local_shift_cells = local_shift_cells
+        self.modular_area_threshold = modular_area_threshold
 
     def fit(
         self,
@@ -225,8 +227,16 @@ class BuildingFitter:
         candidates: list[BuildingCandidate] = []
         seen: set[tuple[str, tuple[GridCell, ...]]] = set()
         limit_reached = False
+        allow_modular = _allow_modular_footprints(
+            polygon,
+            footprints,
+            cell_size_m=self.grid_index.cell_size_m,
+            threshold=self.modular_area_threshold,
+        )
 
         for footprint in footprints:
+            if footprint.is_modular and not allow_modular:
+                continue
             for cells, orientation in self._candidate_cells(polygon, footprint):
                 key = (footprint.footprint_id, cells)
                 if key in seen:
@@ -333,7 +343,7 @@ class BuildingFitter:
         )
 
     def _place_building(self, building: _PreparedBuilding) -> PlacementRecord | None:
-        ordered_candidates = sorted(building.candidates, key=_candidate_sort_key)
+        ordered_candidates = self._ordered_candidates(building.candidates)
         for candidate in ordered_candidates:
             placement = _placement_from_candidate(
                 candidate.footprint,
@@ -358,6 +368,23 @@ class BuildingFitter:
             if decision.allowed:
                 return placement
         return None
+
+    def _ordered_candidates(self, candidates: tuple[BuildingCandidate, ...]) -> tuple[BuildingCandidate, ...]:
+        ordered = sorted(candidates, key=_candidate_sort_key)
+        if len(ordered) < 2:
+            return tuple(ordered)
+
+        top_score = ordered[0].score
+        top = [candidate for candidate in ordered if math.isclose(candidate.score, top_score, rel_tol=1e-9, abs_tol=1e-9)]
+        if len(top) < 2:
+            return tuple(ordered)
+
+        weights = np.array([max(0.0, candidate.footprint.weight) for candidate in top], dtype=float)
+        if not np.any(weights > 0):
+            weights = np.ones(len(top), dtype=float)
+        chosen_index = int(self.rng.choice(len(top), p=weights / weights.sum()))
+        chosen = top[chosen_index]
+        return (chosen, *(candidate for candidate in ordered if candidate is not chosen))
 
     def _nearest_linear_distance_m(self, polygon: Polygon) -> float | None:
         distances = []
@@ -529,6 +556,29 @@ def _cluster_sort_key(building: _PreparedBuilding) -> tuple[int, int, float, str
 
 def _candidate_sort_key(candidate: BuildingCandidate) -> tuple[float, float, int, tuple[GridCell, ...]]:
     return (-candidate.score, -candidate.iou, candidate.collision_cells, candidate.cells)
+
+
+def _allow_modular_footprints(
+    polygon: Polygon,
+    footprints: tuple[BuildingFootprint, ...],
+    *,
+    cell_size_m: float,
+    threshold: float,
+) -> bool:
+    non_modular_areas = [
+        _legacy_footprint_area_m2(footprint, cell_size_m)
+        for footprint in footprints
+        if not footprint.is_modular
+    ]
+    if not non_modular_areas:
+        return True
+    return polygon.area > max(non_modular_areas) * threshold
+
+
+def _legacy_footprint_area_m2(footprint: BuildingFootprint, cell_size_m: float) -> float:
+    half_cell_area = (cell_size_m / 2.0) ** 2
+    diagonal_factor = 2.0 if footprint.is_diagonal else 1.0
+    return footprint.area_cells * half_cell_area * diagonal_factor
 
 
 def _angle_error(source_angle: float, candidate_angle: float) -> float:

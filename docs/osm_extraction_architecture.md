@@ -28,7 +28,7 @@ OSMProcessor
 
 ## Data Contracts
 
-`FeatureRecord` is the source-facing record exchanged between matching and processors. It stores source identity, config name, `ProcessKind`, priority, projected Shapely geometry, source tags, and source properties.
+`FeatureRecord` is the source-facing record exchanged between matching and processors. It stores source identity, config name, `ProcessKind`, priority, projected Shapely geometry, source tags, and source properties. The app adapter clips non-point geometries to the effective map bounding polygon before typed processing and drops points outside that polygon.
 
 `PlacementRecord` is the processor-facing output record. It stores layer, grid kind, cells, config name, feature ID, priority, CM type, score, and diagnostics. Final CSV rows are derived from placements rather than written directly by feature processors.
 
@@ -38,7 +38,11 @@ OSMProcessor
 
 `GridIndex` owns rotated 8 m grid math. Core processors use affine coordinate conversion for normal cells and routing nodes. GeoDataFrame views are lazy debug/export views, not the hot-path snapping mechanism.
 
-`OccupancyModel` owns dense layered conflict state. Layers include ground, foliage, linear surface, linear object, building, point object, and reserved. Empty cells use `-1`; metadata maps object IDs back to source feature/config/process diagnostics. Smaller positive priority values are stronger ranks. Default rows are weaker compatibility fills and are suppressed when a real placement owns the same layer/cell.
+`OccupancyModel` owns dense layered conflict state. Layers include ground, foliage, linear surface, linear object, building, point object, and reserved. Empty cells use `-1`; metadata maps object IDs back to source feature/config/process diagnostics. Smaller positive priority values are stronger ranks, zero/negative area priorities are weaker than positive priorities, and default rows are the weakest compatibility fills. Defaults are suppressed when a real placement owns the same layer/cell.
+
+Linear tile assignment uses the profile catalog's direction and connection tokens. Candidate routes are solved as least-cost compatible tile paths, so adjacent road, stream, rail, and fence cells must expose matching connection values rather than merely sharing a broad north/south/east/west direction set. Intersections are anchored only at shared routed topology endpoints with three or more incident directions; ordinary bends and intermediate path nodes stay as corner or straight route cells. Cardinal-only catalogs reject diagonal route steps instead of coercing them into north/south or east/west tiles.
+
+Building fitting scores footprint candidates by IoU and placement penalties against occupancy. Modular multi-cell candidates are considered only when the outline is larger than the largest independent footprint in the active catalog; equivalent top candidates use profile weights for deterministic seeded variation.
 
 ## Legacy Quarantine
 

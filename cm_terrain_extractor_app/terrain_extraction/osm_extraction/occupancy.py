@@ -223,13 +223,18 @@ class OccupancyModel:
     ) -> bool:
         if not allow_replace or blocking_layer is not requested_layer:
             return False
-        return priority < self.ranks[blocking_layer][cell.xidx, cell.yidx]
+        return _replacement_priority_key(priority) < _replacement_priority_key(
+            int(self.ranks[blocking_layer][cell.xidx, cell.yidx])
+        )
 
     def _release_replaceable_conflicts(self, placement: PlacementRecord) -> set[str | int]:
         object_ids = set()
         for cell in placement.cells:
             internal_id = int(self.occupied[placement.layer][cell.xidx, cell.yidx])
-            if internal_id >= 0 and placement.priority < self.ranks[placement.layer][cell.xidx, cell.yidx]:
+            existing_priority = int(self.ranks[placement.layer][cell.xidx, cell.yidx])
+            if internal_id >= 0 and _replacement_priority_key(placement.priority) < _replacement_priority_key(
+                existing_priority
+            ):
                 object_ids.add(self._internal_id_to_object[internal_id])
         for object_id in object_ids:
             self.release(object_id)
@@ -279,3 +284,11 @@ def _reserved_placement(cells: tuple[GridCell, ...], priority: int) -> Placement
         cm_type=CMType(menu="Reserved", cat1="Reserved"),
         score=1.0,
     )
+
+
+def _replacement_priority_key(priority: int) -> tuple[int, int]:
+    if priority > 0:
+        return 0, priority
+    if priority > -999:
+        return 1, -priority
+    return 2, 0

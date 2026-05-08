@@ -157,6 +157,46 @@ def test_road_occupancy_is_avoided_when_shifted_candidate_is_available() -> None
     assert occupancy.object_id_at(LayerKind.BUILDING, result.placements[0].cells[0]) == "near-road"
 
 
+def test_equivalent_building_candidates_use_profile_weights_for_variation() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+
+    grid = _grid()
+    outline = Polygon([(8, 8), (16, 8), (16, 16), (8, 16)])
+    catalog = (
+        {
+            "width": 1,
+            "height": 1,
+            "row": 0,
+            "col": 0,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": "Suppressed House",
+            "is_modular": False,
+            "weight": 0.0,
+        },
+        {
+            "width": 1,
+            "height": 1,
+            "row": 0,
+            "col": 1,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": "Weighted House",
+            "is_modular": False,
+            "weight": 1.0,
+        },
+    )
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+        (_feature("weighted", outline),),
+        catalogs={"houses": catalog},
+    )
+
+    assert result.placements[0].cm_type.cat2 == "Weighted House"
+
+
 def test_candidate_generation_is_bounded_and_records_fallback_diagnostics() -> None:
     from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
 

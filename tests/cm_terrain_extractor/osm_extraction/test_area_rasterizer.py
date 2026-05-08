@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box
 
 APP_DIR = Path(__file__).parents[3] / "cm_terrain_extractor_app"
 if str(APP_DIR) not in sys.path:
@@ -19,6 +19,22 @@ def _grid(width: int = 3, height: int = 2):
         origin_y=0,
         x_axis_unit=(1.0, 0.0),
         y_axis_unit=(0.0, 1.0),
+        width=width,
+        height=height,
+        cell_size_m=8.0,
+        crs_epsg=25832,
+    )
+
+
+def _rotated_grid(width: int = 4, height: int = 4):
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+
+    axis = 2**-0.5
+    return GridIndex(
+        origin_x=0,
+        origin_y=0,
+        x_axis_unit=(axis, axis),
+        y_axis_unit=(-axis, axis),
         width=width,
         height=height,
         cell_size_m=8.0,
@@ -93,9 +109,47 @@ def test_polygon_rasterization_uses_integer_window_and_area_threshold() -> None:
     assert placements[0].cells == (GridCell(0, 0), GridCell(1, 0))
 
 
-def test_weighted_area_choices_are_deterministic_under_seed() -> None:
+def test_rotated_grid_area_window_uses_all_projected_bounds_corners() -> None:
     from terrain_extraction.osm_extraction.area_rasterizer import AreaRasterizer
-    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    grid = _rotated_grid(width=4, height=4)
+    board_corners = [
+        grid.projected_from_local(0, 0),
+        grid.projected_from_local(grid.width * grid.cell_size_m, 0),
+        grid.projected_from_local(grid.width * grid.cell_size_m, grid.height * grid.cell_size_m),
+        grid.projected_from_local(0, grid.height * grid.cell_size_m),
+    ]
+    board_bounds = box(
+        *Polygon(
+            [(point.x, point.y) for point in board_corners]
+        ).bounds
+    )
+    config = _config(
+        {
+            "forest_ground": {
+                "tags": [["landuse", "forest"]],
+                "cm_types": [{"menu": "Ground 1", "cat1": "Light Forest"}],
+                "process": ["type_from_tag"],
+                "priority": 0,
+            }
+        }
+    )
+    feature = _feature("area-0", "forest_ground", ProcessKind.AREA, board_bounds)
+
+    placements = AreaRasterizer(grid, OccupancyModel.from_grid_index(grid), np.random.default_rng(1)).rasterize(
+        (feature,),
+        config,
+    )
+
+    assert placements[0].diagnostics["candidate_window"] == (0, 0, 3, 3)
+    assert set(placements[0].cells) == {GridCell(xidx, yidx) for xidx in range(4) for yidx in range(4)}
+
+
+def test_type_random_area_chooses_one_type_for_whole_feature() -> None:
+    from terrain_extraction.osm_extraction.area_rasterizer import AreaRasterizer
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
     from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 
     grid = _grid(width=4, height=1)
@@ -124,8 +178,38 @@ def test_weighted_area_choices_are_deterministic_under_seed() -> None:
     )
 
     assert [placement.cm_type.cat1 for placement in first] == [placement.cm_type.cat1 for placement in second]
-    assert len(first) == 4
-    assert len({placement.cm_type.cat1 for placement in first}) > 1
+    assert len(first) == 1
+    assert first[0].cells == (GridCell(0, 0), GridCell(1, 0), GridCell(2, 0), GridCell(3, 0))
+
+
+def test_type_random_individual_keeps_per_cell_variation() -> None:
+    from terrain_extraction.osm_extraction.area_rasterizer import AreaRasterizer
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    grid = _grid(width=4, height=1)
+    config = _config(
+        {
+            "garden": {
+                "tags": [["landuse", "garden"]],
+                "cm_types": [
+                    {"menu": "Ground 3", "cat1": "Crop 1", "weight": 1},
+                    {"menu": "Ground 3", "cat1": "Crop 2", "weight": 2},
+                ],
+                "process": ["type_random_individual"],
+                "priority": 5,
+            }
+        }
+    )
+    feature = _feature("garden-0", "garden", ProcessKind.AREA, Polygon([(0, 0), (32, 0), (32, 8), (0, 8)]))
+
+    placements = AreaRasterizer(grid, OccupancyModel.from_grid_index(grid), np.random.default_rng(123)).rasterize(
+        (feature,),
+        config,
+    )
+
+    assert len(placements) == 4
+    assert len({placement.cm_type.cat1 for placement in placements}) > 1
 
 
 def test_clustered_random_area_choices_are_seeded_and_spatially_correlated() -> None:
