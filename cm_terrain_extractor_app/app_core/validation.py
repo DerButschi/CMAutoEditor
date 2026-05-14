@@ -49,9 +49,11 @@ def update_state_from_uploaded_osm_data(
     *,
     osm_data: dict,
     osm_bbox_object: Any,
+    upload_signature: str | None = None,
 ) -> None:
     state.osm_data = osm_data
     state.osm_data_source = OSM_DATA_SOURCE_UPLOADED
+    state.osm_uploaded_file_signature = upload_signature
     state.osm_bbox_object = osm_bbox_object
     if state.bbox_object is None:
         update_state_from_bbox(state, osm_bbox_object)

@@ -121,6 +121,7 @@ class _IntersectionSpec:
     node: GridNode
     directions: set[str]
     cells: set[GridCell]
+    cm_type: CMType | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +131,7 @@ class _IntersectionEndpoint:
     node: GridNode
     direction: str
     cells_from_node: tuple[GridCell, ...]
+    cm_type: CMType | None = None
 
 
 class TileAssigner:
@@ -167,6 +169,7 @@ class TileAssigner:
                     route=None,
                     intersection=True,
                     variant=variant,
+                    cm_type_override=intersection.cm_type,
                 )
             )
             used_cells.add((intersection.process, cell))
@@ -228,7 +231,9 @@ class TileAssigner:
         route: RouteRecord | None,
         intersection: bool,
         variant: TileVariant,
+        cm_type_override: CMType | None = None,
     ) -> PlacementRecord:
+        cm_type = _variant_cm_type(variant, cm_type_override or (route.cm_type if route is not None else None))
         return PlacementRecord(
             layer=_layer_for_process(process),
             grid_kind=GridKind.NORMAL,
@@ -236,7 +241,7 @@ class TileAssigner:
             config_name=route.config_name if route is not None else f"{process.value}_intersection",
             feature_id=route.edge_id if route is not None else f"intersection:{process.value}:{cell.xidx}:{cell.yidx}",
             priority=route.priority if route is not None else 0,
-            cm_type=variant.cm_type,
+            cm_type=cm_type,
             score=-variant.cost,
             diagnostics={
                 "required_directions": _ordered_directions(required_directions),
@@ -262,12 +267,14 @@ class TileAssigner:
             return ()
 
         candidate_columns: list[tuple[TileVariant, ...]] = []
+        fixed_columns: set[int] = set()
         for spec in specs:
             fixed_variant = fixed_variants.get((route.process, spec.cell))
             if fixed_variant is not None:
                 if not spec.required_directions.issubset(fixed_variant.directions):
                     failures.append(_failure(route.process, spec.cell, spec.required_directions, "fixed_tile_mismatch"))
                     return ()
+                fixed_columns.add(len(candidate_columns))
                 candidate_columns.append((fixed_variant,))
                 continue
 
@@ -277,7 +284,7 @@ class TileAssigner:
                 return ()
             candidate_columns.append(candidates)
 
-        selected = self._least_cost_compatible_path(specs, candidate_columns)
+        selected = self._least_cost_compatible_path(specs, candidate_columns, fixed_columns=fixed_columns)
         if selected is None:
             failures.append(_failure(route.process, specs[0].cell, specs[0].required_directions, "no_compatible_tile_path"))
             return ()
@@ -304,7 +311,10 @@ class TileAssigner:
         self,
         specs: tuple[_RouteCellSpec, ...],
         candidate_columns: Sequence[tuple[TileVariant, ...]],
+        *,
+        fixed_columns: set[int] | None = None,
     ) -> tuple[TileVariant, ...] | None:
+        fixed_columns = fixed_columns or set()
         costs: dict[tuple[int, int], float] = {}
         previous: dict[tuple[int, int], tuple[int, int] | None] = {}
         for variant_index, variant in enumerate(candidate_columns[0]):
@@ -319,7 +329,12 @@ class TileAssigner:
                     prev_key = (column_index - 1, prev_index)
                     if prev_key not in costs:
                         continue
-                    if step_direction is not None and not _variants_connect(prev_variant, variant, step_direction):
+                    crosses_fixed_tile = column_index in fixed_columns or column_index - 1 in fixed_columns
+                    if (
+                        step_direction is not None
+                        and not crosses_fixed_tile
+                        and not _variants_connect(prev_variant, variant, step_direction)
+                    ):
                         continue
                     path_cost = costs[prev_key] + variant.cost
                     if best is None or path_cost < best[0]:
@@ -420,6 +435,19 @@ def _base_menu_cat(process: ProcessKind, base_cm_type: CMType | None) -> tuple[s
     return _DEFAULT_CM_TYPES.get(process, ("Linear", "Linear"))
 
 
+def _variant_cm_type(variant: TileVariant, base_cm_type: CMType | None) -> CMType:
+    if base_cm_type is None:
+        return variant.cm_type
+    return CMType(
+        menu=base_cm_type.menu,
+        cat1=base_cm_type.cat1,
+        cat2=variant.cm_type.cat2,
+        direction=variant.cm_type.direction,
+        tile_id=variant.cm_type.tile_id,
+        modifiers=variant.cm_type.modifiers,
+    )
+
+
 def _optional_int(value: Any) -> int | None:
     if _is_missing(value):
         return None
@@ -448,10 +476,11 @@ def _required_directions_for_nodes(first: GridNode, second: GridNode) -> frozens
 
 
 def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
+    route_cells = _normalized_route_cells(route)
     step_cells: list[GridCell] = []
     step_directions_by_cell: dict[GridCell, set[str]] = {}
     for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False)):
-        cell = route.cells[step_index] if step_index < len(route.cells) else _cell_for_step(start, end)
+        cell = route_cells[step_index] if step_index < len(route_cells) else _cell_for_step(start, end)
         direction = _direction_between_nodes(start, end)
         step_directions_by_cell.setdefault(cell, set()).add(direction)
         if not step_cells or step_cells[-1] != cell:
@@ -475,6 +504,89 @@ def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
     return tuple(specs)
 
 
+def _normalized_route_cells(route: RouteRecord) -> tuple[GridCell, ...]:
+    if len(route.nodes) < 2:
+        return ()
+    candidate_columns = [
+        _candidate_cells_for_step(start, end, route.cells[step_index] if step_index < len(route.cells) else None)
+        for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False))
+    ]
+    selected = _least_diagonal_cell_path(candidate_columns)
+    if selected is None:
+        return route.cells
+    return selected
+
+
+def _candidate_cells_for_step(start: GridNode, end: GridNode, default_cell: GridCell | None) -> tuple[GridCell, ...]:
+    default = default_cell or _cell_for_step(start, end)
+    try:
+        direction = _direction_between_nodes(start, end)
+    except ValueError:
+        return (default,)
+
+    if direction in {"E", "W"}:
+        xidx = min(start.xidx, end.xidx)
+        candidates = (GridCell(xidx, start.yidx), GridCell(xidx, start.yidx - 1))
+    elif direction in {"N", "S"}:
+        yidx = min(start.yidx, end.yidx)
+        candidates = (GridCell(start.xidx, yidx), GridCell(start.xidx - 1, yidx))
+    else:
+        candidates = (default,)
+
+    valid = tuple(dict.fromkeys(cell for cell in (default, *candidates) if cell.xidx >= 0 and cell.yidx >= 0))
+    return valid or (default,)
+
+
+def _least_diagonal_cell_path(candidate_columns: Sequence[tuple[GridCell, ...]]) -> tuple[GridCell, ...] | None:
+    if not candidate_columns:
+        return ()
+
+    costs: dict[tuple[int, int], float] = {}
+    previous: dict[tuple[int, int], tuple[int, int] | None] = {}
+    for candidate_index, _candidate in enumerate(candidate_columns[0]):
+        costs[(0, candidate_index)] = 0.0 if candidate_index == 0 else 0.01
+        previous[(0, candidate_index)] = None
+
+    for column_index in range(1, len(candidate_columns)):
+        for candidate_index, candidate in enumerate(candidate_columns[column_index]):
+            best: tuple[float, tuple[int, int]] | None = None
+            for previous_index, previous_candidate in enumerate(candidate_columns[column_index - 1]):
+                previous_key = (column_index - 1, previous_index)
+                if previous_key not in costs:
+                    continue
+                transition_cost = _cell_transition_cost(previous_candidate, candidate)
+                default_cost = 0.0 if candidate_index == 0 else 0.01
+                path_cost = costs[previous_key] + transition_cost + default_cost
+                if best is None or path_cost < best[0]:
+                    best = (path_cost, previous_key)
+            if best is None:
+                continue
+            costs[(column_index, candidate_index)] = best[0]
+            previous[(column_index, candidate_index)] = best[1]
+
+    final_column = len(candidate_columns) - 1
+    final_keys = [key for key in costs if key[0] == final_column]
+    if not final_keys:
+        return None
+    key = min(final_keys, key=lambda item: (costs[item], item[1]))
+    selected: list[GridCell] = []
+    while key is not None:
+        selected.append(candidate_columns[key[0]][key[1]])
+        key = previous[key]
+    selected.reverse()
+    return tuple(selected)
+
+
+def _cell_transition_cost(first: GridCell, second: GridCell) -> float:
+    dx = abs(second.xidx - first.xidx)
+    dy = abs(second.yidx - first.yidx)
+    if dx == 0 and dy == 0:
+        return 0.0
+    if dx + dy == 1:
+        return 0.0
+    return 100.0
+
+
 def _node_xy(node: GridNode | tuple[int, int]) -> tuple[int, int]:
     if isinstance(node, GridNode):
         return node.xidx, node.yidx
@@ -493,6 +605,7 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
             node=route.nodes[0],
             direction=_direction_between_nodes(route.nodes[0], route.nodes[1]),
             cells_from_node=route.cells or (_cell_for_step(route.nodes[0], route.nodes[1]),),
+            cm_type=route.cm_type,
         )
         _record_route_endpoint_candidate(
             endpoints_by_key,
@@ -501,6 +614,7 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
             node=route.nodes[-1],
             direction=_direction_between_nodes(route.nodes[-1], route.nodes[-2]),
             cells_from_node=tuple(reversed(route.cells or (_cell_for_step(route.nodes[-2], route.nodes[-1]),))),
+            cm_type=route.cm_type,
         )
 
     intersections: dict[tuple[ProcessKind, int], _IntersectionSpec] = {}
@@ -521,6 +635,7 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
             node=valid_endpoints[0].node,
             directions=set(),
             cells={intersection_cell},
+            cm_type=_shared_cm_type(valid_endpoints),
         )
         for endpoint in valid_endpoints:
             spec.directions.add(endpoint.direction)
@@ -536,6 +651,7 @@ def _record_route_endpoint_candidate(
     node: GridNode,
     direction: str,
     cells_from_node: tuple[GridCell, ...],
+    cm_type: CMType | None,
 ) -> None:
     endpoints_by_key.setdefault((process, node_id), []).append(
         _IntersectionEndpoint(
@@ -544,8 +660,20 @@ def _record_route_endpoint_candidate(
             node=node,
             direction=direction,
             cells_from_node=cells_from_node,
+            cm_type=cm_type,
         )
     )
+
+
+def _shared_cm_type(endpoints: Sequence[_IntersectionEndpoint]) -> CMType | None:
+    cm_types = [endpoint.cm_type for endpoint in endpoints if endpoint.cm_type is not None]
+    if not cm_types:
+        return None
+    first = cm_types[0]
+    first_key = _cm_type_key(first)
+    if all(_cm_type_key(cm_type) == first_key for cm_type in cm_types[1:]):
+        return first
+    return None
 
 
 def _arm_continues_in_next_square(
@@ -653,3 +781,7 @@ def _variant_sort_key(variant: TileVariant) -> tuple[float, int, int, int, int]:
 
 def _intersection_sort_key(intersection: _IntersectionSpec) -> tuple[str, int, int, int]:
     return intersection.process.value, intersection.node.xidx, intersection.node.yidx, intersection.node_id
+
+
+def _cm_type_key(cm_type: CMType) -> tuple[str, str, str | None, str | int | None]:
+    return cm_type.menu, cm_type.cat1, cm_type.cat2, cm_type.direction

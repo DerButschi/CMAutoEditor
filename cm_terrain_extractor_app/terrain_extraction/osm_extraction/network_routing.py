@@ -157,6 +157,7 @@ class NetworkRouter:
             config_name=edge.config_name,
             priority=edge.priority,
             success=False,
+            cm_type=edge.cm_type,
             diagnostics={
                 "failure_reason": "no_path",
                 "source_length_m": edge.geometry.length,
@@ -274,6 +275,7 @@ class NetworkRouter:
             cells=record.cells,
             success=True,
             diagnostics=diagnostics,
+            cm_type=record.cm_type,
         )
 
     def _record_success(
@@ -309,6 +311,7 @@ class NetworkRouter:
             cells=cells,
             success=True,
             diagnostics=diagnostics,
+            cm_type=edge.cm_type,
         )
 
     def _node_anchors(self, topology: TopologyGraph) -> dict[int, GridNode]:

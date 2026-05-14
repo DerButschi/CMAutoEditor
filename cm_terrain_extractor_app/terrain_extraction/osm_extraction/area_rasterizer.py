@@ -10,7 +10,7 @@ from shapely.geometry.base import BaseGeometry
 from terrain_extraction.osm_extraction.config_schema import (
     ConfigEntry,
     ExtractionConfig,
-    TagSelector,
+    matched_or_first_cm_type,
 )
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
@@ -90,7 +90,7 @@ class AreaRasterizer:
                 self._accept_cells(feature, entry, cm_type, (cell,), accepted, object_id, diagnostics)
             return
 
-        cm_type = self._matched_or_first_cm_type(entry, feature.source_tags)
+        cm_type = matched_or_first_cm_type(entry, feature.source_tags)
         if cm_type is None:
             return
         self._accept_cells(feature, entry, cm_type, tuple(cells), accepted, feature.feature_id, diagnostics)
@@ -287,17 +287,6 @@ class AreaRasterizer:
             for cell in cells
             if (cell.xidx - min_xidx) % stride_x == 0 and (cell.yidx - min_yidx) % stride_y == 0
         ]
-
-    def _matched_or_first_cm_type(self, entry: ConfigEntry, tags: dict[str, Any] | Any) -> CMType | None:
-        for index, raw_cm_type in enumerate(entry.raw_cm_types):
-            selector = TagSelector.from_raw(raw_cm_type.get("tags", ()), field_name=f"{entry.name}.cm_types.tags")
-            if selector.matches(tags):
-                cm_type = entry.cm_types[index]
-                return None if cm_type.modifiers.get("dummy") is True else cm_type
-        if not entry.cm_types:
-            return None
-        cm_type = entry.cm_types[0]
-        return None if cm_type.modifiers.get("dummy") is True else cm_type
 
     def _layer_for(self, process: ProcessKind, entry: ConfigEntry, cm_type: CMType) -> LayerKind:
         if process is ProcessKind.POINT:

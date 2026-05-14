@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sys
 from typing import Any
 
@@ -203,15 +204,7 @@ def _render_osm_controls(
         with st.container(border=True):
             osm_file = st.file_uploader("Import OpenStreetMap file", type="geojson")
             if osm_file is not None:
-                osm_data = load_osm_data_from_uploaded_bytes(
-                    data=osm_file.getvalue(),
-                    filename=osm_file.name,
-                )
-                update_state_from_uploaded_osm_data(
-                    state,
-                    osm_data=osm_data,
-                    osm_bbox_object=_get_bounding_box(osm_data, resources),
-                )
+                _handle_uploaded_osm_file(state, resources, osm_file)
         with st.container(border=True):
             processing_enabled = True
             if not state.selected_area_valid:
@@ -288,6 +281,36 @@ def _process_osm_data(
     status_update_area.empty()
 
 
+def _handle_uploaded_osm_file(
+    state: AppState,
+    resources: AppResources,
+    osm_file: Any,
+) -> None:
+    upload_bytes = osm_file.getvalue()
+    upload_signature = _uploaded_osm_file_signature(
+        filename=getattr(osm_file, "name", None),
+        data=upload_bytes,
+    )
+    if upload_signature == state.osm_uploaded_file_signature:
+        return
+
+    osm_data = load_osm_data_from_uploaded_bytes(
+        data=upload_bytes,
+        filename=getattr(osm_file, "name", None),
+    )
+    update_state_from_uploaded_osm_data(
+        state,
+        osm_data=osm_data,
+        osm_bbox_object=_get_bounding_box(osm_data, resources),
+        upload_signature=upload_signature,
+    )
+
+
+def _uploaded_osm_file_signature(*, filename: str | None, data: bytes) -> str:
+    digest = hashlib.sha256(data).hexdigest()
+    return f"{filename or ''}:{len(data)}:{digest}"
+
+
 def _get_osm_data(
     state: AppState,
     resources: AppResources,
@@ -297,6 +320,7 @@ def _get_osm_data(
         config=load_osm_config(config_path=resources.config_dir / state.osm_config_file),
     )
     state.osm_data_source = OSM_DATA_SOURCE_DOWNLOADED
+    state.osm_uploaded_file_signature = None
     state.osm_bbox_object = _get_bounding_box(state.osm_data, resources)
     clear_osm_processing_result(state)
 

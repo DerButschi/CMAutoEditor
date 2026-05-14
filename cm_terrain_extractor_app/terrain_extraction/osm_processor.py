@@ -8,7 +8,10 @@ from pyproj.crs import CRS
 from shapely import affinity, transform, union_all
 from shapely.geometry import shape
 from terrain_extraction.bbox_utils import BoundingBox
-from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+from terrain_extraction.osm_extraction.config_schema import (
+    ExtractionConfig,
+    matched_or_first_cm_type,
+)
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
     CMType,
@@ -503,6 +506,7 @@ class OSMProcessor:
                         geometry=geometry,
                         source_tags=source_tags,
                         source_properties=properties,
+                        cm_type=matched_or_first_cm_type(config_entry, source_tags),
                     )
                 )
         return tuple(features)

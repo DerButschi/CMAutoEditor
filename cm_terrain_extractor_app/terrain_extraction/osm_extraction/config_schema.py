@@ -124,6 +124,18 @@ def match_cm_type(cm_types: Iterable[Mapping[str, Any]], tags: Mapping[str, Any]
     return None
 
 
+def matched_or_first_cm_type(entry: ConfigEntry, tags: Mapping[str, Any]) -> CMType | None:
+    for index, raw_cm_type in enumerate(entry.raw_cm_types):
+        selector = TagSelector.from_raw(raw_cm_type.get("tags", ()), field_name=f"{entry.name}.cm_types.tags")
+        if selector.matches(tags):
+            cm_type = entry.cm_types[index]
+            return None if cm_type.modifiers.get("dummy") is True else cm_type
+    if not entry.cm_types:
+        return None
+    cm_type = entry.cm_types[0]
+    return None if cm_type.modifiers.get("dummy") is True else cm_type
+
+
 def _compile_entry(name: str, raw_entry: Mapping[str, Any]) -> ConfigEntry:
     raw_processes = _normalize_string_list(raw_entry.get("process"), name, "process")
     processes = tuple(_process_kind(process, name) for process in raw_processes)

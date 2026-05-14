@@ -26,6 +26,29 @@ def _feature(feature_id, config_name, process, geometry, *, priority=5):
     )
 
 
+def _typed_feature(feature_id, config_name, process, geometry, cat1, *, priority=5):
+    from terrain_extraction.osm_extraction.models import CMType
+
+    feature = _feature(feature_id, config_name, process, geometry, priority=priority)
+    return _feature_record_with_type(feature, CMType(menu="Roads", cat1=cat1))
+
+
+def _feature_record_with_type(feature, cm_type):
+    from terrain_extraction.osm_extraction.models import FeatureRecord
+
+    return FeatureRecord(
+        feature_id=feature.feature_id,
+        source_index=feature.source_index,
+        config_name=feature.config_name,
+        process=feature.process,
+        priority=feature.priority,
+        geometry=feature.geometry,
+        source_tags=feature.source_tags,
+        source_properties=feature.source_properties,
+        cm_type=cm_type,
+    )
+
+
 def _clip() -> Polygon:
     return Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
 
@@ -136,6 +159,23 @@ def test_degree_two_chains_with_identical_metadata_are_collapsed() -> None:
     assert len(graph.edges) == 1
     assert list(graph.edges[0].geometry.coords) == [(0.0, 0.0), (8.0, 0.0), (16.0, 0.0), (24.0, 0.0)]
     assert graph.diagnostics["collapsed_degree_two_nodes"] == 2
+
+
+def test_degree_two_chains_with_different_cm_types_are_not_collapsed() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+
+    graph = NetworkTopologyBuilder().build(
+        (
+            _typed_feature("road-0", "road", ProcessKind.ROAD, LineString([(0, 0), (8, 0)]), "Paved 1", priority=1),
+            _typed_feature("road-1", "road", ProcessKind.ROAD, LineString([(8, 0), (16, 0)]), "Paved 2", priority=1),
+            _typed_feature("road-2", "road", ProcessKind.ROAD, LineString([(16, 0), (24, 0)]), "Paved 2", priority=1),
+        )
+    )
+
+    assert len(graph.edges) == 2
+    assert graph.diagnostics["collapsed_degree_two_nodes"] == 1
+    assert {edge.cm_type.cat1 for edge in graph.edges if edge.cm_type is not None} == {"Paved 1", "Paved 2"}
 
 
 def test_pipeline_runs_network_topology_without_migration_flag() -> None:

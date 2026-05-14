@@ -7,7 +7,11 @@ from typing import Any
 
 from shapely.geometry import shape
 from shapely.geometry.base import BaseGeometry
-from terrain_extraction.osm_extraction.config_schema import ExtractionConfig, extract_tags
+from terrain_extraction.osm_extraction.config_schema import (
+    ExtractionConfig,
+    extract_tags,
+    matched_or_first_cm_type,
+)
 from terrain_extraction.osm_extraction.models import FeatureRecord
 
 
@@ -41,6 +45,7 @@ class FeatureMatcher:
                             geometry=geometry,
                             source_tags=tags,
                             source_properties=properties,
+                            cm_type=matched_or_first_cm_type(entry, tags),
                         )
                     )
 

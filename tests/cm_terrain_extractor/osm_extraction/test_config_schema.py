@@ -62,6 +62,32 @@ def test_config_schema_fails_unknown_process_early() -> None:
         )
 
 
+def test_matched_or_first_cm_type_uses_feature_tags() -> None:
+    from terrain_extraction.osm_extraction.config_schema import (
+        ExtractionConfig,
+        matched_or_first_cm_type,
+    )
+
+    config = ExtractionConfig.from_mapping(
+        {
+            "road": {
+                "tags": [["highway", "primary"], ["highway", "unclassified"]],
+                "cm_types": [
+                    {"menu": "Roads", "cat1": "Paved 1", "tags": [["highway", "primary"]]},
+                    {"menu": "Roads", "cat1": "Paved 2", "tags": [["highway", "unclassified"]]},
+                ],
+                "process": ["road_tiles"],
+                "priority": 4,
+            }
+        }
+    )
+
+    entry = config.entry_by_name("road")
+
+    assert matched_or_first_cm_type(entry, {"highway": "unclassified"}).cat1 == "Paved 2"
+    assert matched_or_first_cm_type(entry, {"highway": "primary"}).cat1 == "Paved 1"
+
+
 def test_barn_process_spelling_is_canonical_and_profile_compatible() -> None:
     from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
     from terrain_extraction.osm_extraction.models import ProcessKind

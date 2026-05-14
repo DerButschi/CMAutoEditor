@@ -101,6 +101,7 @@ class FeatureRecord:
     geometry: BaseGeometry
     source_tags: Mapping[str, Any] = field(default_factory=dict)
     source_properties: Mapping[str, Any] = field(default_factory=dict)
+    cm_type: CMType | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "source_tags", _frozen_mapping(self.source_tags))
@@ -147,6 +148,7 @@ class TopologyEdge:
     process: ProcessKind
     priority: int
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    cm_type: CMType | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "feature_ids", tuple(self.feature_ids))
@@ -192,6 +194,7 @@ class RouteRecord:
     cells: tuple[GridCell, ...] = ()
     success: bool = True
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    cm_type: CMType | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "nodes", tuple(self.nodes))

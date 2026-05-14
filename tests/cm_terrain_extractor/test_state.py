@@ -30,6 +30,7 @@ def test_app_state_defaults_match_contract() -> None:
     assert state.osm_profile == "cold_war"
     assert state.osm_data is None
     assert state.osm_data_source is None
+    assert state.osm_uploaded_file_signature is None
     assert state.osm_bbox_object is None
     assert state.osm_output is None
     assert state.osm_geometries is None
@@ -53,6 +54,7 @@ def test_clear_bbox_dependent_results_preserves_user_map_and_osm_choices() -> No
         osm_profile="cold_war",
         osm_data={"type": "FeatureCollection", "features": []},
         osm_data_source=OSM_DATA_SOURCE_DOWNLOADED,
+        osm_uploaded_file_signature="old-upload",
         osm_bbox_object=object(),
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
@@ -69,6 +71,7 @@ def test_clear_bbox_dependent_results_preserves_user_map_and_osm_choices() -> No
     assert state.height_map_png is None
     assert state.osm_data is None
     assert state.osm_data_source is None
+    assert state.osm_uploaded_file_signature is None
     assert state.osm_bbox_object is None
     assert state.osm_output is None
     assert state.osm_geometries is None
@@ -96,6 +99,7 @@ def test_clear_bbox_dependent_results_preserves_uploaded_osm_data() -> None:
         height_map_png=Path("height.png"),
         osm_data=osm_data,
         osm_data_source=OSM_DATA_SOURCE_UPLOADED,
+        osm_uploaded_file_signature="upload-a",
         osm_bbox_object=osm_bbox,
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
@@ -109,6 +113,7 @@ def test_clear_bbox_dependent_results_preserves_uploaded_osm_data() -> None:
     assert state.height_map_png is None
     assert state.osm_data is osm_data
     assert state.osm_data_source == OSM_DATA_SOURCE_UPLOADED
+    assert state.osm_uploaded_file_signature == "upload-a"
     assert state.osm_bbox_object is osm_bbox
     assert state.osm_output is None
     assert state.osm_geometries is None
@@ -149,6 +154,7 @@ def test_clear_osm_processing_result_invalidates_config_profile_outputs_only() -
         osm_profile="cold_war",
         osm_data={"type": "FeatureCollection", "features": []},
         osm_data_source="uploaded",
+        osm_uploaded_file_signature="upload-a",
         osm_bbox_object=object(),
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
@@ -162,6 +168,7 @@ def test_clear_osm_processing_result_invalidates_config_profile_outputs_only() -
     assert state.osm_profile == "cold_war"
     assert state.osm_data == {"type": "FeatureCollection", "features": []}
     assert state.osm_data_source == "uploaded"
+    assert state.osm_uploaded_file_signature == "upload-a"
     assert state.osm_bbox_object is not None
     assert state.osm_output is None
     assert state.osm_geometries is None

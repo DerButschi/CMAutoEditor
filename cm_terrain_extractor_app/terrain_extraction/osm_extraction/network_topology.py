@@ -16,6 +16,7 @@ from shapely.geometry import (
 from shapely.geometry.base import BaseGeometry
 from shapely.strtree import STRtree
 from terrain_extraction.osm_extraction.models import (
+    CMType,
     FeatureRecord,
     TopologyEdge,
     TopologyGraph,
@@ -205,6 +206,7 @@ class NetworkTopologyBuilder:
                         process=source_line.feature.process,
                         priority=source_line.feature.priority,
                         diagnostics={"source_length_m": source_line.geometry.length},
+                        cm_type=source_line.feature.cm_type,
                     )
                 )
         return tuple(edges)
@@ -294,6 +296,7 @@ class NetworkTopologyBuilder:
                 process=edge.process,
                 priority=edge.priority,
                 diagnostics=edge.diagnostics,
+                cm_type=edge.cm_type,
             )
             for edge in new_edges
         )
@@ -355,10 +358,11 @@ class NetworkTopologyBuilder:
             process=first_edge.process,
             priority=first_edge.priority,
             diagnostics={"collapsed_edge_count": len(chain)},
+            cm_type=first_edge.cm_type,
         )
 
-    def _edge_metadata(self, edge: TopologyEdge) -> tuple[str, str, int]:
-        return edge.config_name, edge.process.value, edge.priority
+    def _edge_metadata(self, edge: TopologyEdge) -> tuple[str, str, int, tuple[str, str, str | None, str | int | None]]:
+        return edge.config_name, edge.process.value, edge.priority, _cm_type_key(edge.cm_type)
 
     def _diagnostics(
         self,
@@ -459,3 +463,9 @@ def _other_node_id(edge: TopologyEdge, node_id: int) -> int:
     if edge.start_node_id == node_id:
         return edge.end_node_id
     return edge.start_node_id
+
+
+def _cm_type_key(cm_type: CMType | None) -> tuple[str, str, str | None, str | int | None]:
+    if cm_type is None:
+        return ("", "", None, None)
+    return cm_type.menu, cm_type.cat1, cm_type.cat2, cm_type.direction

@@ -110,6 +110,7 @@ def test_update_state_from_bbox_preserves_uploaded_osm_data() -> None:
     state = AppState(
         osm_data=osm_data,
         osm_data_source=OSM_DATA_SOURCE_UPLOADED,
+        osm_uploaded_file_signature="upload-a",
         osm_bbox_object=osm_bbox,
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
@@ -121,6 +122,7 @@ def test_update_state_from_bbox_preserves_uploaded_osm_data() -> None:
     assert state.bbox_object is bbox
     assert state.osm_data is osm_data
     assert state.osm_data_source == OSM_DATA_SOURCE_UPLOADED
+    assert state.osm_uploaded_file_signature == "upload-a"
     assert state.osm_bbox_object is osm_bbox
     assert state.osm_output is None
     assert state.osm_geometries is None
@@ -138,12 +140,14 @@ def test_update_state_from_uploaded_osm_data_uses_geojson_bbox_when_no_bbox_sele
         state,
         osm_data=osm_data,
         osm_bbox_object=osm_bbox,
+        upload_signature="upload-a",
     )
 
     assert state.bbox_object is osm_bbox
     assert state.selected_area_valid is True
     assert state.osm_data is osm_data
     assert state.osm_data_source == OSM_DATA_SOURCE_UPLOADED
+    assert state.osm_uploaded_file_signature == "upload-a"
     assert state.osm_bbox_object is osm_bbox
 
 
@@ -165,11 +169,13 @@ def test_update_state_from_uploaded_osm_data_keeps_existing_bbox_selected() -> N
         state,
         osm_data=osm_data,
         osm_bbox_object=osm_bbox,
+        upload_signature="upload-b",
     )
 
     assert state.bbox_object is selected_bbox
     assert state.osm_data is osm_data
     assert state.osm_data_source == OSM_DATA_SOURCE_UPLOADED
+    assert state.osm_uploaded_file_signature == "upload-b"
     assert state.osm_bbox_object is osm_bbox
     assert state.osm_output is None
     assert state.osm_geometries is None

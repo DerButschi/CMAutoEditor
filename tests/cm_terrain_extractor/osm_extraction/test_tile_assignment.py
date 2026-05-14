@@ -10,7 +10,7 @@ if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
 
 
-def _route(edge_id, process, nodes, *, start_node_id=0, end_node_id=1, config_name="primary"):
+def _route(edge_id, process, nodes, *, start_node_id=0, end_node_id=1, config_name="primary", cm_type=None):
     from terrain_extraction.osm_extraction.models import GridCell, GridNode, RouteRecord
 
     grid_nodes = tuple(GridNode(xidx, yidx) for xidx, yidx in nodes)
@@ -27,6 +27,7 @@ def _route(edge_id, process, nodes, *, start_node_id=0, end_node_id=1, config_na
         priority=1,
         nodes=grid_nodes,
         cells=cells,
+        cm_type=cm_type,
     )
 
 
@@ -146,6 +147,88 @@ def test_process_specific_tile_labels_are_generated_for_linear_catalogs() -> Non
         assert catalog.candidates_for(frozenset({"N", "S"}))[0].cm_type.cat2 == cat2
 
 
+def test_route_cm_type_overrides_linear_catalog_base_type() -> None:
+    from terrain_extraction.osm_extraction.models import CMType, ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    base_cm_type = CMType(menu="Roads", cat1="Paved 1")
+    route_cm_type = CMType(menu="Roads", cat1="Paved 2")
+    catalog = CompiledTileCatalog.from_records(
+        (_catalog_rows()[0],),
+        process=ProcessKind.ROAD,
+        base_cm_type=base_cm_type,
+    )
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(
+        (_route(0, ProcessKind.ROAD, ((0, 0), (0, 1)), cm_type=route_cm_type),)
+    )
+
+    assert result.success
+    assert result.placements[0].cm_type.menu == "Roads"
+    assert result.placements[0].cm_type.cat1 == "Paved 2"
+    assert result.placements[0].cm_type.cat2 == "Road Tile 1"
+
+
+def test_same_type_intersection_uses_route_cm_type() -> None:
+    from terrain_extraction.osm_extraction.models import CMType, GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    route_cm_type = CMType(menu="Roads", cat1="Paved 2")
+    catalog = CompiledTileCatalog.from_records(
+        _catalog_rows(),
+        process=ProcessKind.ROAD,
+        base_cm_type=CMType(menu="Roads", cat1="Paved 1"),
+    )
+    routes = (
+        _route(0, ProcessKind.ROAD, ((0, 1), (1, 1)), start_node_id=0, end_node_id=99, cm_type=route_cm_type),
+        _route(1, ProcessKind.ROAD, ((1, 1), (2, 1), (3, 1)), start_node_id=99, end_node_id=1, cm_type=route_cm_type),
+        _route(2, ProcessKind.ROAD, ((1, 0), (1, 1)), start_node_id=2, end_node_id=99, cm_type=route_cm_type),
+        _route(3, ProcessKind.ROAD, ((1, 1), (1, 2), (1, 3)), start_node_id=99, end_node_id=3, cm_type=route_cm_type),
+    )
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(routes)
+
+    intersection = [
+        placement
+        for placement in result.placements
+        if placement.cells == (GridCell(1, 1),) and placement.diagnostics.get("intersection")
+    ]
+    assert len(intersection) == 1
+    assert intersection[0].cm_type.cat1 == "Paved 2"
+
+
+def test_fixed_intersection_connection_variant_does_not_drop_route_arm() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    records = (
+        {"direction": 1, "row": 0, "col": 0, "r": ("narrow",), "l": ("narrow",), "cost": 1.0},
+        {"direction": 0, "row": 0, "col": 1, "u": ("narrow",), "d": ("narrow",), "cost": 1.0},
+        {
+            "direction": 0,
+            "row": 2,
+            "col": 2,
+            "u": ("wide",),
+            "d": ("wide",),
+            "r": ("wide",),
+            "l": ("wide",),
+            "cost": 0.1,
+        },
+    )
+    catalog = CompiledTileCatalog.from_records(records, process=ProcessKind.ROAD)
+    routes = (
+        _route(0, ProcessKind.ROAD, ((0, 1), (1, 1)), start_node_id=0, end_node_id=99),
+        _route(1, ProcessKind.ROAD, ((1, 1), (2, 1), (3, 1)), start_node_id=99, end_node_id=1),
+        _route(2, ProcessKind.ROAD, ((1, 0), (1, 1)), start_node_id=2, end_node_id=99),
+        _route(3, ProcessKind.ROAD, ((1, 1), (1, 2), (1, 3)), start_node_id=99, end_node_id=3),
+    )
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(routes)
+
+    assert result.success
+    assert result.diagnostics["intersection_assignments"] == 1
+
+
 def test_impossible_intersection_records_missing_direction_diagnostic() -> None:
     from terrain_extraction.osm_extraction.models import ProcessKind
     from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
@@ -255,6 +338,24 @@ def test_route_turn_requires_corner_tile_not_straight_tile() -> None:
     assert turn.diagnostics["required_directions"] == ("N", "W")
     assert turn.diagnostics["tile_row"] == 1
     assert turn.diagnostics["tile_col"] == 0
+
+
+def test_route_south_turn_does_not_require_diagonal_road_tile() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    records = (
+        {"direction": 1, "row": 0, "col": 0, "r": (2, 3), "l": (2, 3), "cost": 1.0},
+        {"direction": 0, "row": 0, "col": 1, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+        {"direction": 0, "row": 1, "col": 0, "l": (2, 3), "d": (2, 3), "cost": 1.0},
+    )
+    catalog = CompiledTileCatalog.from_records(records, process=ProcessKind.ROAD)
+    route = _route(0, ProcessKind.ROAD, ((0, 1), (1, 1), (1, 0)))
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(11)).assign((route,))
+
+    assert result.success
+    assert all("SE" not in failure["required_directions"] for failure in result.failures)
 
 
 def test_route_bend_does_not_emit_intersection_tile() -> None:
