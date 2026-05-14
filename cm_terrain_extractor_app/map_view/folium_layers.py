@@ -118,6 +118,95 @@ def add_osm_geometry_layers(map_obj: folium.Map, state: AppState) -> None:
             folium_geometry.add_to(map_obj)
 
 
+def add_osm_debug_layers(map_obj: folium.Map, state: AppState) -> bool:
+    layers_added = False
+    if _has_raw_osm_features(state.osm_data):
+        raw_group = folium.FeatureGroup(name="Raw OSM features", overlay=True, show=False)
+        folium.GeoJson(
+            state.osm_data,
+            name="Raw OSM features",
+            style_function=lambda _feature: {
+                "color": "#6b7280",
+                "weight": 2,
+                "fillColor": "#9ca3af",
+                "fillOpacity": 0.12,
+            },
+            marker=folium.CircleMarker(radius=3, color="#6b7280", fill=True, fill_opacity=0.8),
+        ).add_to(raw_group)
+        raw_group.add_to(map_obj)
+        layers_added = True
+
+    debug_layers = state.osm_debug_layers or {}
+    layers_added = _add_debug_geojson_layer(
+        map_obj,
+        debug_layers.get("source_features"),
+        name="Matched OSM features",
+        style={"color": "#16a34a", "weight": 3, "fillColor": "#22c55e", "fillOpacity": 0.18},
+    ) or layers_added
+
+    network_group = _network_debug_group(debug_layers)
+    if network_group is not None:
+        network_group.add_to(map_obj)
+        layers_added = True
+
+    layers_added = _add_debug_geojson_layer(
+        map_obj,
+        debug_layers.get("final_rows"),
+        name="Output CSV tiles",
+        style={"color": "#0891b2", "weight": 1, "fillColor": "#06b6d4", "fillOpacity": 0.32},
+    ) or layers_added
+    return layers_added
+
+
+def _has_raw_osm_features(osm_data: dict | None) -> bool:
+    return isinstance(osm_data, dict) and bool(osm_data.get("features"))
+
+
+def _network_debug_group(debug_layers: dict) -> folium.FeatureGroup | None:
+    group = folium.FeatureGroup(name="Internal OSM networks", overlay=True, show=False)
+    layer_specs = (
+        ("topology_edges", {"color": "#f97316", "weight": 3, "fillOpacity": 0.0}),
+        ("routed_paths", {"color": "#2563eb", "weight": 2, "dashArray": "4", "fillOpacity": 0.0}),
+        ("topology_nodes", {"color": "#7c3aed", "weight": 2, "fillColor": "#7c3aed", "fillOpacity": 0.8}),
+        ("route_anchors", {"color": "#db2777", "weight": 2, "fillColor": "#db2777", "fillOpacity": 0.8}),
+    )
+    added = False
+    for layer_name, style in layer_specs:
+        added = _add_debug_geojson_layer(group, debug_layers.get(layer_name), name=layer_name, style=style) or added
+    return group if added else None
+
+
+def _add_debug_geojson_layer(
+    target: folium.Map | folium.FeatureGroup,
+    layer: Any,
+    *,
+    name: str,
+    style: dict[str, Any],
+) -> bool:
+    if layer is None or getattr(layer, "empty", True):
+        return False
+
+    folium.GeoJson(
+        _geojson_data(layer),
+        name=name,
+        style_function=lambda _feature, style=style: style,
+        marker=folium.CircleMarker(
+            radius=4,
+            color=style.get("color", "#3388ff"),
+            fill=True,
+            fill_color=style.get("fillColor", style.get("color", "#3388ff")),
+            fill_opacity=style.get("fillOpacity", 0.8),
+        ),
+    ).add_to(target)
+    return True
+
+
+def _geojson_data(layer: Any) -> Any:
+    if hasattr(layer, "to_json"):
+        return layer.to_json()
+    return layer
+
+
 def _visualization_for_key(state: AppState, key: str) -> dict[str, Any] | None:
     if state.osm_config is None or key not in state.osm_config:
         return None

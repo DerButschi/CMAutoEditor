@@ -135,6 +135,7 @@ def test_process_osm_data_runs_processor_stages(monkeypatch) -> None:
     calls = []
     output = pd.DataFrame({"terrain": ["road"]})
     geometries = {"roads": ["line"]}
+    debug_layers = {"final_rows": pd.DataFrame({"name": ["road"]})}
 
     class FakeProcessor:
         def __init__(self, *, profile: str, bbox: object, path_to_config: str) -> None:
@@ -155,11 +156,14 @@ def test_process_osm_data_runs_processor_stages(monkeypatch) -> None:
         def get_geometries(self) -> dict:
             return geometries
 
+        def get_debug_layers(self) -> dict:
+            return debug_layers
+
     monkeypatch.setattr(actions, "_create_osm_processor", FakeProcessor)
 
     bbox = object()
     osm_data = {"type": "FeatureCollection", "features": []}
-    result_output, result_geometries = actions.process_osm_data(
+    result_output, result_geometries, result_debug_layers = actions.process_osm_data(
         osm_data=osm_data,
         bbox=bbox,
         config_path=Path("config.json"),
@@ -168,6 +172,7 @@ def test_process_osm_data_runs_processor_stages(monkeypatch) -> None:
 
     assert result_output is output
     assert result_geometries is geometries
+    assert result_debug_layers is debug_layers
     assert calls == [
         ("init", "cold_war", bbox, "config.json"),
         ("preprocess", osm_data),

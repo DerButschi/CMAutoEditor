@@ -271,7 +271,7 @@ def _process_osm_data(
 ) -> None:
     with status_update_area.container(), st.status("Processing OpenStreetMap data..."):
         st.write("Processing data...")
-        state.osm_output, state.osm_geometries = process_osm_data_action(
+        state.osm_output, state.osm_geometries, state.osm_debug_layers = process_osm_data_action(
             osm_data=state.osm_data,
             bbox=state.bbox_object,
             config_path=resources.config_dir / state.osm_config_file,

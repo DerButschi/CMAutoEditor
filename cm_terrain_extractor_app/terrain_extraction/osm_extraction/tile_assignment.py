@@ -478,14 +478,16 @@ def _required_directions_for_nodes(first: GridNode, second: GridNode) -> frozens
 def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
     route_cells = _normalized_route_cells(route)
     step_cells: list[GridCell] = []
-    step_directions_by_cell: dict[GridCell, set[str]] = {}
     for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False)):
         cell = route_cells[step_index] if step_index < len(route_cells) else _cell_for_step(start, end)
-        direction = _direction_between_nodes(start, end)
-        step_directions_by_cell.setdefault(cell, set()).add(direction)
         if not step_cells or step_cells[-1] != cell:
             step_cells.append(cell)
 
+    if not step_cells:
+        return ()
+
+    first_step_direction = _direction_between_nodes(route.nodes[0], route.nodes[1])
+    last_step_direction = _direction_between_nodes(route.nodes[-2], route.nodes[-1])
     specs = []
     for cell_index, cell in enumerate(step_cells):
         directions = set()
@@ -497,7 +499,10 @@ def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
             direction = _direction_between_cells(cell, step_cells[cell_index + 1])
             if direction is not None:
                 directions.add(direction)
-        directions.update(step_directions_by_cell.get(cell, ()))
+        if cell_index == 0:
+            directions.add(_OPPOSITE_DIRECTIONS[first_step_direction])
+        if cell_index == len(step_cells) - 1:
+            directions.add(last_step_direction)
         if len(directions) == 1:
             directions.add(_OPPOSITE_DIRECTIONS[next(iter(directions))])
         specs.append(_RouteCellSpec(cell=cell, required_directions=frozenset(directions)))
@@ -635,7 +640,7 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
             node=valid_endpoints[0].node,
             directions=set(),
             cells={intersection_cell},
-            cm_type=_shared_cm_type(valid_endpoints),
+            cm_type=_intersection_cm_type(valid_endpoints),
         )
         for endpoint in valid_endpoints:
             spec.directions.add(endpoint.direction)
@@ -665,15 +670,33 @@ def _record_route_endpoint_candidate(
     )
 
 
-def _shared_cm_type(endpoints: Sequence[_IntersectionEndpoint]) -> CMType | None:
+def _intersection_cm_type(endpoints: Sequence[_IntersectionEndpoint]) -> CMType | None:
     cm_types = [endpoint.cm_type for endpoint in endpoints if endpoint.cm_type is not None]
     if not cm_types:
         return None
-    first = cm_types[0]
-    first_key = _cm_type_key(first)
-    if all(_cm_type_key(cm_type) == first_key for cm_type in cm_types[1:]):
-        return first
-    return None
+    counts: dict[tuple[str, str, str | None, str | int | None], int] = {}
+    by_key = {}
+    for cm_type in cm_types:
+        key = _cm_type_key(cm_type)
+        counts[key] = counts.get(key, 0) + 1
+        by_key.setdefault(key, cm_type)
+    best_key = min(
+        counts,
+        key=lambda key: (
+            -counts[key],
+            _ROAD_SURFACE_RANK.get(key[1], 99),
+            tuple("" if value is None else str(value) for value in key),
+        ),
+    )
+    return by_key[best_key]
+
+
+_ROAD_SURFACE_RANK = {
+    "Paved 1": 0,
+    "Paved 2": 1,
+    "Gravel Road": 2,
+    "Dirt Road": 3,
+}
 
 
 def _arm_continues_in_next_square(

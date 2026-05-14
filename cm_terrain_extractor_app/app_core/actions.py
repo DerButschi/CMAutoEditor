@@ -51,7 +51,7 @@ def process_osm_data(
     bbox: object,
     config_path: Path,
     profile: str,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict, dict]:
     osm_processor = _create_osm_processor(
         path_to_config=str(config_path),
         bbox=bbox,
@@ -60,7 +60,11 @@ def process_osm_data(
     osm_processor.preprocess_osm_data(osm_data=osm_data)
     osm_processor.run_processors()
     osm_processor.post_process()
-    return osm_processor.get_output(), osm_processor.get_geometries()
+    return (
+        osm_processor.get_output(),
+        osm_processor.get_geometries(),
+        osm_processor.get_debug_layers(),
+    )
 
 
 def _build_osmnx_tag_dict(config: dict) -> dict[str, list[Any]]:

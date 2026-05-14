@@ -34,6 +34,7 @@ def test_app_state_defaults_match_contract() -> None:
     assert state.osm_bbox_object is None
     assert state.osm_output is None
     assert state.osm_geometries is None
+    assert state.osm_debug_layers is None
     assert state.currently_processing_data is None
 
 
@@ -58,6 +59,7 @@ def test_clear_bbox_dependent_results_preserves_user_map_and_osm_choices() -> No
         osm_bbox_object=object(),
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
+        osm_debug_layers={"final_rows": pd.DataFrame({"name": ["road"]})},
         map_mode="OpenStreetMap",
         map_center=(51.0, 7.0),
         map_zoom=11,
@@ -75,6 +77,7 @@ def test_clear_bbox_dependent_results_preserves_user_map_and_osm_choices() -> No
     assert state.osm_bbox_object is None
     assert state.osm_output is None
     assert state.osm_geometries is None
+    assert state.osm_debug_layers is None
     assert state.osm_config_file == "default_osm_config_cmcw.json"
     assert state.osm_config == {"roads": {"visualization": {}}}
     assert state.osm_profile == "cold_war"
@@ -103,6 +106,7 @@ def test_clear_bbox_dependent_results_preserves_uploaded_osm_data() -> None:
         osm_bbox_object=osm_bbox,
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
+        osm_debug_layers={"final_rows": pd.DataFrame({"name": ["road"]})},
     )
 
     clear_bbox_dependent_results(state)
@@ -117,6 +121,7 @@ def test_clear_bbox_dependent_results_preserves_uploaded_osm_data() -> None:
     assert state.osm_bbox_object is osm_bbox
     assert state.osm_output is None
     assert state.osm_geometries is None
+    assert state.osm_debug_layers is None
 
 
 def test_clear_elevation_result_invalidates_selected_source_output_only() -> None:
@@ -158,6 +163,7 @@ def test_clear_osm_processing_result_invalidates_config_profile_outputs_only() -
         osm_bbox_object=object(),
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
+        osm_debug_layers={"final_rows": pd.DataFrame({"name": ["road"]})},
         elevation_in_bbox=pd.DataFrame({"height": [1]}),
     )
 
@@ -172,6 +178,7 @@ def test_clear_osm_processing_result_invalidates_config_profile_outputs_only() -
     assert state.osm_bbox_object is not None
     assert state.osm_output is None
     assert state.osm_geometries is None
+    assert state.osm_debug_layers is None
     assert state.elevation_in_bbox is not None
 
 

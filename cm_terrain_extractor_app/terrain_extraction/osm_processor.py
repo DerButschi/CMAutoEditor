@@ -871,6 +871,17 @@ class OSMProcessor:
         )
 
     def _get_debug_export_geometries(self, crs: CRS | None = None):
+        debug_layers = self.get_debug_layers(crs=crs)
+        final_rows = debug_layers.get("final_rows")
+        if final_rows is None or final_rows.empty:
+            return {}
+
+        geometry_dict = {}
+        for name, group in final_rows.groupby("name"):
+            geometry_dict[name] = list(group.geometry)
+        return geometry_dict
+
+    def get_debug_layers(self, crs: CRS | None = None):
         from terrain_extraction.osm_extraction.debug_export import build_debug_layers
         from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
 
@@ -894,17 +905,14 @@ class OSMProcessor:
             stats=getattr(self, "stats", None),
         )
         self.debug_export_diagnostics = debug_export.diagnostics
-        final_rows = debug_export.layers.get("final_rows")
-        if final_rows is None or final_rows.empty:
-            return {}
-
-        if crs is not None and final_rows.crs is not None:
-            final_rows = final_rows.to_crs(epsg=crs.to_epsg())
-
-        geometry_dict = {}
-        for name, group in final_rows.groupby("name"):
-            geometry_dict[name] = list(group.geometry)
-        return geometry_dict
+        if crs is None:
+            crs = CRS.from_epsg(4326)
+        return {
+            name: layer.to_crs(epsg=crs.to_epsg())
+            if getattr(layer, "crs", None) is not None
+            else layer
+            for name, layer in debug_export.layers.items()
+        }
     
     def get_geometries(self, crs: CRS | None = None):
         if self._uses_new_debug_export():

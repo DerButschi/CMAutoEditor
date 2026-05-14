@@ -37,6 +37,7 @@ class AppState:
     osm_bbox_object: Any | None = None
     osm_output: pd.DataFrame | None = None
     osm_geometries: dict | None = None
+    osm_debug_layers: dict | None = None
     currently_processing_data: tuple[str, str] | None = None
 
 
@@ -63,6 +64,7 @@ def clear_elevation_result(state: AppState) -> None:
 def clear_osm_processing_result(state: AppState) -> None:
     state.osm_output = None
     state.osm_geometries = None
+    state.osm_debug_layers = None
 
 
 def mark_map_dirty(state: AppState) -> None:

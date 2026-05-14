@@ -9,6 +9,7 @@ from cm_terrain_extractor_app.map_view.folium_layers import (
     add_draw_control,
     add_elevation_overlay,
     add_osm_bbox_layer,
+    add_osm_debug_layers,
     add_osm_geometry_layers,
 )
 
@@ -40,4 +41,6 @@ def build_folium_map(*, state: AppState, resources: AppResources) -> folium.Map:
     add_bbox_layer(map_obj, state)
     add_osm_bbox_layer(map_obj, state)
     add_osm_geometry_layers(map_obj, state)
+    if add_osm_debug_layers(map_obj, state):
+        folium.LayerControl(collapsed=False).add_to(map_obj)
     return map_obj
