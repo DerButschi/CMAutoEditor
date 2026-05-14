@@ -31,6 +31,7 @@ from cm_terrain_extractor_app.app_core.resources import (
     find_default_osm_configs,
 )
 from cm_terrain_extractor_app.app_core.state import (
+    OSM_DATA_SOURCE_DOWNLOADED,
     AppState,
     clear_elevation_result,
     clear_osm_processing_result,
@@ -38,6 +39,7 @@ from cm_terrain_extractor_app.app_core.state import (
 from cm_terrain_extractor_app.app_core.validation import (
     compute_bbox_metrics,
     is_selected_area_valid,
+    update_state_from_uploaded_osm_data,
 )
 from cm_terrain_extractor_app.streamlit_ui.widgets import (
     format_data_source_label,
@@ -201,12 +203,15 @@ def _render_osm_controls(
         with st.container(border=True):
             osm_file = st.file_uploader("Import OpenStreetMap file", type="geojson")
             if osm_file is not None:
-                state.osm_data = load_osm_data_from_uploaded_bytes(
+                osm_data = load_osm_data_from_uploaded_bytes(
                     data=osm_file.getvalue(),
                     filename=osm_file.name,
                 )
-                state.osm_bbox_object = _get_bounding_box(state.osm_data, resources)
-                clear_osm_processing_result(state)
+                update_state_from_uploaded_osm_data(
+                    state,
+                    osm_data=osm_data,
+                    osm_bbox_object=_get_bounding_box(osm_data, resources),
+                )
         with st.container(border=True):
             processing_enabled = True
             if not state.selected_area_valid:
@@ -291,6 +296,7 @@ def _get_osm_data(
         bbox=state.bbox_object,
         config=load_osm_config(config_path=resources.config_dir / state.osm_config_file),
     )
+    state.osm_data_source = OSM_DATA_SOURCE_DOWNLOADED
     state.osm_bbox_object = _get_bounding_box(state.osm_data, resources)
     clear_osm_processing_result(state)
 

@@ -6,6 +6,9 @@ from typing import Any
 
 import pandas as pd
 
+OSM_DATA_SOURCE_DOWNLOADED = "downloaded"
+OSM_DATA_SOURCE_UPLOADED = "uploaded"
+
 
 @dataclass
 class AppState:
@@ -29,6 +32,7 @@ class AppState:
     osm_config: dict | None = None
     osm_profile: str = "cold_war"
     osm_data: dict | None = None
+    osm_data_source: str | None = None
     osm_bbox_object: Any | None = None
     osm_output: pd.DataFrame | None = None
     osm_geometries: dict | None = None
@@ -39,8 +43,10 @@ def clear_bbox_dependent_results(state: AppState) -> None:
     state.available_data_sources = []
     state.selected_data_source = None
     clear_elevation_result(state)
-    state.osm_data = None
-    state.osm_bbox_object = None
+    if state.osm_data_source != OSM_DATA_SOURCE_UPLOADED:
+        state.osm_data = None
+        state.osm_data_source = None
+        state.osm_bbox_object = None
     clear_osm_processing_result(state)
 
 

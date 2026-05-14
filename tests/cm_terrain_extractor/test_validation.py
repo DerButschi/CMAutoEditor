@@ -49,7 +49,7 @@ def test_compute_bbox_metrics_uses_bounding_box_methods() -> None:
 
 
 def test_update_state_from_bbox_sets_metrics_and_clears_bbox_dependent_results() -> None:
-    from cm_terrain_extractor_app.app_core.state import AppState
+    from cm_terrain_extractor_app.app_core.state import OSM_DATA_SOURCE_DOWNLOADED, AppState
     from cm_terrain_extractor_app.app_core.validation import update_state_from_bbox
 
     bbox = FakeBBox(len_x=1200, len_y=1000)
@@ -62,6 +62,7 @@ def test_update_state_from_bbox_sets_metrics_and_clears_bbox_dependent_results()
         osm_config_file="default_osm_config_cmcw.json",
         osm_profile="cold_war",
         osm_data={"type": "FeatureCollection", "features": []},
+        osm_data_source=OSM_DATA_SOURCE_DOWNLOADED,
         osm_bbox_object=object(),
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
@@ -81,6 +82,7 @@ def test_update_state_from_bbox_sets_metrics_and_clears_bbox_dependent_results()
     assert state.elevation_in_bbox is None
     assert state.height_map_png is None
     assert state.osm_data is None
+    assert state.osm_data_source is None
     assert state.osm_bbox_object is None
     assert state.osm_output is None
     assert state.osm_geometries is None
@@ -97,3 +99,77 @@ def test_update_state_from_bbox_marks_invalid_area() -> None:
     update_state_from_bbox(state, FakeBBox(len_x=4160, len_y=4400))
 
     assert state.selected_area_valid is False
+
+
+def test_update_state_from_bbox_preserves_uploaded_osm_data() -> None:
+    from cm_terrain_extractor_app.app_core.state import OSM_DATA_SOURCE_UPLOADED, AppState
+    from cm_terrain_extractor_app.app_core.validation import update_state_from_bbox
+
+    osm_data = {"type": "FeatureCollection", "features": []}
+    osm_bbox = object()
+    state = AppState(
+        osm_data=osm_data,
+        osm_data_source=OSM_DATA_SOURCE_UPLOADED,
+        osm_bbox_object=osm_bbox,
+        osm_output=pd.DataFrame({"category": ["road"]}),
+        osm_geometries={"roads": []},
+    )
+    bbox = FakeBBox(len_x=1200, len_y=1000)
+
+    update_state_from_bbox(state, bbox)
+
+    assert state.bbox_object is bbox
+    assert state.osm_data is osm_data
+    assert state.osm_data_source == OSM_DATA_SOURCE_UPLOADED
+    assert state.osm_bbox_object is osm_bbox
+    assert state.osm_output is None
+    assert state.osm_geometries is None
+
+
+def test_update_state_from_uploaded_osm_data_uses_geojson_bbox_when_no_bbox_selected() -> None:
+    from cm_terrain_extractor_app.app_core.state import OSM_DATA_SOURCE_UPLOADED, AppState
+    from cm_terrain_extractor_app.app_core.validation import update_state_from_uploaded_osm_data
+
+    state = AppState()
+    osm_data = {"type": "FeatureCollection", "features": []}
+    osm_bbox = FakeBBox(len_x=1200, len_y=1000)
+
+    update_state_from_uploaded_osm_data(
+        state,
+        osm_data=osm_data,
+        osm_bbox_object=osm_bbox,
+    )
+
+    assert state.bbox_object is osm_bbox
+    assert state.selected_area_valid is True
+    assert state.osm_data is osm_data
+    assert state.osm_data_source == OSM_DATA_SOURCE_UPLOADED
+    assert state.osm_bbox_object is osm_bbox
+
+
+def test_update_state_from_uploaded_osm_data_keeps_existing_bbox_selected() -> None:
+    from cm_terrain_extractor_app.app_core.state import OSM_DATA_SOURCE_UPLOADED, AppState
+    from cm_terrain_extractor_app.app_core.validation import update_state_from_uploaded_osm_data
+
+    selected_bbox = FakeBBox(len_x=900, len_y=800)
+    osm_bbox = FakeBBox(len_x=1200, len_y=1000)
+    state = AppState(
+        bbox_object=selected_bbox,
+        selected_area_valid=True,
+        osm_output=pd.DataFrame({"category": ["road"]}),
+        osm_geometries={"roads": []},
+    )
+    osm_data = {"type": "FeatureCollection", "features": []}
+
+    update_state_from_uploaded_osm_data(
+        state,
+        osm_data=osm_data,
+        osm_bbox_object=osm_bbox,
+    )
+
+    assert state.bbox_object is selected_bbox
+    assert state.osm_data is osm_data
+    assert state.osm_data_source == OSM_DATA_SOURCE_UPLOADED
+    assert state.osm_bbox_object is osm_bbox
+    assert state.osm_output is None
+    assert state.osm_geometries is None

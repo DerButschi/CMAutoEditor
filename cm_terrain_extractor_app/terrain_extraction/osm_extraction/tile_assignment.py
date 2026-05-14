@@ -123,6 +123,15 @@ class _IntersectionSpec:
     cells: set[GridCell]
 
 
+@dataclass(frozen=True, slots=True)
+class _IntersectionEndpoint:
+    process: ProcessKind
+    node_id: int
+    node: GridNode
+    direction: str
+    cells_from_node: tuple[GridCell, ...]
+
+
 class TileAssigner:
     def __init__(
         self,
@@ -473,45 +482,105 @@ def _node_xy(node: GridNode | tuple[int, int]) -> tuple[int, int]:
 
 
 def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[ProcessKind, int], _IntersectionSpec]:
-    intersections: dict[tuple[ProcessKind, int], _IntersectionSpec] = {}
+    endpoints_by_key: dict[tuple[ProcessKind, int], list[_IntersectionEndpoint]] = {}
     for route in routes:
         if len(route.nodes) < 2:
             continue
-        _record_route_endpoint(
-            intersections,
+        _record_route_endpoint_candidate(
+            endpoints_by_key,
             process=route.process,
             node_id=route.start_node_id,
             node=route.nodes[0],
             direction=_direction_between_nodes(route.nodes[0], route.nodes[1]),
-            cell=route.cells[0] if route.cells else _cell_for_step(route.nodes[0], route.nodes[1]),
+            cells_from_node=route.cells or (_cell_for_step(route.nodes[0], route.nodes[1]),),
         )
-        _record_route_endpoint(
-            intersections,
+        _record_route_endpoint_candidate(
+            endpoints_by_key,
             process=route.process,
             node_id=route.end_node_id,
             node=route.nodes[-1],
             direction=_direction_between_nodes(route.nodes[-1], route.nodes[-2]),
-            cell=route.cells[-1] if route.cells else _cell_for_step(route.nodes[-2], route.nodes[-1]),
+            cells_from_node=tuple(reversed(route.cells or (_cell_for_step(route.nodes[-2], route.nodes[-1]),))),
         )
+
+    intersections: dict[tuple[ProcessKind, int], _IntersectionSpec] = {}
+    for key, endpoints in endpoints_by_key.items():
+        if not endpoints:
+            continue
+        intersection_cell = _intersection_cell_for_endpoints(endpoints)
+        valid_endpoints = tuple(
+            endpoint
+            for endpoint in endpoints
+            if _arm_continues_in_next_square(intersection_cell, endpoint.direction, endpoint.cells_from_node)
+        )
+        if not valid_endpoints:
+            continue
+        spec = _IntersectionSpec(
+            process=key[0],
+            node_id=key[1],
+            node=valid_endpoints[0].node,
+            directions=set(),
+            cells={intersection_cell},
+        )
+        for endpoint in valid_endpoints:
+            spec.directions.add(endpoint.direction)
+        intersections[key] = spec
     return intersections
 
 
-def _record_route_endpoint(
-    intersections: dict[tuple[ProcessKind, int], _IntersectionSpec],
+def _record_route_endpoint_candidate(
+    endpoints_by_key: dict[tuple[ProcessKind, int], list[_IntersectionEndpoint]],
     *,
     process: ProcessKind,
     node_id: int,
     node: GridNode,
     direction: str,
-    cell: GridCell,
+    cells_from_node: tuple[GridCell, ...],
 ) -> None:
-    key = (process, node_id)
-    spec = intersections.get(key)
-    if spec is None:
-        spec = _IntersectionSpec(process=process, node_id=node_id, node=node, directions=set(), cells=set())
-        intersections[key] = spec
-    spec.directions.add(direction)
-    spec.cells.add(cell)
+    endpoints_by_key.setdefault((process, node_id), []).append(
+        _IntersectionEndpoint(
+            process=process,
+            node_id=node_id,
+            node=node,
+            direction=direction,
+            cells_from_node=cells_from_node,
+        )
+    )
+
+
+def _arm_continues_in_next_square(
+    intersection_cell: GridCell,
+    direction: str,
+    cells_from_node: Iterable[GridCell],
+) -> bool:
+    return _next_cell(intersection_cell, direction) in set(cells_from_node)
+
+
+def _intersection_cell_for_endpoints(endpoints: Sequence[_IntersectionEndpoint]) -> GridCell:
+    node = endpoints[0].node
+    incident_cells = {cell for endpoint in endpoints for cell in endpoint.cells_from_node}
+    preferred = GridCell(node.xidx, node.yidx)
+    if preferred in incident_cells:
+        return preferred
+
+    cells = tuple(sorted(incident_cells, key=lambda cell: (cell.xidx, cell.yidx)))
+    if not cells:
+        return preferred
+
+    return max(
+        cells,
+        key=lambda cell: (
+            sum(
+                1
+                for endpoint in endpoints
+                if _arm_continues_in_next_square(cell, endpoint.direction, endpoint.cells_from_node)
+            ),
+            -abs(cell.xidx - node.xidx),
+            -abs(cell.yidx - node.yidx),
+            cell.xidx,
+            cell.yidx,
+        ),
+    )
 
 
 def _intersection_cell_for_node(node: GridNode, incident_cells: Iterable[GridCell]) -> GridCell:
@@ -536,6 +605,12 @@ def _direction_between_cells(first: GridCell, second: GridCell) -> str | None:
     if dy == 1:
         return "N"
     return "S"
+
+
+def _next_cell(cell: GridCell, direction: str) -> GridCell:
+    dx = 1 if "E" in direction else -1 if "W" in direction else 0
+    dy = 1 if "N" in direction else -1 if "S" in direction else 0
+    return GridCell(cell.xidx + dx, cell.yidx + dy)
 
 
 def _variants_connect(first: TileVariant, second: TileVariant, direction: str) -> bool:

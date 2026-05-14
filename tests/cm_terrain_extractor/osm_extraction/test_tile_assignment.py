@@ -57,9 +57,9 @@ def test_intersection_anchor_uses_one_tile_with_unioned_directions() -> None:
     catalog = CompiledTileCatalog.from_records(_catalog_rows(), process=ProcessKind.ROAD)
     routes = (
         _route(0, ProcessKind.ROAD, ((0, 1), (1, 1)), start_node_id=0, end_node_id=99),
-        _route(1, ProcessKind.ROAD, ((1, 1), (2, 1)), start_node_id=99, end_node_id=1),
+        _route(1, ProcessKind.ROAD, ((1, 1), (2, 1), (3, 1)), start_node_id=99, end_node_id=1),
         _route(2, ProcessKind.ROAD, ((1, 0), (1, 1)), start_node_id=2, end_node_id=99),
-        _route(3, ProcessKind.ROAD, ((1, 1), (1, 2)), start_node_id=99, end_node_id=3),
+        _route(3, ProcessKind.ROAD, ((1, 1), (1, 2), (1, 3)), start_node_id=99, end_node_id=3),
     )
 
     result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(routes)
@@ -96,8 +96,8 @@ def test_boundary_intersection_uses_adjacent_route_cell() -> None:
         process=ProcessKind.ROAD,
         config_name="primary",
         priority=1,
-        nodes=(GridNode(2, 1), boundary_node),
-        cells=(GridCell(2, 1),),
+        nodes=(GridNode(1, 1), GridNode(2, 1), boundary_node),
+        cells=(GridCell(1, 1), GridCell(2, 1)),
     )
     vertical_lower = RouteRecord(
         edge_id=1,
@@ -116,8 +116,8 @@ def test_boundary_intersection_uses_adjacent_route_cell() -> None:
         process=ProcessKind.ROAD,
         config_name="primary",
         priority=1,
-        nodes=(boundary_node, GridNode(3, 2)),
-        cells=(GridCell(2, 1),),
+        nodes=(boundary_node, GridNode(3, 2), GridNode(3, 3)),
+        cells=(GridCell(2, 1), GridCell(2, 2)),
     )
 
     result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(
@@ -153,9 +153,9 @@ def test_impossible_intersection_records_missing_direction_diagnostic() -> None:
     catalog = CompiledTileCatalog.from_records(_catalog_rows()[:2], process=ProcessKind.ROAD)
     routes = (
         _route(0, ProcessKind.ROAD, ((0, 1), (1, 1)), start_node_id=0, end_node_id=99),
-        _route(1, ProcessKind.ROAD, ((1, 1), (2, 1)), start_node_id=99, end_node_id=1),
+        _route(1, ProcessKind.ROAD, ((1, 1), (2, 1), (3, 1)), start_node_id=99, end_node_id=1),
         _route(2, ProcessKind.ROAD, ((1, 0), (1, 1)), start_node_id=2, end_node_id=99),
-        _route(3, ProcessKind.ROAD, ((1, 1), (1, 2)), start_node_id=99, end_node_id=3),
+        _route(3, ProcessKind.ROAD, ((1, 1), (1, 2), (1, 3)), start_node_id=99, end_node_id=3),
     )
 
     result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(routes)
@@ -164,6 +164,53 @@ def test_impossible_intersection_records_missing_direction_diagnostic() -> None:
     assert result.diagnostics["failed_assignments"] == 1
     assert result.failures[0]["failure_reason"] == "catalog_gap"
     assert result.failures[0]["required_directions"] == ("E", "N", "S", "W")
+
+
+def test_intersection_ignores_arm_that_does_not_continue_into_next_square() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    records = (
+        {"direction": 1, "row": 0, "col": 0, "r": (2, 3), "l": (2, 3), "cost": 1.0},
+        {"direction": 0, "row": 0, "col": 1, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+        {"direction": 3, "row": 2, "col": 2, "u": (2, 3), "d": (2, 3), "l": (2, 3), "cost": 0.1},
+    )
+    catalog = CompiledTileCatalog.from_records(records, process=ProcessKind.ROAD)
+    routes = (
+        _route(0, ProcessKind.ROAD, ((0, 1), (1, 1)), start_node_id=0, end_node_id=99),
+        _route(1, ProcessKind.ROAD, ((1, 0), (1, 1)), start_node_id=1, end_node_id=99),
+        _route(2, ProcessKind.ROAD, ((1, 1), (1, 2)), start_node_id=99, end_node_id=2),
+    )
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(routes)
+
+    assert result.success
+    assert result.diagnostics["intersection_assignments"] == 0
+    assert all(not placement.diagnostics.get("intersection") for placement in result.placements)
+
+
+def test_intersection_counts_arm_that_continues_into_next_square() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    records = (
+        {"direction": 0, "row": 0, "col": 0, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+        {"direction": 1, "row": 0, "col": 1, "r": (2, 3), "l": (2, 3), "cost": 1.0},
+        {"direction": 3, "row": 2, "col": 2, "u": (2, 3), "d": (2, 3), "l": (2, 3), "cost": 0.1},
+    )
+    catalog = CompiledTileCatalog.from_records(records, process=ProcessKind.ROAD)
+    routes = (
+        _route(0, ProcessKind.ROAD, ((0, 1), (1, 1)), start_node_id=0, end_node_id=99),
+        _route(1, ProcessKind.ROAD, ((1, 0), (1, 1)), start_node_id=1, end_node_id=99),
+        _route(2, ProcessKind.ROAD, ((1, 1), (1, 2), (1, 3)), start_node_id=99, end_node_id=2),
+    )
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(routes)
+
+    intersections = [placement for placement in result.placements if placement.diagnostics.get("intersection")]
+    assert len(intersections) == 1
+    assert intersections[0].cells == (GridCell(1, 1),)
+    assert intersections[0].diagnostics["required_directions"] == ("N", "S", "W")
 
 
 def test_candidate_choice_is_deterministic_for_equal_cost_variants() -> None:

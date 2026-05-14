@@ -473,6 +473,7 @@ class OSMProcessor:
 
     def _typed_features_from_matched_elements(self):
         features = []
+        clip_geometry = getattr(self, "effective_bbox_polygon", None)
         for fallback_index, element_entry in enumerate(self.matched_elements):
             name = element_entry["name"]
             try:
@@ -485,6 +486,13 @@ class OSMProcessor:
             for process in config_entry.processes:
                 if process is ProcessKind.DEFAULT:
                     continue
+                geometry = self._clip_feature_geometry_to_bbox(
+                    element_entry["geometry"],
+                    process=process,
+                    clip_geometry=clip_geometry,
+                )
+                if geometry is None:
+                    continue
                 features.append(
                     FeatureRecord(
                         feature_id=feature_id,
@@ -492,12 +500,23 @@ class OSMProcessor:
                         config_name=name,
                         process=process,
                         priority=config_entry.priority,
-                        geometry=element_entry["geometry"],
+                        geometry=geometry,
                         source_tags=source_tags,
                         source_properties=properties,
                     )
                 )
         return tuple(features)
+
+    @staticmethod
+    def _clip_feature_geometry_to_bbox(geometry, *, process, clip_geometry):
+        if clip_geometry is None:
+            return geometry
+        if process is ProcessKind.POINT:
+            return geometry if clip_geometry.covers(geometry) else None
+        if not geometry.intersects(clip_geometry):
+            return None
+        clipped = geometry.intersection(clip_geometry)
+        return None if clipped.is_empty else clipped
 
     @staticmethod
     def _element_properties(element):

@@ -29,6 +29,7 @@ def test_app_state_defaults_match_contract() -> None:
     assert state.osm_config is None
     assert state.osm_profile == "cold_war"
     assert state.osm_data is None
+    assert state.osm_data_source is None
     assert state.osm_bbox_object is None
     assert state.osm_output is None
     assert state.osm_geometries is None
@@ -37,6 +38,7 @@ def test_app_state_defaults_match_contract() -> None:
 
 def test_clear_bbox_dependent_results_preserves_user_map_and_osm_choices() -> None:
     from cm_terrain_extractor_app.app_core.state import (
+        OSM_DATA_SOURCE_DOWNLOADED,
         AppState,
         clear_bbox_dependent_results,
     )
@@ -50,6 +52,7 @@ def test_clear_bbox_dependent_results_preserves_user_map_and_osm_choices() -> No
         osm_config={"roads": {"visualization": {}}},
         osm_profile="cold_war",
         osm_data={"type": "FeatureCollection", "features": []},
+        osm_data_source=OSM_DATA_SOURCE_DOWNLOADED,
         osm_bbox_object=object(),
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
@@ -65,6 +68,7 @@ def test_clear_bbox_dependent_results_preserves_user_map_and_osm_choices() -> No
     assert state.elevation_in_bbox is None
     assert state.height_map_png is None
     assert state.osm_data is None
+    assert state.osm_data_source is None
     assert state.osm_bbox_object is None
     assert state.osm_output is None
     assert state.osm_geometries is None
@@ -74,6 +78,40 @@ def test_clear_bbox_dependent_results_preserves_user_map_and_osm_choices() -> No
     assert state.map_mode == "OpenStreetMap"
     assert state.map_center == (51.0, 7.0)
     assert state.map_zoom == 11
+
+
+def test_clear_bbox_dependent_results_preserves_uploaded_osm_data() -> None:
+    from cm_terrain_extractor_app.app_core.state import (
+        OSM_DATA_SOURCE_UPLOADED,
+        AppState,
+        clear_bbox_dependent_results,
+    )
+
+    osm_data = {"type": "FeatureCollection", "features": []}
+    osm_bbox = object()
+    state = AppState(
+        available_data_sources=["source-a"],
+        selected_data_source="source-a",
+        elevation_in_bbox=pd.DataFrame({"height": [1]}),
+        height_map_png=Path("height.png"),
+        osm_data=osm_data,
+        osm_data_source=OSM_DATA_SOURCE_UPLOADED,
+        osm_bbox_object=osm_bbox,
+        osm_output=pd.DataFrame({"category": ["road"]}),
+        osm_geometries={"roads": []},
+    )
+
+    clear_bbox_dependent_results(state)
+
+    assert state.available_data_sources == []
+    assert state.selected_data_source is None
+    assert state.elevation_in_bbox is None
+    assert state.height_map_png is None
+    assert state.osm_data is osm_data
+    assert state.osm_data_source == OSM_DATA_SOURCE_UPLOADED
+    assert state.osm_bbox_object is osm_bbox
+    assert state.osm_output is None
+    assert state.osm_geometries is None
 
 
 def test_clear_elevation_result_invalidates_selected_source_output_only() -> None:
@@ -110,6 +148,7 @@ def test_clear_osm_processing_result_invalidates_config_profile_outputs_only() -
         osm_config={"roads": {"visualization": {}}},
         osm_profile="cold_war",
         osm_data={"type": "FeatureCollection", "features": []},
+        osm_data_source="uploaded",
         osm_bbox_object=object(),
         osm_output=pd.DataFrame({"category": ["road"]}),
         osm_geometries={"roads": []},
@@ -122,6 +161,7 @@ def test_clear_osm_processing_result_invalidates_config_profile_outputs_only() -
     assert state.osm_config == {"roads": {"visualization": {}}}
     assert state.osm_profile == "cold_war"
     assert state.osm_data == {"type": "FeatureCollection", "features": []}
+    assert state.osm_data_source == "uploaded"
     assert state.osm_bbox_object is not None
     assert state.osm_output is None
     assert state.osm_geometries is None

@@ -3,8 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from cm_terrain_extractor_app.app_core.state import (
+    OSM_DATA_SOURCE_UPLOADED,
     AppState,
     clear_bbox_dependent_results,
+    clear_osm_processing_result,
 )
 
 MAX_LEN_X_METERS = 4160
@@ -40,3 +42,18 @@ def update_state_from_bbox(state: AppState, bbox_object: Any) -> None:
     state.selected_area_valid = is_selected_area_valid(state.len_x, state.len_y)
     state.bbox_origin = 0
     clear_bbox_dependent_results(state)
+
+
+def update_state_from_uploaded_osm_data(
+    state: AppState,
+    *,
+    osm_data: dict,
+    osm_bbox_object: Any,
+) -> None:
+    state.osm_data = osm_data
+    state.osm_data_source = OSM_DATA_SOURCE_UPLOADED
+    state.osm_bbox_object = osm_bbox_object
+    if state.bbox_object is None:
+        update_state_from_bbox(state, osm_bbox_object)
+    else:
+        clear_osm_processing_result(state)
