@@ -135,7 +135,7 @@ def test_debug_layers_include_sources_topology_routes_anchors_occupancy_building
                 config_name="road",
                 priority=2,
                 nodes=(GridNode(0, 1), GridNode(1, 1), GridNode(2, 1)),
-                cells=(GridCell(0, 1), road_cell, GridCell(2, 1)),
+                tile_cells=(GridCell(0, 1), road_cell, GridCell(2, 1)),
                 diagnostics={"detour_ratio": 1.2},
             ),
         ),

@@ -14,10 +14,7 @@ def _route(edge_id, process, nodes, *, start_node_id=0, end_node_id=1, config_na
     from terrain_extraction.osm_extraction.models import GridCell, GridNode, RouteRecord
 
     grid_nodes = tuple(GridNode(xidx, yidx) for xidx, yidx in nodes)
-    cells = tuple(
-        GridCell(min(a.xidx, b.xidx), min(a.yidx, b.yidx))
-        for a, b in zip(grid_nodes, grid_nodes[1:], strict=False)
-    )
+    tile_cells = tuple(GridCell(node.xidx, node.yidx) for node in grid_nodes)
     return RouteRecord(
         edge_id=edge_id,
         start_node_id=start_node_id,
@@ -26,7 +23,7 @@ def _route(edge_id, process, nodes, *, start_node_id=0, end_node_id=1, config_na
         config_name=config_name,
         priority=1,
         nodes=grid_nodes,
-        cells=cells,
+        tile_cells=tile_cells,
         cm_type=cm_type,
     )
 
@@ -98,7 +95,7 @@ def test_boundary_intersection_uses_adjacent_route_cell() -> None:
         config_name="primary",
         priority=1,
         nodes=(GridNode(1, 1), GridNode(2, 1), boundary_node),
-        cells=(GridCell(1, 1), GridCell(2, 1)),
+        tile_cells=(GridCell(1, 1), GridCell(2, 1)),
     )
     vertical_lower = RouteRecord(
         edge_id=1,
@@ -108,7 +105,7 @@ def test_boundary_intersection_uses_adjacent_route_cell() -> None:
         config_name="primary",
         priority=1,
         nodes=(GridNode(3, 0), boundary_node),
-        cells=(GridCell(2, 0),),
+        tile_cells=(GridCell(2, 0),),
     )
     vertical_upper = RouteRecord(
         edge_id=2,
@@ -118,7 +115,7 @@ def test_boundary_intersection_uses_adjacent_route_cell() -> None:
         config_name="primary",
         priority=1,
         nodes=(boundary_node, GridNode(3, 2), GridNode(3, 3)),
-        cells=(GridCell(2, 1), GridCell(2, 2)),
+        tile_cells=(GridCell(2, 1), GridCell(2, 2)),
     )
 
     result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(
@@ -279,7 +276,9 @@ def test_impossible_intersection_records_missing_direction_diagnostic() -> None:
 
 
 def test_intersection_ignores_arm_that_does_not_continue_into_next_square() -> None:
-    from terrain_extraction.osm_extraction.models import ProcessKind
+    from dataclasses import replace
+
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
     from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
 
     records = (
@@ -291,7 +290,10 @@ def test_intersection_ignores_arm_that_does_not_continue_into_next_square() -> N
     routes = (
         _route(0, ProcessKind.ROAD, ((0, 1), (1, 1)), start_node_id=0, end_node_id=99),
         _route(1, ProcessKind.ROAD, ((1, 0), (1, 1)), start_node_id=1, end_node_id=99),
-        _route(2, ProcessKind.ROAD, ((1, 1), (1, 2)), start_node_id=99, end_node_id=2),
+        replace(
+            _route(2, ProcessKind.ROAD, ((1, 1), (1, 2)), start_node_id=99, end_node_id=2),
+            tile_cells=(GridCell(1, 1),),
+        ),
     )
 
     result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(routes)
@@ -469,7 +471,7 @@ def test_adjacent_route_tiles_must_have_matching_catalog_connections() -> None:
     result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(11)).assign((route,))
 
     assert result.success
-    assert [placement.diagnostics["tile_row"] for placement in result.placements] == [1, 1]
+    assert [placement.diagnostics["tile_row"] for placement in result.placements] == [1, 1, 1]
 
 
 def test_pipeline_runs_tile_assignment_without_migration_flag() -> None:
@@ -491,6 +493,6 @@ def test_pipeline_runs_tile_assignment_without_migration_flag() -> None:
         catalogs={ProcessKind.ROAD: catalog},
     )
 
-    assert result.stats.counts["tile_assignments_succeeded"] == 1
+    assert result.stats.counts["tile_assignments_succeeded"] == 2
     assert result.placements[0].cm_type.cat2 == "Road Tile 1"
     assert result.diagnostics["tile_assignment"].success

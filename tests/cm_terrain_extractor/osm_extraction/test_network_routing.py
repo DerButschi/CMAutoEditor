@@ -72,12 +72,12 @@ def test_routes_simple_topology_edge_on_integer_grid() -> None:
         *result.routes[0].nodes[1:-1],
         result.node_anchors[1],
     )
-    assert result.routes[0].cells == (
-        result.routes[0].cells[0],
-        *result.routes[0].cells[1:],
+    assert result.routes[0].tile_cells == (
+        result.routes[0].tile_cells[0],
+        *result.routes[0].tile_cells[1:],
     )
     assert [node.xidx for node in result.routes[0].nodes] == [0, 1, 2, 3, 4]
-    assert {cell.yidx for cell in result.routes[0].cells} == {0}
+    assert {cell.yidx for cell in result.routes[0].tile_cells} == {0}
     assert result.routes[0].diagnostics["detour_ratio"] == pytest.approx(1.0)
 
 
@@ -89,7 +89,7 @@ def test_route_cells_are_output_cells_not_grid_corner_edges() -> None:
     route = NetworkRouter(grid_index=_grid()).route(_graph((edge,))).routes[0]
 
     assert route.success
-    assert route.cells == (GridCell(0, 0), GridCell(1, 0), GridCell(2, 0), GridCell(3, 0))
+    assert route.tile_cells == (GridCell(0, 0), GridCell(1, 0), GridCell(2, 0), GridCell(3, 0))
 
 
 def test_route_follows_preserved_linestring_bend() -> None:
@@ -112,7 +112,7 @@ def test_route_follows_preserved_linestring_bend() -> None:
     route = NetworkRouter(grid_index=_grid(), corridor_deviation_m=8.0).route(_graph((edge,))).routes[0]
 
     assert route.success
-    assert route.cells == (
+    assert route.tile_cells == (
         GridCell(0, 0),
         GridCell(0, 1),
         GridCell(0, 2),
@@ -135,8 +135,8 @@ def test_routes_around_blocked_occupancy_inside_corridor() -> None:
     route = NetworkRouter(grid_index=_grid(), occupancy=occupancy, corridor_deviation_m=16.0).route(_graph((edge,))).routes[0]
 
     assert route.success
-    assert GridCell(2, 0) not in route.cells
-    assert max(cell.yidx for cell in route.cells) > 0
+    assert GridCell(2, 0) not in route.tile_cells
+    assert max(cell.yidx for cell in route.tile_cells) > 0
     assert route.diagnostics["blocked_cells_considered"] >= 1
 
 
@@ -149,7 +149,7 @@ def test_boundary_route_clamps_to_last_output_cell() -> None:
 
     assert route.success
     assert [node.yidx for node in route.nodes] == [175, 175]
-    assert route.cells == (GridCell(76, 175), GridCell(77, 175))
+    assert route.tile_cells == (GridCell(76, 175), GridCell(77, 175))
 
 
 def test_incident_edges_share_one_integer_anchor() -> None:
@@ -199,7 +199,7 @@ def test_minor_route_gets_wider_retry_before_failure() -> None:
 
     assert route.success
     assert route.diagnostics["forced_relaxation"] == "minor_corridor"
-    assert max(cell.yidx for cell in route.cells) == 2
+    assert max(cell.yidx for cell in route.tile_cells) == 2
 
 
 def test_failed_route_is_explicit_and_counted() -> None:

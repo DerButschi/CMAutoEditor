@@ -17,7 +17,7 @@ Future agents and humans must update this document after each milestone. Record 
 | Milestone | Name | Status | Owner | Last updated | Notes |
 | --- | --- | --- | --- | --- | --- |
 | M0 | Semantic regression harness | Complete | Codex | 2026-05-15 | Added six network recovery fixtures, `run_osm_extraction_fixture`, `ExtractionTestResult`, road graph reconstruction, debug capture, ASCII grids, and an xfailed four-way road case. |
-| M1 | Route node vs tile-cell contract | Not started | Unassigned | 2026-05-15 | Remove ambiguous `RouteRecord.cells` semantics or replace with direct cell-path routing. |
+| M1 | Route node vs tile-cell contract | Complete | Codex | 2026-05-15 | Replaced ambiguous `RouteRecord.cells` with explicit direct `RouteRecord.tile_cells`; routing, tile assignment, debug export, tests, and recovery diagnostics now consume tile cells. |
 | M2 | Raster-spine / line-support extraction | Not started | Unassigned | 2026-05-15 | Add source-line support cells and route/spine diagnostics. |
 | M3 | Tile catalog feasibility oracle | Not started | Unassigned | 2026-05-15 | Extend `CompiledTileCatalog` with pre-assignment direction-set feasibility. |
 | M4 | `LinearNetworkState` | Not started | Unassigned | 2026-05-15 | Add persistent linear connection state and debug layer. |
@@ -43,6 +43,8 @@ Future agents and humans must update this document after each milestone. Record 
 | 2026-05-15 | Keep the current implementation facts in the exec plan as actionable context, not as contract overrides. | The source plan is authoritative, while implementation facts help future agents locate the first changes. | Codex |
 | 2026-05-15 | Implement M0 as test harness and fixtures only, with no road algorithm changes or debug production-code changes. | Existing `OSMProcessor` state and `get_debug_layers()` expose enough topology, routing, placement, row, and debug-layer information for the semantic harness. | Codex |
 | 2026-05-15 | Track `four_way_crossing` as an explicit xfailed red fixture. | The fixture documents the expected future outcome: one connected, legal 4-way intersection after tile-feasible intersection and persistent linear-state milestones. | Codex |
+| 2026-05-15 | Use Model C direct cell-path routing for M1. | The current router already searches over cell-coordinate anchors; exposing ordered `tile_cells` directly removes node/cell ambiguity with the narrowest production change. | Codex |
+| 2026-05-15 | Remove the public `RouteRecord.cells` field instead of keeping a compatibility alias. | The recovery contract forbids ambiguous route-cell semantics; tests and debug consumers were migrated to `tile_cells`. | Codex |
 
 ## Contract Changes Requested or Approved
 
@@ -64,6 +66,7 @@ No further contract changes have been requested or approved.
 | 2026-05-15 | Current code | Accepted routes do not yet update an explicit persistent `LinearNetworkState`. | The old graph kept hidden connection state; the typed path needs an inspectable equivalent. | Milestone M4. |
 | 2026-05-15 | Current code | Anchor selection is still too close to nearest-cell snapping. | Legal CM intersections require tile-aware candidate scoring and split/failure planning. | Milestone M5. |
 | 2026-05-15 | M0 | The network recovery helper uses a file-level ruff import-order/E402 waiver because tests extend `sys.path` before importing app modules. | Existing local test pattern imports app modules this way; changing global test import setup is outside M0. | Consider a shared test import/conftest cleanup outside network recovery milestones. |
+| 2026-05-15 | M1 | Endpoint cells owned by fixed intersection variants can skip route-placement mismatch checks when the route endpoint's local straight-tile requirement is broader than the intersection tile. | Direct cell paths make endpoint cells visible to both route and intersection placement; a full connection-state validator is intentionally deferred. | Milestone M8. |
 
 ## Test and Validation Results
 
@@ -74,6 +77,11 @@ No further contract changes have been requested or approved.
 | 2026-05-15 | M0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_network_recovery_harness.py -q` | Failed as expected before helper implementation | Collection failed because `tests.cm_terrain_extractor.osm_extraction.network_recovery_helpers` did not exist yet. This was the intended red harness API test. |
 | 2026-05-15 | M0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_network_recovery_harness.py -v` | Passed | Final result: 14 passed, 1 xfailed. Xfail is `test_four_way_crossing_has_a_single_legal_four_way_intersection`. Pytest emitted dependency deprecation warnings and a `PytestCacheWarning` because `.pytest_cache` nodeids could not be written in the sandbox. |
 | 2026-05-15 | M0 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check tests\cm_terrain_extractor\osm_extraction\network_recovery_helpers.py tests\cm_terrain_extractor\osm_extraction\test_network_recovery_harness.py --no-cache` | Passed | `ruff --fix` was attempted once and hit Windows access denied on the helper file; the style issue was then fixed manually and the final check passed. |
+| 2026-05-15 | M1 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_route_cell_contract.py -q` | Failed as expected before model implementation | New M1 contract tests failed because `RouteRecord` did not accept or expose `tile_cells` yet. |
+| 2026-05-15 | M1 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_route_cell_contract.py tests\cm_terrain_extractor\osm_extraction\test_network_routing.py tests\cm_terrain_extractor\osm_extraction\test_tile_assignment.py -v` | Passed | Final result: 34 passed. Pytest emitted dependency deprecation warnings and a `.pytest_cache` permission warning in the sandbox. |
+| 2026-05-15 | M1 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_network_recovery_harness.py -v` | Passed | Final result: 14 passed, 1 xfailed. The xfail remains `test_four_way_crossing_has_a_single_legal_four_way_intersection`. Pytest emitted dependency deprecation warnings and a `.pytest_cache` permission warning in the sandbox. |
+| 2026-05-15 | M1 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_debug_export.py -q` | Passed | Final result: 4 passed. Run because `debug_export.py` changed from `cells` to `tile_cells`. |
+| 2026-05-15 | M1 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check cm_terrain_extractor_app\terrain_extraction\osm_extraction\models.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\network_routing.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\tile_assignment.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\debug_export.py tests\cm_terrain_extractor\osm_extraction --no-cache` | Passed | First run reported an unused import and import-order issues in `test_route_cell_contract.py`; after manual cleanup, final ruff passed. |
 
 ## Blockers and Residual Risk
 
@@ -87,6 +95,8 @@ No further contract changes have been requested or approved.
 | 2026-05-15 | M0 | `four_way_crossing` is xfailed, not fixed. | The harness now preserves a reproducible red scenario for later milestones; it does not claim current four-way output is semantically legal. | M4-M8 should turn this into a passing semantic road invariant after linear state, anchor planning, routing, and tile assignment are repaired. |
 | 2026-05-15 | M0 | The helper's road graph reconstructs only road-tile config rows from post-process rows and checks orthogonal connectivity plus catalog-backed direction sets for degree 2+. | This is sufficient for M0 diagnostics but not the final authoritative output validator promised in M9. | Keep M9 as the owner of strict final-row validation and visual debug rendering. |
 | 2026-05-15 | M0 | Pytest passed despite `.pytest_cache` write warnings in the sandbox. | Cache warnings do not affect harness correctness, but repeated runs may not benefit from pytest cache state. | No code action needed; record if cache writes become hard failures in future validation. |
+| 2026-05-15 | M1 | M1 resolved known `RouteRecord.cells` compatibility risk in M1-owned tests and debug helpers. | Production road output no longer consumes ambiguous route cells. | Continue with M2 raster-spine work; watch for any non-M1 tests or downstream callers outside the current validation set that still construct old `RouteRecord(cells=...)`. |
+| 2026-05-15 | M1 | `four_way_crossing` remains xfailed. | M1 only clarified cell-path semantics; legal 4-way recovery still needs persistent connection state, anchor planning, tile-feasible routing, and final validation. | Milestones M4-M9. |
 
 ## Status Update Procedure
 

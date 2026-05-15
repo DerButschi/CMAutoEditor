@@ -272,7 +272,7 @@ class NetworkRouter:
             config_name=record.config_name,
             priority=record.priority,
             nodes=record.nodes,
-            cells=record.cells,
+            tile_cells=record.tile_cells,
             success=True,
             diagnostics=diagnostics,
             cm_type=record.cm_type,
@@ -287,7 +287,7 @@ class NetworkRouter:
         soft_crossings: int,
         degrees: Mapping[int, int],
     ) -> RouteRecord:
-        cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
+        tile_cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
         route_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
         source_length = edge.geometry.length
         diagnostics = {
@@ -308,7 +308,7 @@ class NetworkRouter:
             config_name=edge.config_name,
             priority=edge.priority,
             nodes=nodes,
-            cells=cells,
+            tile_cells=tile_cells,
             success=True,
             diagnostics=diagnostics,
             cm_type=edge.cm_type,

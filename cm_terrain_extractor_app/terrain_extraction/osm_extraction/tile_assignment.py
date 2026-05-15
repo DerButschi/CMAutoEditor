@@ -266,14 +266,18 @@ class TileAssigner:
         if not specs:
             return ()
 
+        active_specs: list[_RouteCellSpec] = []
         candidate_columns: list[tuple[TileVariant, ...]] = []
         fixed_columns: set[int] = set()
         for spec in specs:
             fixed_variant = fixed_variants.get((route.process, spec.cell))
             if fixed_variant is not None:
                 if not spec.required_directions.issubset(fixed_variant.directions):
+                    if spec.cell in {specs[0].cell, specs[-1].cell}:
+                        continue
                     failures.append(_failure(route.process, spec.cell, spec.required_directions, "fixed_tile_mismatch"))
                     return ()
+                active_specs.append(spec)
                 fixed_columns.add(len(candidate_columns))
                 candidate_columns.append((fixed_variant,))
                 continue
@@ -282,7 +286,12 @@ class TileAssigner:
             if not candidates:
                 failures.append(_failure(route.process, spec.cell, spec.required_directions, "catalog_gap"))
                 return ()
+            active_specs.append(spec)
             candidate_columns.append(candidates)
+
+        specs = tuple(active_specs)
+        if not specs:
+            return ()
 
         selected = self._least_cost_compatible_path(specs, candidate_columns, fixed_columns=fixed_columns)
         if selected is None:
@@ -476,125 +485,27 @@ def _required_directions_for_nodes(first: GridNode, second: GridNode) -> frozens
 
 
 def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
-    route_cells = _normalized_route_cells(route)
-    if len(route_cells) == len(route.nodes):
-        step_cells = list(route_cells)
-    else:
-        step_cells = []
-        for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False)):
-            cell = route_cells[step_index] if step_index < len(route_cells) else _cell_for_step(start, end)
-            if not step_cells or step_cells[-1] != cell:
-                step_cells.append(cell)
-
-    if not step_cells:
+    tile_cells = route.tile_cells
+    if not tile_cells:
         return ()
 
-    first_step_direction = _direction_between_nodes(route.nodes[0], route.nodes[1])
-    last_step_direction = _direction_between_nodes(route.nodes[-2], route.nodes[-1])
     specs = []
-    for cell_index, cell in enumerate(step_cells):
+    for cell_index, cell in enumerate(tile_cells):
         directions = set()
         if cell_index > 0:
-            direction = _direction_between_cells(cell, step_cells[cell_index - 1])
+            direction = _direction_between_cells(cell, tile_cells[cell_index - 1])
             if direction is not None:
                 directions.add(direction)
-        if cell_index < len(step_cells) - 1:
-            direction = _direction_between_cells(cell, step_cells[cell_index + 1])
+        if cell_index < len(tile_cells) - 1:
+            direction = _direction_between_cells(cell, tile_cells[cell_index + 1])
             if direction is not None:
                 directions.add(direction)
-        if cell_index == 0:
-            directions.add(_OPPOSITE_DIRECTIONS[first_step_direction])
-        if cell_index == len(step_cells) - 1:
-            directions.add(last_step_direction)
+        if not directions:
+            continue
         if len(directions) == 1:
             directions.add(_OPPOSITE_DIRECTIONS[next(iter(directions))])
         specs.append(_RouteCellSpec(cell=cell, required_directions=frozenset(directions)))
     return tuple(specs)
-
-
-def _normalized_route_cells(route: RouteRecord) -> tuple[GridCell, ...]:
-    if len(route.nodes) < 2:
-        return ()
-    if len(route.cells) == len(route.nodes):
-        return route.cells
-    candidate_columns = [
-        _candidate_cells_for_step(start, end, route.cells[step_index] if step_index < len(route.cells) else None)
-        for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False))
-    ]
-    selected = _least_diagonal_cell_path(candidate_columns)
-    if selected is None:
-        return route.cells
-    return selected
-
-
-def _candidate_cells_for_step(start: GridNode, end: GridNode, default_cell: GridCell | None) -> tuple[GridCell, ...]:
-    default = default_cell or _cell_for_step(start, end)
-    try:
-        direction = _direction_between_nodes(start, end)
-    except ValueError:
-        return (default,)
-
-    if direction in {"E", "W"}:
-        xidx = min(start.xidx, end.xidx)
-        candidates = (GridCell(xidx, start.yidx), GridCell(xidx, start.yidx - 1))
-    elif direction in {"N", "S"}:
-        yidx = min(start.yidx, end.yidx)
-        candidates = (GridCell(start.xidx, yidx), GridCell(start.xidx - 1, yidx))
-    else:
-        candidates = (default,)
-
-    valid = tuple(dict.fromkeys(cell for cell in (default, *candidates) if cell.xidx >= 0 and cell.yidx >= 0))
-    return valid or (default,)
-
-
-def _least_diagonal_cell_path(candidate_columns: Sequence[tuple[GridCell, ...]]) -> tuple[GridCell, ...] | None:
-    if not candidate_columns:
-        return ()
-
-    costs: dict[tuple[int, int], float] = {}
-    previous: dict[tuple[int, int], tuple[int, int] | None] = {}
-    for candidate_index, _candidate in enumerate(candidate_columns[0]):
-        costs[(0, candidate_index)] = 0.0 if candidate_index == 0 else 0.01
-        previous[(0, candidate_index)] = None
-
-    for column_index in range(1, len(candidate_columns)):
-        for candidate_index, candidate in enumerate(candidate_columns[column_index]):
-            best: tuple[float, tuple[int, int]] | None = None
-            for previous_index, previous_candidate in enumerate(candidate_columns[column_index - 1]):
-                previous_key = (column_index - 1, previous_index)
-                if previous_key not in costs:
-                    continue
-                transition_cost = _cell_transition_cost(previous_candidate, candidate)
-                default_cost = 0.0 if candidate_index == 0 else 0.01
-                path_cost = costs[previous_key] + transition_cost + default_cost
-                if best is None or path_cost < best[0]:
-                    best = (path_cost, previous_key)
-            if best is None:
-                continue
-            costs[(column_index, candidate_index)] = best[0]
-            previous[(column_index, candidate_index)] = best[1]
-
-    final_column = len(candidate_columns) - 1
-    final_keys = [key for key in costs if key[0] == final_column]
-    if not final_keys:
-        return None
-    key = min(final_keys, key=lambda item: (costs[item], item[1]))
-    selected: list[GridCell] = []
-    while key is not None:
-        selected.append(candidate_columns[key[0]][key[1]])
-        key = previous[key]
-    selected.reverse()
-    return tuple(selected)
-
-
-def _cell_transition_cost(first: GridCell, second: GridCell) -> float:
-    dx = abs(second.xidx - first.xidx)
-    dy = abs(second.yidx - first.yidx)
-    if dx == 0 and dy == 0:
-        return 0.0
-    if dx + dy == 1:
-        return 0.0
-    return 100.0
 
 
 def _node_xy(node: GridNode | tuple[int, int]) -> tuple[int, int]:
@@ -606,15 +517,15 @@ def _node_xy(node: GridNode | tuple[int, int]) -> tuple[int, int]:
 def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[ProcessKind, int], _IntersectionSpec]:
     endpoints_by_key: dict[tuple[ProcessKind, int], list[_IntersectionEndpoint]] = {}
     for route in routes:
-        if len(route.nodes) < 2:
+        if len(route.nodes) < 2 or not route.tile_cells:
             continue
         _record_route_endpoint_candidate(
             endpoints_by_key,
             process=route.process,
             node_id=route.start_node_id,
             node=route.nodes[0],
-            direction=_direction_between_nodes(route.nodes[0], route.nodes[1]),
-            cells_from_node=route.cells or (_cell_for_step(route.nodes[0], route.nodes[1]),),
+            direction=_start_endpoint_direction(route),
+            cells_from_node=route.tile_cells,
             cm_type=route.cm_type,
         )
         _record_route_endpoint_candidate(
@@ -622,8 +533,8 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
             process=route.process,
             node_id=route.end_node_id,
             node=route.nodes[-1],
-            direction=_direction_between_nodes(route.nodes[-1], route.nodes[-2]),
-            cells_from_node=tuple(reversed(route.cells or (_cell_for_step(route.nodes[-2], route.nodes[-1]),))),
+            direction=_end_endpoint_direction(route),
+            cells_from_node=tuple(reversed(route.tile_cells)),
             cm_type=route.cm_type,
         )
 
@@ -651,6 +562,22 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
             spec.directions.add(endpoint.direction)
         intersections[key] = spec
     return intersections
+
+
+def _start_endpoint_direction(route: RouteRecord) -> str:
+    if len(route.tile_cells) >= 2:
+        direction = _direction_between_cells(route.tile_cells[0], route.tile_cells[1])
+        if direction is not None:
+            return direction
+    return _direction_between_nodes(route.nodes[0], route.nodes[1])
+
+
+def _end_endpoint_direction(route: RouteRecord) -> str:
+    if len(route.tile_cells) >= 2:
+        direction = _direction_between_cells(route.tile_cells[-1], route.tile_cells[-2])
+        if direction is not None:
+            return direction
+    return _direction_between_nodes(route.nodes[-1], route.nodes[-2])
 
 
 def _record_route_endpoint_candidate(
@@ -743,10 +670,6 @@ def _intersection_cell_for_node(node: GridNode, incident_cells: Iterable[GridCel
     preferred = GridCell(node.xidx, node.yidx)
     cells = tuple(sorted(incident_cells, key=lambda cell: (cell.xidx, cell.yidx)))
     return preferred if preferred in cells or not cells else cells[-1]
-
-
-def _cell_for_step(start: GridNode, end: GridNode) -> GridCell:
-    return GridCell(min(start.xidx, end.xidx), min(start.yidx, end.yidx))
 
 
 def _direction_between_cells(first: GridCell, second: GridCell) -> str | None:

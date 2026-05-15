@@ -383,7 +383,7 @@ def _diagnostics(
                 {
                     "edge_id": route.edge_id,
                     "node_count": len(route.nodes),
-                    "cell_count": len(route.cells),
+                    "cell_count": len(route.tile_cells),
                 }
                 for route in routes
             ),

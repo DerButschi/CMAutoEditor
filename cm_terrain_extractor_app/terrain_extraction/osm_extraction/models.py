@@ -191,14 +191,14 @@ class RouteRecord:
     config_name: str
     priority: int
     nodes: tuple[GridNode, ...] = ()
-    cells: tuple[GridCell, ...] = ()
+    tile_cells: tuple[GridCell, ...] = ()
     success: bool = True
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
     cm_type: CMType | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "nodes", tuple(self.nodes))
-        object.__setattr__(self, "cells", tuple(self.cells))
+        object.__setattr__(self, "tile_cells", tuple(self.tile_cells))
         object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
 
 

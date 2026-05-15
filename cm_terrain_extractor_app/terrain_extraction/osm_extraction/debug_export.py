@@ -302,7 +302,7 @@ def _route_geometry(route: Any, grid_index: Any) -> BaseGeometry:
         return LineString()
     points = [_node_point(node, grid_index) for node in route.nodes]
     if len(points) < 2:
-        points = [grid_index.cell_center(cell) for cell in route.cells]
+        points = [grid_index.cell_center(cell) for cell in route.tile_cells]
     if len(points) < 2:
         return points[0] if points else LineString()
     return LineString([(point.x, point.y) for point in points])
