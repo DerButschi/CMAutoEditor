@@ -1,0 +1,42 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3008,
+        "tags": {
+          "highway": "residential"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00000, 50.00020],
+          [7.00100, 50.00020]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3009,
+        "tags": {
+          "building": "yes"
+        }
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [7.00042, 50.00026],
+            [7.00058, 50.00026],
+            [7.00058, 50.00042],
+            [7.00042, 50.00042],
+            [7.00042, 50.00026]
+          ]
+        ]
+      }
+    }
+  ]
+}
