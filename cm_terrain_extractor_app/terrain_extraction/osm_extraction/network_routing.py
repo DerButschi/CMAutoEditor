@@ -17,11 +17,13 @@ from terrain_extraction.osm_extraction.models import (
     NetworkRoutingResult,
     PlacementRecord,
     ProcessKind,
+    RasterSpine,
     RouteRecord,
     TopologyEdge,
     TopologyGraph,
 )
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
 
 _DIRECTION_STEPS = {
     "N": (0, 1),
@@ -131,6 +133,11 @@ class NetworkRouter:
     ) -> RouteRecord:
         start = anchors[edge.start_node_id]
         goal = anchors[edge.end_node_id]
+        raster_spine = build_raster_spine(
+            topology_edge_id=edge.edge_id,
+            line=edge.geometry,
+            grid_index=self.grid_index,
+        )
         attempts: list[tuple[str | None, float, bool]] = [(None, self.corridor_deviation_m, False)]
         if self._is_minor(edge) and self.minor_relaxation_m > self.corridor_deviation_m:
             attempts.append(("minor_corridor", self.minor_relaxation_m, False))
@@ -139,13 +146,29 @@ class NetworkRouter:
 
         total_blocked = 0
         for relaxation, corridor_m, soft_crossing in attempts:
-            attempt = self._a_star(edge.geometry, start, goal, corridor_m, self._layer_for_edge(edge), soft_crossing)
+            attempt = self._a_star(
+                edge.geometry,
+                start,
+                goal,
+                corridor_m,
+                self._layer_for_edge(edge),
+                soft_crossing,
+                raster_spine,
+            )
             total_blocked += attempt.blocked_cells_considered
             if attempt.success:
-                return self._record_success(edge, attempt.nodes, relaxation, total_blocked, attempt.soft_crossings, degrees)
+                return self._record_success(
+                    edge,
+                    attempt.nodes,
+                    relaxation,
+                    total_blocked,
+                    attempt.soft_crossings,
+                    degrees,
+                    raster_spine,
+                )
 
         if edge.geometry.length > self.split_long_edge_m:
-            split_record = self._try_split_route(edge, start, goal, degrees)
+            split_record = self._try_split_route(edge, start, goal, degrees, raster_spine)
             if split_record is not None:
                 return split_record
 
@@ -156,11 +179,13 @@ class NetworkRouter:
             process=edge.process,
             config_name=edge.config_name,
             priority=edge.priority,
+            raster_spine=raster_spine,
             success=False,
             cm_type=edge.cm_type,
             diagnostics={
                 "failure_reason": "no_path",
                 "source_length_m": edge.geometry.length,
+                "raster_spine_cell_count": len(raster_spine.cells),
                 "blocked_cells_considered": total_blocked,
                 "corridor_deviation_m": self.corridor_deviation_m,
             },
@@ -174,6 +199,7 @@ class NetworkRouter:
         corridor_m: float,
         layer: LayerKind,
         allow_soft_crossing: bool,
+        raster_spine: RasterSpine,
     ) -> _RouteAttempt:
         if start == goal:
             return _RouteAttempt(nodes=(start,), blocked_cells_considered=0)
@@ -228,8 +254,9 @@ class NetworkRouter:
                     / max(self.grid_index.cell_size_m, 1.0)
                     * 0.1
                 )
+                spine_cost = self._spine_alignment_cost(traversed_cell, raster_spine)
                 soft_cost = 25.0 if blocked else 0.0
-                next_cost = cost_so_far + 1.0 + turn_cost + distance_cost + soft_cost
+                next_cost = cost_so_far + 1.0 + turn_cost + distance_cost + spine_cost + soft_cost
                 next_state = (neighbor.xidx, neighbor.yidx, step.direction)
                 if next_cost >= best_cost.get(next_state, math.inf):
                     continue
@@ -245,13 +272,30 @@ class NetworkRouter:
         start: GridNode,
         goal: GridNode,
         degrees: Mapping[int, int],
+        raster_spine: RasterSpine,
     ) -> RouteRecord | None:
         midpoint = edge.geometry.interpolate(0.5, normalized=True)
         midpoint_node = self._clamp_node(self.grid_index.projected_to_cell(midpoint.x, midpoint.y))
         if midpoint_node in {start, goal}:
             return None
-        first = self._a_star(edge.geometry, start, midpoint_node, self.minor_relaxation_m, self._layer_for_edge(edge), True)
-        second = self._a_star(edge.geometry, midpoint_node, goal, self.minor_relaxation_m, self._layer_for_edge(edge), True)
+        first = self._a_star(
+            edge.geometry,
+            start,
+            midpoint_node,
+            self.minor_relaxation_m,
+            self._layer_for_edge(edge),
+            True,
+            raster_spine,
+        )
+        second = self._a_star(
+            edge.geometry,
+            midpoint_node,
+            goal,
+            self.minor_relaxation_m,
+            self._layer_for_edge(edge),
+            True,
+            raster_spine,
+        )
         if not first.success or not second.success:
             return None
         nodes = first.nodes + second.nodes[1:]
@@ -262,6 +306,7 @@ class NetworkRouter:
             first.blocked_cells_considered + second.blocked_cells_considered,
             first.soft_crossings + second.soft_crossings,
             degrees,
+            raster_spine,
         )
         diagnostics = {**dict(record.diagnostics), "split_intersections": 1}
         return RouteRecord(
@@ -273,6 +318,7 @@ class NetworkRouter:
             priority=record.priority,
             nodes=record.nodes,
             tile_cells=record.tile_cells,
+            raster_spine=record.raster_spine,
             success=True,
             diagnostics=diagnostics,
             cm_type=record.cm_type,
@@ -286,19 +332,23 @@ class NetworkRouter:
         blocked_cells_considered: int,
         soft_crossings: int,
         degrees: Mapping[int, int],
+        raster_spine: RasterSpine,
     ) -> RouteRecord:
         tile_cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
         route_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
         source_length = edge.geometry.length
+        spine_diagnostics = self._spine_diagnostics(edge.geometry, nodes, tile_cells, raster_spine)
         diagnostics = {
             "source_length_m": source_length,
             "route_length_m": route_length,
             "detour_ratio": route_length / source_length if source_length > 0 else 1.0,
+            "mean_source_line_distance_m": self._mean_node_source_distance(nodes, edge.geometry),
             "max_source_line_distance_m": max((self._node_source_distance(node, edge.geometry) for node in nodes), default=0.0),
             "blocked_cells_considered": blocked_cells_considered,
             "forced_relaxation": relaxation,
             "soft_crossings": soft_crossings,
             "intersection_importance": max(degrees.get(edge.start_node_id, 0), degrees.get(edge.end_node_id, 0)),
+            **spine_diagnostics,
         }
         return RouteRecord(
             edge_id=edge.edge_id,
@@ -309,6 +359,7 @@ class NetworkRouter:
             priority=edge.priority,
             nodes=nodes,
             tile_cells=tile_cells,
+            raster_spine=raster_spine,
             success=True,
             diagnostics=diagnostics,
             cm_type=edge.cm_type,
@@ -397,6 +448,49 @@ class NetworkRouter:
             distance_cache[node] = distance
         return distance
 
+    def _mean_node_source_distance(self, nodes: Sequence[GridNode], line: LineString) -> float:
+        if not nodes:
+            return 0.0
+        return sum(self._node_source_distance(node, line) for node in nodes) / len(nodes)
+
+    def _spine_alignment_cost(self, cell: GridCell, raster_spine: RasterSpine) -> float:
+        if not raster_spine.cells:
+            return 0.0
+        if cell in raster_spine.cells:
+            return -0.25
+        nearest_cell_steps = min(
+            abs(cell.xidx - spine_cell.xidx) + abs(cell.yidx - spine_cell.yidx) for spine_cell in raster_spine.cells
+        )
+        return nearest_cell_steps * 0.2
+
+    def _spine_diagnostics(
+        self,
+        line: LineString,
+        nodes: Sequence[GridNode],
+        tile_cells: Sequence[GridCell],
+        raster_spine: RasterSpine,
+    ) -> dict[str, Any]:
+        route_cell_set = set(tile_cells)
+        spine_cell_set = set(raster_spine.cells)
+        skipped = tuple(cell for cell in raster_spine.cells if cell not in route_cell_set)
+        extra = tuple(cell for cell in tile_cells if cell not in spine_cell_set)
+        route_to_spine = [self._cell_spine_distance(cell, raster_spine) for cell in tile_cells]
+        return {
+            "raster_spine_cell_count": len(raster_spine.cells),
+            "mean_spine_distance_m": sum(route_to_spine) / len(route_to_spine) if route_to_spine else 0.0,
+            "max_spine_distance_m": max(route_to_spine, default=0.0),
+            "skipped_spine_cells": skipped,
+            "extra_detour_cells": extra,
+            "source_spine_length_m": raster_spine.source_length_m,
+            "mean_source_line_distance_m": self._mean_node_source_distance(nodes, line),
+        }
+
+    def _cell_spine_distance(self, cell: GridCell, raster_spine: RasterSpine) -> float:
+        if not raster_spine.cells:
+            return 0.0
+        point = self.grid_index.cell_center(cell)
+        return min(point.distance(self.grid_index.cell_center(spine_cell)) for spine_cell in raster_spine.cells)
+
     def _cell_for_step(self, _start: GridNode, end: GridNode) -> GridCell:
         return GridCell(
             min(max(end.xidx, 0), self.grid_index.width - 1),
@@ -464,11 +558,15 @@ class NetworkRouter:
         failed = [route for route in routes if not route.success]
         detours = [float(route.diagnostics["detour_ratio"]) for route in successful]
         distances = [float(route.diagnostics["max_source_line_distance_m"]) for route in successful]
+        spine_distances = [float(route.diagnostics["max_spine_distance_m"]) for route in successful]
         return {
             "successful_routes": len(successful),
             "failed_routes": len(failed),
             "mean_detour_ratio": sum(detours) / len(detours) if detours else None,
             "max_source_line_distance_m": max(distances) if distances else None,
+            "max_spine_distance_m": max(spine_distances) if spine_distances else None,
+            "raster_spines": sum(1 for route in routes if route.raster_spine is not None),
+            "raster_spine_cells": sum(len(route.raster_spine.cells) for route in routes if route.raster_spine is not None),
             "forced_relaxations": sum(1 for route in successful if route.diagnostics.get("forced_relaxation")),
             "soft_crossings": sum(int(route.diagnostics.get("soft_crossings", 0)) for route in successful),
         }

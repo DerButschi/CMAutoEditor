@@ -183,6 +183,27 @@ class TopologyGraph:
 
 
 @dataclass(frozen=True, slots=True)
+class RasterSpine:
+    topology_edge_id: int
+    cells: tuple[GridCell, ...]
+    progress: tuple[float, ...]
+    distance_m: tuple[float, ...]
+    source_length_m: float
+
+    def __post_init__(self) -> None:
+        cells = tuple(self.cells)
+        progress = tuple(float(value) for value in self.progress)
+        distance_m = tuple(float(value) for value in self.distance_m)
+        if not (len(cells) == len(progress) == len(distance_m)):
+            raise ValueError("RasterSpine cells, progress, and distance_m must have equal length")
+        if any(progress[index] > progress[index + 1] for index in range(len(progress) - 1)):
+            raise ValueError("RasterSpine progress must be ordered")
+        object.__setattr__(self, "cells", cells)
+        object.__setattr__(self, "progress", progress)
+        object.__setattr__(self, "distance_m", distance_m)
+
+
+@dataclass(frozen=True, slots=True)
 class RouteRecord:
     edge_id: int
     start_node_id: int
@@ -192,6 +213,7 @@ class RouteRecord:
     priority: int
     nodes: tuple[GridNode, ...] = ()
     tile_cells: tuple[GridCell, ...] = ()
+    raster_spine: RasterSpine | None = None
     success: bool = True
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
     cm_type: CMType | None = None

@@ -31,6 +31,7 @@ from terrain_extraction.osm_extraction.models import (
     OccupancyConflict,
     PlacementRecord,
     ProcessKind,
+    RasterSpine,
     RouteRecord,
     TileAssignmentResult,
     TopologyEdge,
@@ -42,6 +43,7 @@ from terrain_extraction.osm_extraction.network_routing import (
     MoveStep,
     NetworkRouter,
 )
+from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
 from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.output_rows import (
@@ -98,6 +100,7 @@ __all__ = [
     "PlacementRecord",
     "ProcessKind",
     "ProgressCallback",
+    "RasterSpine",
     "RouteRecord",
     "MoveStep",
     "noop_progress",
@@ -110,6 +113,7 @@ __all__ = [
     "TopologyNode",
     "append_extent_marker",
     "build_debug_layers",
+    "build_raster_spine",
     "normalize_output_coordinates",
     "placements_to_output_rows",
     "validate_output_rows",

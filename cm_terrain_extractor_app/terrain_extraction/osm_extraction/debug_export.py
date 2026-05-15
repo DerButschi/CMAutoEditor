@@ -49,6 +49,7 @@ def build_debug_layers(
         **_layer("topology_nodes", lambda: _topology_nodes_layer(topology, grid_index), layer_errors),
         **_layer("topology_edges", lambda: _topology_edges_layer(topology, grid_index), layer_errors),
         **_layer("routed_paths", lambda: _routed_paths_layer(routing, grid_index), layer_errors),
+        **_layer("raster_spines", lambda: _raster_spines_layer(routing, grid_index), layer_errors),
         **_layer("route_anchors", lambda: _route_anchors_layer(routing, grid_index), layer_errors),
         **_occupancy_layers(occupancy, grid_index, layer_errors),
         **_layer("building_footprints", lambda: _building_footprints_layer(placement_tuple, grid_index, layer_errors), layer_errors),
@@ -185,6 +186,31 @@ def _route_anchors_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFram
     for node_id, anchor in sorted((getattr(routing, "node_anchors", {}) or {}).items()):
         rows.append({"node_id": node_id, "xidx": anchor.xidx, "yidx": anchor.yidx})
         geometries.append(_node_point(anchor, grid_index))
+    return _gdf(rows, geometries, grid_index)
+
+
+def _raster_spines_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFrame:
+    rows = []
+    geometries = []
+    if grid_index is None:
+        return _empty_layer()
+    for route in getattr(routing, "routes", ()) or ():
+        spine = getattr(route, "raster_spine", None)
+        if spine is None:
+            continue
+        for cell, progress, distance_m in zip(spine.cells, spine.progress, spine.distance_m, strict=True):
+            rows.append(
+                {
+                    "edge_id": spine.topology_edge_id,
+                    "route_success": route.success,
+                    "xidx": cell.xidx,
+                    "yidx": cell.yidx,
+                    "progress": progress,
+                    "distance_m": distance_m,
+                    "source_length_m": spine.source_length_m,
+                }
+            )
+            geometries.append(grid_index.cell_polygon(cell))
     return _gdf(rows, geometries, grid_index)
 
 

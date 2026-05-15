@@ -121,6 +121,28 @@ def test_route_follows_preserved_linestring_bend() -> None:
         GridCell(2, 3),
         GridCell(3, 3),
     )
+    assert route.raster_spine is not None
+    assert route.diagnostics["raster_spine_cell_count"] > 0
+    assert route.diagnostics["skipped_spine_cells"] == ()
+    assert route.diagnostics["extra_detour_cells"] == ()
+    assert route.diagnostics["mean_spine_distance_m"] >= 0.0
+
+
+def test_diagonalish_route_prefers_source_line_spine_support() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edge = _edge(0, (0, (4, 4)), (1, (28, 20)))
+
+    result = NetworkRouter(grid_index=_grid(), corridor_deviation_m=16.0).route(_graph((edge,)))
+    route = result.routes[0]
+
+    assert route.success
+    assert route.raster_spine is not None
+    assert route.raster_spine.cells[0] == GridCell(0, 0)
+    assert route.raster_spine.cells[-1] == GridCell(3, 2)
+    assert set(route.raster_spine.cells).issubset(set(route.tile_cells))
+    assert result.diagnostics["raster_spines"] == 1
 
 
 def test_routes_around_blocked_occupancy_inside_corridor() -> None:

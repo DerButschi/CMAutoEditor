@@ -69,6 +69,7 @@ def test_debug_layers_include_sources_topology_routes_anchors_occupancy_building
         NetworkRoutingResult,
         PlacementRecord,
         ProcessKind,
+        RasterSpine,
         RouteRecord,
         TopologyEdge,
         TopologyGraph,
@@ -136,6 +137,13 @@ def test_debug_layers_include_sources_topology_routes_anchors_occupancy_building
                 priority=2,
                 nodes=(GridNode(0, 1), GridNode(1, 1), GridNode(2, 1)),
                 tile_cells=(GridCell(0, 1), road_cell, GridCell(2, 1)),
+                raster_spine=RasterSpine(
+                    topology_edge_id=10,
+                    cells=(GridCell(0, 1), road_cell, GridCell(2, 1)),
+                    progress=(0.0, 0.5, 1.0),
+                    distance_m=(0.0, 0.0, 0.0),
+                    source_length_m=24.0,
+                ),
                 diagnostics={"detour_ratio": 1.2},
             ),
         ),
@@ -162,6 +170,7 @@ def test_debug_layers_include_sources_topology_routes_anchors_occupancy_building
         "topology_nodes",
         "topology_edges",
         "routed_paths",
+        "raster_spines",
         "route_anchors",
         "occupancy_linear_surface",
         "building_footprints",
@@ -169,6 +178,8 @@ def test_debug_layers_include_sources_topology_routes_anchors_occupancy_building
     }
     assert result.layers["source_features"].loc[0, "feature_id"] == "road-1"
     assert result.layers["routed_paths"].loc[0, "detour_ratio"] == 1.2
+    assert result.layers["raster_spines"].edge_id.tolist() == [10, 10, 10]
+    assert result.layers["raster_spines"].progress.tolist() == [0.0, 0.5, 1.0]
     assert result.layers["route_anchors"].node_id.tolist() == [0, 1]
     assert result.layers["occupancy_linear_surface"].loc[0, "object_id"] == "road-1"
     assert result.layers["building_footprints"].loc[0, "config_name"] == "barns"

@@ -377,6 +377,10 @@ def _diagnostics(
             "successful_routes": sum(1 for route in routes if route.success),
             "failed_routes": len(failed_routes),
             "failure_reasons": tuple(route.diagnostics.get("failure_reason") for route in failed_routes),
+            "raster_spine_count": sum(1 for route in routes if getattr(route, "raster_spine", None) is not None),
+            "raster_spine_cells": sum(
+                len(getattr(getattr(route, "raster_spine", None), "cells", ()) or ()) for route in routes
+            ),
         },
         "step_cell": {
             "route_lengths": tuple(
