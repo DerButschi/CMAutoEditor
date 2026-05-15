@@ -137,7 +137,7 @@ class CompiledTileCatalog:
                 (variant for variant in self.variants if variant.directions == normalized),
                 key=_variant_sort_key,
             )
-        )
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +176,7 @@ class TileAssigner:
         self.catalogs = dict(catalogs)
         self.rng = rng or np.random.default_rng(0)
 
-    def assign(self, routes: Sequence[RouteRecord]) -> TileAssignmentResult:
+    def assign(self, routes: Sequence[RouteRecord], *, linear_state: Any = None) -> TileAssignmentResult:
         successful_routes = tuple(route for route in routes if route.success and route.nodes)
         intersections = _intersection_specs_by_process(successful_routes)
 
@@ -220,6 +220,7 @@ class TileAssigner:
                 fixed_variants=fixed_variants,
                 used_cells=used_cells,
                 failures=failures,
+                linear_state=linear_state,
             )
             placements.extend(route_placements)
 
@@ -293,8 +294,9 @@ class TileAssigner:
         fixed_variants: Mapping[tuple[ProcessKind, GridCell], TileVariant],
         used_cells: set[tuple[ProcessKind, GridCell]],
         failures: list[Mapping[str, Any]],
+        linear_state: Any = None,
     ) -> tuple[PlacementRecord, ...]:
-        specs = _route_cell_specs(route)
+        specs = _route_cell_specs(route, linear_state=linear_state)
         if not specs:
             return ()
 
@@ -524,7 +526,7 @@ def _required_directions_for_nodes(first: GridNode, second: GridNode) -> frozens
     return frozenset((direction, _OPPOSITE_DIRECTIONS[direction]))
 
 
-def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
+def _route_cell_specs(route: RouteRecord, *, linear_state: Any = None) -> tuple[_RouteCellSpec, ...]:
     tile_cells = route.tile_cells
     if not tile_cells:
         return ()
@@ -544,8 +546,18 @@ def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
             continue
         if len(directions) == 1:
             directions.add(_OPPOSITE_DIRECTIONS[next(iter(directions))])
-        specs.append(_RouteCellSpec(cell=cell, required_directions=frozenset(directions)))
+        required_directions = _state_required_dirs(linear_state, cell, directions)
+        specs.append(_RouteCellSpec(cell=cell, required_directions=required_directions))
     return tuple(specs)
+
+
+def _state_required_dirs(linear_state: Any, cell: GridCell, route_directions: set[str]) -> frozenset[str]:
+    if linear_state is None:
+        return frozenset(route_directions)
+    state_directions = frozenset(linear_state.required_dirs(cell))
+    if len(state_directions) >= 2:
+        return state_directions
+    return frozenset(route_directions)
 
 
 def _node_xy(node: GridNode | tuple[int, int]) -> tuple[int, int]:

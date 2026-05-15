@@ -80,9 +80,15 @@ def test_harness_captures_debug_layers_and_structured_symptoms() -> None:
         debug=True,
     )
 
-    assert {"source_features", "topology_edges", "routed_paths", "raster_spines", "route_anchors", "final_rows"} <= set(
-        result.debug_layers
-    )
+    assert {
+        "source_features",
+        "topology_edges",
+        "routed_paths",
+        "raster_spines",
+        "route_anchors",
+        "connection_bits",
+        "final_rows",
+    } <= set(result.debug_layers)
     assert set(result.diagnostics) >= {"topology", "anchor", "route", "step_cell", "tile", "output"}
     assert result.diagnostics["route"]["successful_routes"] >= 1
     assert result.diagnostics["route"]["raster_spine_count"] >= 1

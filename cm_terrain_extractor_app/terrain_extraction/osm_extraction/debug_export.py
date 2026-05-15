@@ -51,6 +51,7 @@ def build_debug_layers(
         **_layer("routed_paths", lambda: _routed_paths_layer(routing, grid_index), layer_errors),
         **_layer("raster_spines", lambda: _raster_spines_layer(routing, grid_index), layer_errors),
         **_layer("route_anchors", lambda: _route_anchors_layer(routing, grid_index), layer_errors),
+        **_layer("connection_bits", lambda: _connection_bits_layer(routing, grid_index), layer_errors),
         **_occupancy_layers(occupancy, grid_index, layer_errors),
         **_layer("building_footprints", lambda: _building_footprints_layer(placement_tuple, grid_index, layer_errors), layer_errors),
         **_layer("final_rows", lambda: _final_rows_layer(output_rows, grid_index, bounds=bounds, layer_errors=layer_errors), layer_errors),
@@ -211,6 +212,22 @@ def _raster_spines_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFram
                 }
             )
             geometries.append(grid_index.cell_polygon(cell))
+    return _gdf(rows, geometries, grid_index)
+
+
+def _connection_bits_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFrame:
+    rows = []
+    geometries = []
+    if grid_index is None:
+        return _empty_layer()
+    linear_state = getattr(routing, "linear_state", None)
+    if linear_state is None:
+        return _empty_layer()
+    for state_row in linear_state.as_debug_layer():
+        row = dict(state_row)
+        cell = GridCell(row["xidx"], row["yidx"])
+        rows.append(row)
+        geometries.append(grid_index.cell_polygon(cell))
     return _gdf(rows, geometries, grid_index)
 
 

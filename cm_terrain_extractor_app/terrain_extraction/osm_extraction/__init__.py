@@ -18,6 +18,11 @@ from terrain_extraction.osm_extraction.debug_export import (
 )
 from terrain_extraction.osm_extraction.feature_matcher import FeatureMatcher
 from terrain_extraction.osm_extraction.grid_index import GridIndex
+from terrain_extraction.osm_extraction.linear_network_state import (
+    LinearCellDecision,
+    LinearNetworkState,
+    LinearReservationResult,
+)
 from terrain_extraction.osm_extraction.models import (
     CMType,
     ConflictDecision,
@@ -43,7 +48,6 @@ from terrain_extraction.osm_extraction.network_routing import (
     MoveStep,
     NetworkRouter,
 )
-from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
 from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.output_rows import (
@@ -59,6 +63,7 @@ from terrain_extraction.osm_extraction.pipeline import (
     ProgressCallback,
     noop_progress,
 )
+from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
 from terrain_extraction.osm_extraction.stats import ExtractionStats
 from terrain_extraction.osm_extraction.tile_assignment import (
     CompiledTileCatalog,
@@ -91,6 +96,9 @@ __all__ = [
     "GridIndex",
     "GridNode",
     "LayerKind",
+    "LinearCellDecision",
+    "LinearNetworkState",
+    "LinearReservationResult",
     "NetworkTopologyBuilder",
     "NetworkRouter",
     "NetworkRoutingResult",

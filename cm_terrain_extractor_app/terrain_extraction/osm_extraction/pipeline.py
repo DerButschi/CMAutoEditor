@@ -151,10 +151,11 @@ class ExtractionPipeline:
         *,
         routes: tuple[Any, ...],
         catalogs: Mapping[Any, Any],
+        linear_state: Any = None,
     ) -> ExtractionResult:
         from terrain_extraction.osm_extraction.tile_assignment import TileAssigner
 
-        assignment = TileAssigner(catalogs, rng=self.context.rng).assign(routes)
+        assignment = TileAssigner(catalogs, rng=self.context.rng).assign(routes, linear_state=linear_state)
         self.context.progress("tile_assignment", 1.0, "Tile assignment complete")
         return ExtractionResult(
             placements=assignment.placements,

@@ -8,6 +8,10 @@ from typing import Any
 
 from shapely.geometry import LineString
 from terrain_extraction.osm_extraction.grid_index import GridIndex
+from terrain_extraction.osm_extraction.linear_network_state import (
+    LinearNetworkState,
+    LinearReservationResult,
+)
 from terrain_extraction.osm_extraction.models import (
     CMType,
     GridCell,
@@ -102,6 +106,8 @@ class NetworkRouter:
         minor_relaxation_m: float = 48.0,
         allow_soft_crossing: bool = False,
         split_long_edge_m: float = 256.0,
+        catalogs: Mapping[ProcessKind, Any] | None = None,
+        linear_state: LinearNetworkState | None = None,
     ) -> None:
         if corridor_deviation_m < 0:
             raise ValueError("corridor_deviation_m must be non-negative")
@@ -114,16 +120,35 @@ class NetworkRouter:
         self.minor_relaxation_m = minor_relaxation_m
         self.allow_soft_crossing = allow_soft_crossing
         self.split_long_edge_m = split_long_edge_m
+        self.catalogs = dict(catalogs or {})
+        self.linear_state = linear_state
 
     def route(self, topology: TopologyGraph) -> NetworkRoutingResult:
         anchors = self._node_anchors(topology)
         degrees = {node.node_id: topology.degree(node.node_id) for node in topology.nodes}
+        linear_state = self.linear_state or LinearNetworkState(
+            width=self.grid_index.width,
+            height=self.grid_index.height,
+            catalogs=self.catalogs,
+        )
+        self.linear_state = linear_state
         routes = []
         for edge in self._route_order(topology.edges, degrees):
-            routes.append(self._route_edge(edge, anchors, degrees))
+            route = self._route_edge(edge, anchors, degrees)
+            if route.success:
+                reservation = linear_state.reserve_path(route)
+                if not reservation.success:
+                    route = self._reservation_failed_route(route, reservation)
+            routes.append(route)
 
         diagnostics = self._diagnostics(routes)
-        return NetworkRoutingResult(routes=tuple(routes), node_anchors=anchors, diagnostics=diagnostics)
+        diagnostics.update(linear_state.diagnostics())
+        return NetworkRoutingResult(
+            routes=tuple(routes),
+            node_anchors=anchors,
+            diagnostics=diagnostics,
+            linear_state=linear_state,
+        )
 
     def _route_edge(
         self,
@@ -363,6 +388,32 @@ class NetworkRouter:
             success=True,
             diagnostics=diagnostics,
             cm_type=edge.cm_type,
+        )
+
+    def _reservation_failed_route(
+        self,
+        route: RouteRecord,
+        reservation: LinearReservationResult,
+    ) -> RouteRecord:
+        failure = dict(reservation.failures[0]) if reservation.failures else {"failure_reason": "linear_state_rejected"}
+        diagnostics = {
+            **dict(route.diagnostics),
+            "failure_reason": failure.get("failure_reason", "linear_state_rejected"),
+            "linear_state_failures": tuple(dict(item) for item in reservation.failures),
+        }
+        return RouteRecord(
+            edge_id=route.edge_id,
+            start_node_id=route.start_node_id,
+            end_node_id=route.end_node_id,
+            process=route.process,
+            config_name=route.config_name,
+            priority=route.priority,
+            nodes=route.nodes,
+            tile_cells=route.tile_cells,
+            raster_spine=route.raster_spine,
+            success=False,
+            diagnostics=diagnostics,
+            cm_type=route.cm_type,
         )
 
     def _node_anchors(self, topology: TopologyGraph) -> dict[int, GridNode]:
