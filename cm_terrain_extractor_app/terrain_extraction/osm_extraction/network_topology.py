@@ -14,6 +14,7 @@ from shapely.geometry import (
     Polygon,
 )
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import substring
 from shapely.strtree import STRtree
 from terrain_extraction.osm_extraction.models import (
     CMType,
@@ -182,14 +183,18 @@ class NetworkTopologyBuilder:
     ) -> tuple[TopologyEdge, ...]:
         edges = []
         for line_idx, source_line in enumerate(source_lines):
-            ordered_node_ids = self._ordered_line_node_ids(
+            ordered_entries = self._ordered_line_node_entries(
                 source_line.geometry,
                 self._line_point_ids[line_idx],
                 nodes,
                 point_to_node,
                 split_points,
             )
-            for start_node_id, end_node_id in zip(ordered_node_ids, ordered_node_ids[1:], strict=False):
+            for (start_distance, start_node_id), (end_distance, end_node_id) in zip(
+                ordered_entries,
+                ordered_entries[1:],
+                strict=False,
+            ):
                 if start_node_id == end_node_id:
                     continue
                 start = nodes[start_node_id].point
@@ -199,7 +204,13 @@ class NetworkTopologyBuilder:
                         edge_id=len(edges),
                         start_node_id=start_node_id,
                         end_node_id=end_node_id,
-                        geometry=LineString([(start.x, start.y), (end.x, end.y)]),
+                        geometry=_line_substring_with_node_endpoints(
+                            source_line.geometry,
+                            start_distance,
+                            end_distance,
+                            start,
+                            end,
+                        ),
                         feature_ids=(source_line.feature.feature_id,),
                         source_indices=(source_line.feature.source_index,),
                         config_name=source_line.feature.config_name,
@@ -211,14 +222,14 @@ class NetworkTopologyBuilder:
                 )
         return tuple(edges)
 
-    def _ordered_line_node_ids(
+    def _ordered_line_node_entries(
         self,
         line: LineString,
         point_ids: set[int],
         nodes: tuple[TopologyNode, ...],
         point_to_node: dict[int, int],
         split_points: list[Point],
-    ) -> tuple[int, ...]:
+    ) -> tuple[tuple[float, int], ...]:
         entries = []
         seen = set()
         for point_id in point_ids:
@@ -229,16 +240,15 @@ class NetworkTopologyBuilder:
             entries.append((line.project(split_points[point_id]), node_id))
         entries.sort(key=lambda entry: entry[0])
 
-        ordered = [node_id for _distance, node_id in entries]
-        if len(ordered) >= 2:
-            return tuple(ordered)
+        if len(entries) >= 2:
+            return tuple(entries)
 
-        endpoint_ids = []
+        endpoint_entries = []
         for coord in (line.coords[0], line.coords[-1]):
             point = Point(coord)
             node_id = min(nodes, key=lambda node: node.point.distance(point)).node_id
-            endpoint_ids.append(node_id)
-        return tuple(endpoint_ids)
+            endpoint_entries.append((line.project(point), node_id))
+        return tuple(endpoint_entries)
 
     def _collapse_degree_two_chains(
         self,
@@ -270,7 +280,7 @@ class NetworkTopologyBuilder:
             if edge.edge_id in visited_edges:
                 continue
             chain = self._walk_chain(edge, adjacency, collapsible_nodes, visited_edges)
-            new_edges.append(self._merge_chain(len(new_edges), chain, nodes))
+            new_edges.append(self._merge_chain(len(new_edges), chain))
 
         used_node_ids = {edge.start_node_id for edge in new_edges} | {edge.end_node_id for edge in new_edges}
         node_id_mapping = {old_id: new_id for new_id, old_id in enumerate(sorted(used_node_ids))}
@@ -330,7 +340,6 @@ class NetworkTopologyBuilder:
         self,
         edge_id: int,
         chain: list[TopologyEdge],
-        nodes: tuple[TopologyNode, ...],
     ) -> TopologyEdge:
         node_ids = [chain[0].start_node_id, chain[0].end_node_id]
         for edge in chain[1:]:
@@ -343,7 +352,7 @@ class NetworkTopologyBuilder:
             else:
                 node_ids.insert(0, edge.start_node_id)
 
-        coords = [(nodes[node_id].point.x, nodes[node_id].point.y) for node_id in node_ids]
+        coords = _chain_coords(chain, node_ids)
         feature_ids = tuple(dict.fromkeys(feature_id for edge in chain for feature_id in edge.feature_ids))
         source_indices = tuple(dict.fromkeys(source_index for edge in chain for source_index in edge.source_indices))
         first_edge = chain[0]
@@ -401,6 +410,40 @@ def _extract_lines(geometry: BaseGeometry) -> tuple[LineString, ...]:
     if isinstance(geometry, GeometryCollection):
         return tuple(line for part in geometry.geoms for line in _extract_lines(part))
     return ()
+
+
+def _line_substring_with_node_endpoints(
+    line: LineString,
+    start_distance: float,
+    end_distance: float,
+    start: Point,
+    end: Point,
+) -> LineString:
+    segment = substring(line, start_distance, end_distance)
+    if isinstance(segment, Point):
+        return LineString([(start.x, start.y), (end.x, end.y)])
+    coords = list(segment.coords)
+    if len(coords) < 2:
+        coords = [(start.x, start.y), (end.x, end.y)]
+    else:
+        coords[0] = (start.x, start.y)
+        coords[-1] = (end.x, end.y)
+    return LineString(coords)
+
+
+def _chain_coords(chain: list[TopologyEdge], node_ids: list[int]) -> list[tuple[float, float]]:
+    coords: list[tuple[float, float]] = []
+    for edge_index, edge in enumerate(chain):
+        expected_start = node_ids[edge_index]
+        if edge.start_node_id == expected_start:
+            edge_coords = list(edge.geometry.coords)
+        else:
+            edge_coords = list(reversed(edge.geometry.coords))
+        if coords and coords[-1] == edge_coords[0]:
+            coords.extend(edge_coords[1:])
+        else:
+            coords.extend(edge_coords)
+    return coords
 
 
 def _line_segments_if_closed(line: LineString) -> tuple[LineString, ...]:

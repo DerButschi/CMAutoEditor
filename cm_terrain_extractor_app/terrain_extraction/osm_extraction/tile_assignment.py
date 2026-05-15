@@ -477,11 +477,14 @@ def _required_directions_for_nodes(first: GridNode, second: GridNode) -> frozens
 
 def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
     route_cells = _normalized_route_cells(route)
-    step_cells: list[GridCell] = []
-    for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False)):
-        cell = route_cells[step_index] if step_index < len(route_cells) else _cell_for_step(start, end)
-        if not step_cells or step_cells[-1] != cell:
-            step_cells.append(cell)
+    if len(route_cells) == len(route.nodes):
+        step_cells = list(route_cells)
+    else:
+        step_cells = []
+        for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False)):
+            cell = route_cells[step_index] if step_index < len(route_cells) else _cell_for_step(start, end)
+            if not step_cells or step_cells[-1] != cell:
+                step_cells.append(cell)
 
     if not step_cells:
         return ()
@@ -512,6 +515,8 @@ def _route_cell_specs(route: RouteRecord) -> tuple[_RouteCellSpec, ...]:
 def _normalized_route_cells(route: RouteRecord) -> tuple[GridCell, ...]:
     if len(route.nodes) < 2:
         return ()
+    if len(route.cells) == len(route.nodes):
+        return route.cells
     candidate_columns = [
         _candidate_cells_for_step(start, end, route.cells[step_index] if step_index < len(route.cells) else None)
         for step_index, (start, end) in enumerate(zip(route.nodes, route.nodes[1:], strict=False))

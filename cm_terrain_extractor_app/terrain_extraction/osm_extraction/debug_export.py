@@ -309,10 +309,7 @@ def _route_geometry(route: Any, grid_index: Any) -> BaseGeometry:
 
 
 def _node_point(node: GridNode, grid_index: Any) -> Point:
-    return grid_index.projected_from_local(
-        node.xidx * grid_index.cell_size_m,
-        node.yidx * grid_index.cell_size_m,
-    )
+    return grid_index.cell_center(GridCell(node.xidx, node.yidx))
 
 
 def _row_geometry(grid_index: Any, xidx: float, yidx: float, grid_kind: GridKind) -> BaseGeometry:

@@ -186,6 +186,38 @@ def test_osm_debug_layers_skip_unavailable_stage_data() -> None:
     assert "Output CSV tiles" in rendered
 
 
+def test_osm_debug_layers_skip_empty_geometries_for_folium_bounds() -> None:
+    from cm_terrain_extractor_app.map_view.folium_map import build_folium_map
+
+    state = AppState(
+        osm_debug_layers={
+            "routed_paths": gpd.GeoDataFrame(
+                {"config_name": ["road"]},
+                geometry=[LineString()],
+                crs="EPSG:4326",
+            ),
+            "final_rows": gpd.GeoDataFrame(
+                {"name": ["road"]},
+                geometry=[
+                    Polygon(
+                        [
+                            (7.10, 51.20),
+                            (7.11, 51.20),
+                            (7.11, 51.21),
+                            (7.10, 51.20),
+                        ]
+                    )
+                ],
+                crs="EPSG:4326",
+            ),
+        },
+    )
+
+    map_obj = build_folium_map(state=state, resources=_resources())
+
+    assert map_obj.get_bounds()
+
+
 def _resources() -> AppResources:
     app_root = Path("cm_terrain_extractor_app")
     return AppResources(

@@ -120,10 +120,11 @@ def add_osm_geometry_layers(map_obj: folium.Map, state: AppState) -> None:
 
 def add_osm_debug_layers(map_obj: folium.Map, state: AppState) -> bool:
     layers_added = False
-    if _has_raw_osm_features(state.osm_data):
+    raw_osm_data = _raw_osm_data_for_folium(state.osm_data)
+    if raw_osm_data is not None:
         raw_group = folium.FeatureGroup(name="Raw OSM features", overlay=True, show=False)
         folium.GeoJson(
-            state.osm_data,
+            raw_osm_data,
             name="Raw OSM features",
             style_function=lambda _feature: {
                 "color": "#6b7280",
@@ -158,8 +159,17 @@ def add_osm_debug_layers(map_obj: folium.Map, state: AppState) -> bool:
     return layers_added
 
 
-def _has_raw_osm_features(osm_data: dict | None) -> bool:
-    return isinstance(osm_data, dict) and bool(osm_data.get("features"))
+def _raw_osm_data_for_folium(osm_data: dict | None) -> dict | None:
+    if not isinstance(osm_data, dict):
+        return None
+    features = [
+        feature
+        for feature in osm_data.get("features", ())
+        if isinstance(feature, dict) and feature.get("geometry") is not None
+    ]
+    if not features:
+        return None
+    return {**osm_data, "features": features}
 
 
 def _network_debug_group(debug_layers: dict) -> folium.FeatureGroup | None:
@@ -185,6 +195,9 @@ def _add_debug_geojson_layer(
 ) -> bool:
     if layer is None or getattr(layer, "empty", True):
         return False
+    layer = _layer_with_folium_safe_geometries(layer)
+    if layer is None:
+        return False
 
     folium.GeoJson(
         _geojson_data(layer),
@@ -199,6 +212,16 @@ def _add_debug_geojson_layer(
         ),
     ).add_to(target)
     return True
+
+
+def _layer_with_folium_safe_geometries(layer: Any) -> Any | None:
+    geometry = getattr(layer, "geometry", None)
+    if geometry is None:
+        return layer
+    mask = ~geometry.is_empty & ~geometry.isna()
+    if not mask.any():
+        return None
+    return layer.loc[mask].copy()
 
 
 def _geojson_data(layer: Any) -> Any:

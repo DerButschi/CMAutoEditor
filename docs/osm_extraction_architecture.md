@@ -7,8 +7,8 @@ The OSM extractor keeps `OSMProcessor` as the app-facing compatibility boundary 
 `OSMProcessor.preprocess_osm_data` projects matched fixture or OSM geometries and keeps a compatibility `matched_elements` list. `run_processors` converts those entries to `FeatureRecord` objects, creates a `GridIndex`, creates an `OccupancyModel`, and runs the typed stages:
 
 1. `AreaRasterizer` handles area, random, point, and default feature classes.
-2. `NetworkTopologyBuilder` nodes road, rail, stream, and fence features.
-3. `NetworkRouter` routes those topology edges on integer grid nodes without NetworkX.
+2. `NetworkTopologyBuilder` nodes road, rail, stream, and fence features while preserving source LineString vertices between topology nodes.
+3. `NetworkRouter` routes those topology edges on integer output-cell centers without NetworkX.
 4. `TileAssigner` converts successful routes to process-specific tile `PlacementRecord` objects.
 5. The linear-dependent placement pass handles `type_from_linear` entries from existing linear placements.
 6. `BuildingFitter` scores and places building outlines against current occupancy.
@@ -36,7 +36,7 @@ OSMProcessor
 
 ## Grid And Occupancy
 
-`GridIndex` owns rotated 8 m grid math. Core processors use affine coordinate conversion for normal cells and routing nodes. GeoDataFrame views are lazy debug/export views, not the hot-path snapping mechanism.
+`GridIndex` owns rotated 8 m grid math. Core processors use affine coordinate conversion for normal cells. Network routes use output-cell center indices, so `RouteRecord.cells` names the CSV cells occupied by the route instead of cells inferred later from grid-line edges. GeoDataFrame views are lazy debug/export views, not the hot-path snapping mechanism.
 
 `OccupancyModel` owns dense layered conflict state. Layers include ground, foliage, linear surface, linear object, building, point object, and reserved. Empty cells use `-1`; metadata maps object IDs back to source feature/config/process diagnostics. Smaller positive priority values are stronger ranks, zero/negative area priorities are weaker than positive priorities, and default rows are the weakest compatibility fills. Defaults are suppressed when a real placement owns the same layer/cell.
 

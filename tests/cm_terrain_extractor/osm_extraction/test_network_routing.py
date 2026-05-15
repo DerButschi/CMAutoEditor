@@ -81,6 +81,48 @@ def test_routes_simple_topology_edge_on_integer_grid() -> None:
     assert result.routes[0].diagnostics["detour_ratio"] == pytest.approx(1.0)
 
 
+def test_route_cells_are_output_cells_not_grid_corner_edges() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edge = _edge(0, (0, (4, 4)), (1, (28, 4)))
+    route = NetworkRouter(grid_index=_grid()).route(_graph((edge,))).routes[0]
+
+    assert route.success
+    assert route.cells == (GridCell(0, 0), GridCell(1, 0), GridCell(2, 0), GridCell(3, 0))
+
+
+def test_route_follows_preserved_linestring_bend() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edge = _edge(0, (0, (4, 4)), (1, (28, 28)))
+    edge = type(edge)(
+        edge.edge_id,
+        edge.start_node_id,
+        edge.end_node_id,
+        LineString([(4, 4), (4, 28), (28, 28)]),
+        edge.feature_ids,
+        edge.source_indices,
+        edge.config_name,
+        edge.process,
+        edge.priority,
+    )
+
+    route = NetworkRouter(grid_index=_grid(), corridor_deviation_m=8.0).route(_graph((edge,))).routes[0]
+
+    assert route.success
+    assert route.cells == (
+        GridCell(0, 0),
+        GridCell(0, 1),
+        GridCell(0, 2),
+        GridCell(0, 3),
+        GridCell(1, 3),
+        GridCell(2, 3),
+        GridCell(3, 3),
+    )
+
+
 def test_routes_around_blocked_occupancy_inside_corridor() -> None:
     from terrain_extraction.osm_extraction.models import GridCell
     from terrain_extraction.osm_extraction.network_routing import NetworkRouter
@@ -98,7 +140,7 @@ def test_routes_around_blocked_occupancy_inside_corridor() -> None:
     assert route.diagnostics["blocked_cells_considered"] >= 1
 
 
-def test_boundary_route_preserves_one_cell_per_step_after_clamping() -> None:
+def test_boundary_route_clamps_to_last_output_cell() -> None:
     from terrain_extraction.osm_extraction.models import GridCell
     from terrain_extraction.osm_extraction.network_routing import NetworkRouter
 
@@ -106,8 +148,8 @@ def test_boundary_route_preserves_one_cell_per_step_after_clamping() -> None:
     route = NetworkRouter(grid_index=_grid(width=100, height=176), corridor_deviation_m=16.0).route(_graph((edge,))).routes[0]
 
     assert route.success
-    assert [node.yidx for node in route.nodes] == [175, 176, 176]
-    assert route.cells == (GridCell(76, 175), GridCell(76, 175))
+    assert [node.yidx for node in route.nodes] == [175, 175]
+    assert route.cells == (GridCell(76, 175), GridCell(77, 175))
 
 
 def test_incident_edges_share_one_integer_anchor() -> None:

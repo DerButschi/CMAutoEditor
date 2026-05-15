@@ -161,6 +161,26 @@ def test_degree_two_chains_with_identical_metadata_are_collapsed() -> None:
     assert graph.diagnostics["collapsed_degree_two_nodes"] == 2
 
 
+def test_curved_linestring_vertices_survive_topology_edges() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+
+    graph = NetworkTopologyBuilder().build(
+        (
+            _feature(
+                "road-0",
+                "primary",
+                ProcessKind.ROAD,
+                LineString([(0, 0), (8, 0), (8, 8), (16, 8)]),
+                priority=1,
+            ),
+        )
+    )
+
+    assert len(graph.edges) == 1
+    assert list(graph.edges[0].geometry.coords) == [(0.0, 0.0), (8.0, 0.0), (8.0, 8.0), (16.0, 8.0)]
+
+
 def test_degree_two_chains_with_different_cm_types_are_not_collapsed() -> None:
     from terrain_extraction.osm_extraction.models import ProcessKind
     from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder

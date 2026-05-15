@@ -247,7 +247,7 @@ class NetworkRouter:
         degrees: Mapping[int, int],
     ) -> RouteRecord | None:
         midpoint = edge.geometry.interpolate(0.5, normalized=True)
-        midpoint_node = self._clamp_node(self.grid_index.projected_to_nearest_node(midpoint.x, midpoint.y))
+        midpoint_node = self._clamp_node(self.grid_index.projected_to_cell(midpoint.x, midpoint.y))
         if midpoint_node in {start, goal}:
             return None
         first = self._a_star(edge.geometry, start, midpoint_node, self.minor_relaxation_m, self._layer_for_edge(edge), True)
@@ -287,7 +287,7 @@ class NetworkRouter:
         soft_crossings: int,
         degrees: Mapping[int, int],
     ) -> RouteRecord:
-        cells = tuple(self._cell_for_step(start, end) for start, end in zip(nodes, nodes[1:], strict=False))
+        cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
         route_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
         source_length = edge.geometry.length
         diagnostics = {
@@ -316,7 +316,7 @@ class NetworkRouter:
 
     def _node_anchors(self, topology: TopologyGraph) -> dict[int, GridNode]:
         return {
-            node.node_id: self._clamp_node(self.grid_index.projected_to_nearest_node(node.point.x, node.point.y))
+            node.node_id: self._clamp_node(self.grid_index.projected_to_cell(node.point.x, node.point.y))
             for node in topology.nodes
         }
 
@@ -352,8 +352,8 @@ class NetworkRouter:
         return (
             max(0, math.floor(min_x / cell_size)),
             max(0, math.floor(min_y / cell_size)),
-            min(self.grid_index.width, math.ceil(max_x / cell_size)),
-            min(self.grid_index.height, math.ceil(max_y / cell_size)),
+            min(self.grid_index.width - 1, math.ceil(max_x / cell_size)),
+            min(self.grid_index.height - 1, math.ceil(max_y / cell_size)),
         )
 
     def _node_in_corridor(
@@ -382,10 +382,7 @@ class NetworkRouter:
         return self._cached_node_source_distance(node, line, distance_cache) <= corridor_m + 1e-9
 
     def _node_source_distance(self, node: GridNode, line: LineString) -> float:
-        point = self.grid_index.projected_from_local(
-            node.xidx * self.grid_index.cell_size_m,
-            node.yidx * self.grid_index.cell_size_m,
-        )
+        point = self.grid_index.cell_center(GridCell(node.xidx, node.yidx))
         return point.distance(line)
 
     def _cached_node_source_distance(
@@ -400,16 +397,10 @@ class NetworkRouter:
             distance_cache[node] = distance
         return distance
 
-    def _cell_for_step(self, start: GridNode, end: GridNode) -> GridCell:
-        if start.xidx != end.xidx:
-            xidx = min(start.xidx, end.xidx)
-            yidx = min(start.yidx, end.yidx)
-        else:
-            xidx = min(start.xidx, end.xidx)
-            yidx = min(start.yidx, end.yidx)
+    def _cell_for_step(self, _start: GridNode, end: GridNode) -> GridCell:
         return GridCell(
-            min(max(xidx, 0), self.grid_index.width - 1),
-            min(max(yidx, 0), self.grid_index.height - 1),
+            min(max(end.xidx, 0), self.grid_index.width - 1),
+            min(max(end.yidx, 0), self.grid_index.height - 1),
         )
 
     def _cell_is_blocked(self, cell: GridCell, layer: LayerKind) -> bool:
@@ -438,12 +429,12 @@ class NetworkRouter:
         return blocked
 
     def _node_in_bounds(self, node: GridNode) -> bool:
-        return 0 <= node.xidx <= self.grid_index.width and 0 <= node.yidx <= self.grid_index.height
+        return 0 <= node.xidx < self.grid_index.width and 0 <= node.yidx < self.grid_index.height
 
     def _clamp_node(self, node: GridNode) -> GridNode:
         return GridNode(
-            min(max(node.xidx, 0), self.grid_index.width),
-            min(max(node.yidx, 0), self.grid_index.height),
+            min(max(node.xidx, 0), self.grid_index.width - 1),
+            min(max(node.yidx, 0), self.grid_index.height - 1),
         )
 
     def _layer_for_edge(self, edge: TopologyEdge) -> LayerKind:
