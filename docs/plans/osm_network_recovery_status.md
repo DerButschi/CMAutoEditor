@@ -19,7 +19,7 @@ Future agents and humans must update this document after each milestone. Record 
 | M0 | Semantic regression harness | Complete | Codex | 2026-05-15 | Added six network recovery fixtures, `run_osm_extraction_fixture`, `ExtractionTestResult`, road graph reconstruction, debug capture, ASCII grids, and an xfailed four-way road case. |
 | M1 | Route node vs tile-cell contract | Complete | Codex | 2026-05-15 | Replaced ambiguous `RouteRecord.cells` with explicit direct `RouteRecord.tile_cells`; routing, tile assignment, debug export, tests, and recovery diagnostics now consume tile cells. |
 | M2 | Raster-spine / line-support extraction | Complete | Codex | 2026-05-15 | Added `RasterSpine`, Shapely cell-intersection support extraction, route/spine diagnostics, spine-alignment routing cost, debug `raster_spines` layer, and harness diagnostics. |
-| M3 | Tile catalog feasibility oracle | Not started | Unassigned | 2026-05-15 | Extend `CompiledTileCatalog` with pre-assignment direction-set feasibility. |
+| M3 | Tile catalog feasibility oracle | Complete | Codex | 2026-05-15 | Added `CompiledTileCatalog` feasibility oracle methods, direction-set normalization, catalog-gap diagnostics, and exhaustive direction-set tests. |
 | M4 | `LinearNetworkState` | Not started | Unassigned | 2026-05-15 | Add persistent linear connection state and debug layer. |
 | M5 | Tile-aware anchor selection | Not started | Unassigned | 2026-05-15 | Add anchor candidates, selected anchor plans, and split/failure planning. |
 | M6 | Tile-feasible routing | Not started | Unassigned | 2026-05-15 | Integrate raster-spine cost, tile feasibility, and linear state into route search. |
@@ -47,6 +47,8 @@ Future agents and humans must update this document after each milestone. Record 
 | 2026-05-15 | Remove the public `RouteRecord.cells` field instead of keeping a compatibility alias. | The recovery contract forbids ambiguous route-cell semantics; tests and debug consumers were migrated to `tile_cells`. | Codex |
 | 2026-05-15 | Store raster-spine support on each `RouteRecord`. | Keeping the accepted route and its source-line support artifact together makes debug export, harness diagnostics, and later tile-feasible routing consume one typed route contract. | Codex |
 | 2026-05-15 | Use correctness-first Shapely cell intersections for M2 spine extraction. | M2 prioritizes semantic correctness and small-fixture diagnostics; performance tuning is explicitly deferred until M12. | Codex |
+| 2026-05-15 | Normalize catalog feasibility queries through `CompiledTileCatalog` before matching variants. | Routing and anchor-selection milestones need the same direction-set interpretation as final tile assignment. | Codex |
+| 2026-05-15 | Keep `best_tile(..., road_class=...)` deterministic and cost/sort based for M3. | Road-class-aware tile preference needs route priority/class semantics from later milestones, so M3 exposes the parameter without changing selection behavior. | Codex |
 
 ## Contract Changes Requested or Approved
 
@@ -71,6 +73,8 @@ No further contract changes have been requested or approved.
 | 2026-05-15 | M1 | Endpoint cells owned by fixed intersection variants can skip route-placement mismatch checks when the route endpoint's local straight-tile requirement is broader than the intersection tile. | Direct cell paths make endpoint cells visible to both route and intersection placement; a full connection-state validator is intentionally deferred. | Milestone M8. |
 | 2026-05-15 | M2 | Raster-spine extraction scans the candidate bbox with Shapely cell intersections and has not been optimized for large real-world line batches. | M2 is correctness-first and fixture-scale; optimizing before route correctness stabilizes could hide semantic mistakes. | Milestone M12. |
 | 2026-05-15 | M2 | Spine alignment is currently a routing cost and diagnostic, not a hard tile-feasible acceptance rule. | Tile catalog feasibility, persistent connection state, and final validation are owned by later milestones. | Milestones M3-M9. |
+| 2026-05-15 | M3 | `best_tile` accepts `road_class` but does not yet use it for ranking. | M3 only establishes the feasibility oracle; class/priority-aware tile preference belongs with anchor and staged routing decisions. | Milestones M5-M7. |
+| 2026-05-15 | M3 | Catalog-gap diagnostics are exposed as query helpers, not emitted as a global startup report. | The current typed pipeline does not have a dedicated startup diagnostic stage; tests can identify gaps and later orchestration can publish them. | Milestones M7-M11. |
 
 ## Test and Validation Results
 
@@ -90,6 +94,9 @@ No further contract changes have been requested or approved.
 | 2026-05-15 | M2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_raster_spine.py tests\cm_terrain_extractor\osm_extraction\test_network_routing.py -v` | Passed | Final result: 15 passed. Pytest emitted dependency deprecation warnings and a `.pytest_cache` permission warning in the sandbox. |
 | 2026-05-15 | M2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_network_recovery_harness.py -v` | Passed | Final result: 14 passed, 1 xfailed. The xfail remains `test_four_way_crossing_has_a_single_legal_four_way_intersection`. Pytest emitted dependency deprecation warnings and a `.pytest_cache` permission warning in the sandbox. |
 | 2026-05-15 | M2 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check cm_terrain_extractor_app\terrain_extraction\osm_extraction\raster_spine.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\models.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\network_routing.py cm_terrain_extractor_app\terrain_extraction\osm_extraction\debug_export.py tests\cm_terrain_extractor\osm_extraction --no-cache` | Passed | First run reported `SIM108` in `raster_spine.py`; after replacing the branch with a ternary expression, final ruff passed. |
+| 2026-05-15 | M3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_tile_catalog_feasibility.py -q` | Failed as expected before oracle implementation | New tests failed because `CompiledTileCatalog` did not yet expose `has_tile`, `best_tile`, `allowed_step_dirs`, `can_extend`, or catalog-gap helpers. |
+| 2026-05-15 | M3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\pytest.exe tests\cm_terrain_extractor\osm_extraction\test_tile_catalog_feasibility.py tests\cm_terrain_extractor\osm_extraction\test_tile_assignment.py -v` | Passed | Final result: 25 passed. Pytest emitted dependency deprecation warnings and a `.pytest_cache` permission warning in the sandbox. |
+| 2026-05-15 | M3 | `C:\Users\der_b\miniconda3\envs\cm_terrain\Scripts\ruff.exe check cm_terrain_extractor_app\terrain_extraction\osm_extraction\tile_assignment.py tests\cm_terrain_extractor\osm_extraction\test_tile_catalog_feasibility.py tests\cm_terrain_extractor\osm_extraction\test_tile_assignment.py --no-cache` | Passed | Final result: all checks passed. |
 
 ## Blockers and Residual Risk
 
@@ -107,6 +114,8 @@ No further contract changes have been requested or approved.
 | 2026-05-15 | M1 | `four_way_crossing` remains xfailed. | M1 only clarified cell-path semantics; legal 4-way recovery still needs persistent connection state, anchor planning, tile-feasible routing, and final validation. | Milestones M4-M9. |
 | 2026-05-15 | M2 | `four_way_crossing` remains xfailed. | M2 constrains routes to source-line support, but legal 4-way recovery still needs tile feasibility, persistent linear state, anchor planning, routing finalization, and final-row validation. | Milestones M3-M9. |
 | 2026-05-15 | M2 | The first raster-spine cost is intentionally simple and not catalog-aware. | It improves equal-length route selection and diagnostics without claiming final tile legality. | Use M3 feasibility oracle and M6 tile-feasible routing to turn this diagnostic/cost into a stronger acceptance constraint. |
+| 2026-05-15 | M3 | The feasibility oracle is available but not yet wired into router neighbor expansion or anchor selection. | M3 makes legality queryable before assignment, but routes can still be planned before checking catalog feasibility. | Milestones M5-M6. |
+| 2026-05-15 | M3 | Catalogs that lack 3-way or 4-way tiles still produce assignment-time structured failures rather than split-intersection plans. | Split anchor planning is owned by later milestones. | Milestone M5. |
 
 ## Status Update Procedure
 

@@ -99,10 +99,42 @@ class CompiledTileCatalog:
         direction = _direction_between_nodes(first, second)
         return frozenset((direction, _OPPOSITE_DIRECTIONS[direction]))
 
-    def candidates_for(self, required_directions: frozenset[str]) -> tuple[TileVariant, ...]:
+    def has_tile(self, required_dirs: Iterable[str]) -> bool:
+        return bool(self.candidates_for(required_dirs))
+
+    def best_tile(self, required_dirs: Iterable[str], road_class: object | None = None) -> TileVariant | None:
+        del road_class
+        candidates = self.candidates_for(required_dirs)
+        return None if not candidates else candidates[0]
+
+    def allowed_step_dirs(self) -> frozenset[str]:
+        return frozenset(direction for variant in self.variants for direction in variant.directions)
+
+    def can_extend(self, existing_dirs: Iterable[str], new_dir: str) -> bool:
+        return self.has_tile((*existing_dirs, new_dir))
+
+    def missing_direction_sets(self, required_direction_sets: Iterable[Iterable[str]]) -> tuple[tuple[str, ...], ...]:
+        return tuple(
+            _ordered_directions(normalized)
+            for normalized in (_normalize_direction_set(direction_set) for direction_set in required_direction_sets)
+            if not self.has_tile(normalized)
+        )
+
+    def catalog_gap_diagnostics(self, required_direction_sets: Iterable[Iterable[str]]) -> tuple[Mapping[str, Any], ...]:
+        return tuple(
+            {
+                "process": self.process.value,
+                "required_directions": missing,
+                "failure_reason": "catalog_gap",
+            }
+            for missing in self.missing_direction_sets(required_direction_sets)
+        )
+
+    def candidates_for(self, required_directions: Iterable[str]) -> tuple[TileVariant, ...]:
+        normalized = _normalize_direction_set(required_directions)
         return tuple(
             sorted(
-                (variant for variant in self.variants if variant.directions == required_directions),
+                (variant for variant in self.variants if variant.directions == normalized),
                 key=_variant_sort_key,
             )
         )
@@ -430,6 +462,14 @@ def _connections_from_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
         for column in _CATALOG_DIRECTION_COLUMNS
         if column in record and not _is_missing(record[column])
     }
+
+
+def _normalize_direction_set(directions: Iterable[str]) -> frozenset[str]:
+    normalized = frozenset(direction.upper() for direction in directions)
+    unsupported = normalized.difference(_OPPOSITE_DIRECTIONS)
+    if unsupported:
+        raise ValueError(f"Unsupported tile direction(s): {_ordered_directions(unsupported)}")
+    return normalized
 
 
 def _is_missing(value: Any) -> bool:
