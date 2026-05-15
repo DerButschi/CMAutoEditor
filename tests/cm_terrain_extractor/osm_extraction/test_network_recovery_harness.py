@@ -86,6 +86,8 @@ def test_harness_captures_debug_layers_and_structured_symptoms() -> None:
         "routed_paths",
         "raster_spines",
         "route_anchors",
+        "anchor_candidates",
+        "selected_anchor_plans",
         "connection_bits",
         "final_rows",
     } <= set(result.debug_layers)

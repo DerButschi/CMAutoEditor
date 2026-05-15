@@ -51,6 +51,8 @@ def build_debug_layers(
         **_layer("routed_paths", lambda: _routed_paths_layer(routing, grid_index), layer_errors),
         **_layer("raster_spines", lambda: _raster_spines_layer(routing, grid_index), layer_errors),
         **_layer("route_anchors", lambda: _route_anchors_layer(routing, grid_index), layer_errors),
+        **_layer("anchor_candidates", lambda: _anchor_candidates_layer(routing, grid_index), layer_errors),
+        **_layer("selected_anchor_plans", lambda: _selected_anchor_plans_layer(routing, grid_index), layer_errors),
         **_layer("connection_bits", lambda: _connection_bits_layer(routing, grid_index), layer_errors),
         **_occupancy_layers(occupancy, grid_index, layer_errors),
         **_layer("building_footprints", lambda: _building_footprints_layer(placement_tuple, grid_index, layer_errors), layer_errors),
@@ -190,6 +192,53 @@ def _route_anchors_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFram
     return _gdf(rows, geometries, grid_index)
 
 
+def _anchor_candidates_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFrame:
+    rows = []
+    geometries = []
+    if grid_index is None:
+        return _empty_layer()
+    for plan in (getattr(routing, "anchor_plans", {}) or {}).values():
+        for candidate in getattr(plan, "candidates", ()) or ():
+            rows.append(
+                {
+                    "node_id": candidate.topology_node_id,
+                    "xidx": candidate.cell.xidx,
+                    "yidx": candidate.cell.yidx,
+                    "score": candidate.score,
+                    "search_radius": candidate.search_radius,
+                    "required_dirs_estimate": _json_value(candidate.required_dirs_estimate),
+                    "tile_feasible": candidate.tile_feasible,
+                    "occupancy_feasible": candidate.occupancy_feasible,
+                    "reasons": _json_value(candidate.reasons),
+                }
+            )
+            geometries.append(grid_index.cell_polygon(candidate.cell))
+    return _gdf(rows, geometries, grid_index)
+
+
+def _selected_anchor_plans_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFrame:
+    rows = []
+    geometries = []
+    if grid_index is None:
+        return _empty_layer()
+    for node_id, plan in sorted((getattr(routing, "anchor_plans", {}) or {}).items()):
+        for index, cell in enumerate(_plan_cells(plan)):
+            rows.append(
+                {
+                    "node_id": node_id,
+                    "plan_kind": getattr(plan, "plan_kind", None),
+                    "xidx": cell.xidx,
+                    "yidx": cell.yidx,
+                    "anchor_index": index,
+                    "reason": getattr(plan, "reason", None),
+                    "required_dirs_estimate": _json_value(getattr(plan, "required_dirs_estimate", ())),
+                    "split_direction_sets": _json_value(getattr(plan, "split_direction_sets", ())),
+                }
+            )
+            geometries.append(grid_index.cell_polygon(cell))
+    return _gdf(rows, geometries, grid_index)
+
+
 def _raster_spines_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFrame:
     rows = []
     geometries = []
@@ -213,6 +262,17 @@ def _raster_spines_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFram
             )
             geometries.append(grid_index.cell_polygon(cell))
     return _gdf(rows, geometries, grid_index)
+
+
+def _plan_cells(plan: Any) -> tuple[GridCell, ...]:
+    anchor_cell = getattr(plan, "anchor_cell", None)
+    if anchor_cell is not None:
+        return (anchor_cell,)
+    split_anchor_cells = getattr(plan, "split_anchor_cells", None)
+    if split_anchor_cells:
+        return tuple(split_anchor_cells)
+    fallback_cell = getattr(plan, "fallback_cell", None)
+    return () if fallback_cell is None else (fallback_cell,)
 
 
 def _connection_bits_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFrame:

@@ -424,6 +424,7 @@ class OSMProcessor:
             if feature.process in {ProcessKind.ROAD, ProcessKind.RAIL, ProcessKind.STREAM, ProcessKind.FENCE}
         )
         if linear_features:
+            linear_catalogs = self._tile_catalogs_for(linear_features)
             topology_result = self.pipeline.run_network_topology(
                 features=linear_features,
                 clip_geometry=getattr(self, "effective_bbox_polygon", None),
@@ -433,11 +434,12 @@ class OSMProcessor:
                 topology=self.topology,
                 grid_index=grid_index,
                 occupancy=self.occupancy,
+                catalogs=linear_catalogs,
             )
             self.routing = routing_result.diagnostics["network_routes"]
             tile_result = self.pipeline.run_tile_assignment(
                 routes=self.routing.routes,
-                catalogs=self._tile_catalogs_for(linear_features),
+                catalogs=linear_catalogs,
             )
             placements.extend(tile_result.placements)
             self._reserve_output_placements(tile_result.placements)

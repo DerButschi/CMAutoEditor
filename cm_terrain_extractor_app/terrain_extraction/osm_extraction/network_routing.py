@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from shapely.geometry import LineString
+from terrain_extraction.osm_extraction.anchor_selection import AnchorSelector, anchor_cell_for_plan
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.linear_network_state import (
     LinearNetworkState,
@@ -124,7 +125,12 @@ class NetworkRouter:
         self.linear_state = linear_state
 
     def route(self, topology: TopologyGraph) -> NetworkRoutingResult:
-        anchors = self._node_anchors(topology)
+        anchor_selection = AnchorSelector(
+            grid_index=self.grid_index,
+            occupancy=self.occupancy,
+            catalogs=self.catalogs,
+        ).select(topology)
+        anchors = self._node_anchors(topology, anchor_selection.plans)
         degrees = {node.node_id: topology.degree(node.node_id) for node in topology.nodes}
         linear_state = self.linear_state or LinearNetworkState(
             width=self.grid_index.width,
@@ -142,10 +148,12 @@ class NetworkRouter:
             routes.append(route)
 
         diagnostics = self._diagnostics(routes)
+        diagnostics.update(anchor_selection.diagnostics)
         diagnostics.update(linear_state.diagnostics())
         return NetworkRoutingResult(
             routes=tuple(routes),
             node_anchors=anchors,
+            anchor_plans=anchor_selection.plans,
             diagnostics=diagnostics,
             linear_state=linear_state,
         )
@@ -416,11 +424,17 @@ class NetworkRouter:
             cm_type=route.cm_type,
         )
 
-    def _node_anchors(self, topology: TopologyGraph) -> dict[int, GridNode]:
-        return {
-            node.node_id: self._clamp_node(self.grid_index.projected_to_cell(node.point.x, node.point.y))
-            for node in topology.nodes
-        }
+    def _node_anchors(self, topology: TopologyGraph, anchor_plans: Mapping[int, Any]) -> dict[int, GridNode]:
+        anchors = {}
+        for node in topology.nodes:
+            plan = anchor_plans.get(node.node_id)
+            cell = (
+                anchor_cell_for_plan(plan)
+                if plan is not None
+                else self._clamp_node(self.grid_index.projected_to_cell(node.point.x, node.point.y))
+            )
+            anchors[node.node_id] = GridNode(cell.xidx, cell.yidx)
+        return anchors
 
     def _route_order(
         self,

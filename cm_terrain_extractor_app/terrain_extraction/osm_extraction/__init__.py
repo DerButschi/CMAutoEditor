@@ -1,3 +1,11 @@
+from terrain_extraction.osm_extraction.anchor_selection import (
+    AnchorCandidate,
+    AnchorSelectionResult,
+    AnchorSelector,
+    FailedAnchorPlan,
+    SingleAnchorPlan,
+    SplitAnchorPlan,
+)
 from terrain_extraction.osm_extraction.area_rasterizer import AreaRasterizer
 from terrain_extraction.osm_extraction.building_fitter import (
     BuildingCatalog,
@@ -73,6 +81,9 @@ from terrain_extraction.osm_extraction.tile_assignment import (
 
 __all__ = [
     "AreaRasterizer",
+    "AnchorCandidate",
+    "AnchorSelectionResult",
+    "AnchorSelector",
     "BuildingCatalog",
     "BuildingFitter",
     "BuildingFittingResult",
@@ -91,6 +102,7 @@ __all__ = [
     "ExtractionStats",
     "FeatureMatcher",
     "FeatureRecord",
+    "FailedAnchorPlan",
     "GridCell",
     "GridKind",
     "GridIndex",
@@ -110,6 +122,8 @@ __all__ = [
     "ProgressCallback",
     "RasterSpine",
     "RouteRecord",
+    "SingleAnchorPlan",
+    "SplitAnchorPlan",
     "MoveStep",
     "noop_progress",
     "TagSelector",

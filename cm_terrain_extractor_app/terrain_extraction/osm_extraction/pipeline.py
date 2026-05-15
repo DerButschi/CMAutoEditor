@@ -128,6 +128,7 @@ class ExtractionPipeline:
         topology: Any,
         grid_index: GridIndex,
         occupancy: OccupancyModel | None = None,
+        catalogs: Mapping[Any, Any] | None = None,
         corridor_deviation_m: float = 32.0,
         minor_relaxation_m: float = 48.0,
     ) -> ExtractionResult:
@@ -136,6 +137,7 @@ class ExtractionPipeline:
         router = NetworkRouter(
             grid_index=grid_index,
             occupancy=occupancy,
+            catalogs=catalogs,
             corridor_deviation_m=corridor_deviation_m,
             minor_relaxation_m=minor_relaxation_m,
         )

@@ -371,6 +371,10 @@ def _diagnostics(
         "anchor": {
             "anchor_count": len(getattr(routing, "node_anchors", {}) or {}),
             "anchor_node_ids": tuple(sorted((getattr(routing, "node_anchors", {}) or {}).keys())),
+            "anchor_plan_count": len(getattr(routing, "anchor_plans", {}) or {}),
+            "anchor_plan_kinds": tuple(
+                sorted(getattr(plan, "plan_kind", "unknown") for plan in (getattr(routing, "anchor_plans", {}) or {}).values())
+            ),
         },
         "route": {
             "route_count": len(routes),

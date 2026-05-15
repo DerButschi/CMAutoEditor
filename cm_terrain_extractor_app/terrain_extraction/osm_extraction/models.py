@@ -228,12 +228,14 @@ class RouteRecord:
 class NetworkRoutingResult:
     routes: tuple[RouteRecord, ...] = ()
     node_anchors: Mapping[int, GridNode] = field(default_factory=dict)
+    anchor_plans: Mapping[int, Any] = field(default_factory=dict)
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
     linear_state: Any | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "routes", tuple(self.routes))
         object.__setattr__(self, "node_anchors", _frozen_mapping(self.node_anchors))
+        object.__setattr__(self, "anchor_plans", _frozen_mapping(self.anchor_plans))
         object.__setattr__(self, "diagnostics", _frozen_mapping(self.diagnostics))
 
     @property

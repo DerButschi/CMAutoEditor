@@ -143,7 +143,16 @@ def test_osm_processor_run_processors_dispatches_to_typed_pipeline(monkeypatch) 
             calls.append(("topology", tuple(feature.process for feature in features)))
             return ExtractionResult(diagnostics={"network_topology": TopologyGraph()})
 
-        def run_network_router(self, *, topology, grid_index, occupancy, corridor_deviation_m=32.0, minor_relaxation_m=48.0):
+        def run_network_router(
+            self,
+            *,
+            topology,
+            grid_index,
+            occupancy,
+            catalogs=None,
+            corridor_deviation_m=32.0,
+            minor_relaxation_m=48.0,
+        ):
             calls.append(("routing", topology))
             return ExtractionResult(diagnostics={"network_routes": NetworkRoutingResult()})
 
