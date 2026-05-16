@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from terrain_extraction.osm_extraction.linear_processing_plan import (
+    LinearInteractionPolicy,
+    default_linear_interaction_policy,
+)
 from terrain_extraction.osm_extraction.models import GridCell, ProcessKind, RouteRecord
 
 _DIRECTION_BITS = {"N": 1, "E": 2, "S": 4, "W": 8}
@@ -36,6 +40,7 @@ class LinearNetworkState:
     width: int
     height: int
     catalogs: Mapping[ProcessKind, Any] = field(default_factory=dict)
+    interaction_policy: LinearInteractionPolicy = field(default_factory=default_linear_interaction_policy)
     occupied: set[GridCell] = field(init=False, default_factory=set)
     connection_bits: dict[GridCell, int] = field(init=False, default_factory=dict)
     route_id_at_cell: dict[GridCell, tuple[int | str, ...]] = field(init=False, default_factory=dict)
@@ -59,6 +64,8 @@ class LinearNetworkState:
         outgoing_dir: str | None,
         process: ProcessKind,
         priority: int,
+        *,
+        allow_lower_priority_connection: bool = False,
     ) -> LinearCellDecision:
         dirs = {direction for direction in (incoming_dir, outgoing_dir) if direction}
         failures = self._reservation_failures(
@@ -66,6 +73,7 @@ class LinearNetworkState:
             process=process,
             priority=priority,
             route_id=None,
+            lower_priority_connection_cells=frozenset((cell,)) if allow_lower_priority_connection else frozenset(),
         )
         return LinearCellDecision(allowed=not failures, failures=failures)
 
@@ -77,6 +85,7 @@ class LinearNetworkState:
             process=route.process,
             priority=route.priority,
             route_id=route_key,
+            lower_priority_connection_cells=_endpoint_cells(route.tile_cells),
         )
         if failures:
             return LinearReservationResult(success=False, route_id=route_key, failures=failures)
@@ -143,6 +152,7 @@ class LinearNetworkState:
                 "linear_state_intersections": sum(
                     1 for kind in self.intersection_kind_at_cell.values() if kind in {"t_junction", "four_way"}
                 ),
+                "process_pair_policy": self.interaction_policy.as_diagnostics(),
             }
         )
 
@@ -153,6 +163,7 @@ class LinearNetworkState:
         process: ProcessKind,
         priority: int,
         route_id: int | str | None,
+        lower_priority_connection_cells: frozenset[GridCell],
     ) -> tuple[Mapping[str, Any], ...]:
         failures = []
         for cell, directions in additions.items():
@@ -168,16 +179,35 @@ class LinearNetworkState:
             existing_dirs = self.required_dirs(cell)
             new_dirs = normalized_dirs.difference(existing_dirs)
             existing_process = self.process_at_cell.get(cell)
-            if existing_process is not None and existing_process != process and new_dirs:
-                failures.append(_failure(process, cell, existing_dirs | normalized_dirs, "process_conflict"))
-                continue
-
             existing_priority = self.priority_at_cell.get(cell)
+            if existing_process is not None and existing_process != process and new_dirs:
+                decision = self.interaction_policy.decision(existing_process, process)
+                if decision.interaction != "connect":
+                    reason = "process_avoidance" if decision.interaction == "avoid" else "process_conflict"
+                    failures.append(
+                        _failure(
+                            process,
+                            cell,
+                            existing_dirs | normalized_dirs,
+                            reason,
+                            existing_process=existing_process,
+                            interaction=decision.interaction,
+                        )
+                    )
+                    continue
+
+            allows_lower_priority_connection = (
+                existing_process is not None
+                and self.interaction_policy.decision(existing_process, process).interaction == "connect"
+                and len(new_dirs) == 1
+                and cell in lower_priority_connection_cells
+            )
             if (
                 existing_priority is not None
                 and priority > existing_priority
                 and new_dirs
                 and route_id not in self.route_id_at_cell.get(cell, ())
+                and not allows_lower_priority_connection
             ):
                 failures.append(_failure(process, cell, existing_dirs | normalized_dirs, "lower_priority_overwrite"))
                 continue
@@ -231,6 +261,13 @@ def _route_direction_additions(tile_cells: Iterable[GridCell]) -> dict[GridCell,
     return additions
 
 
+def _endpoint_cells(tile_cells: Iterable[GridCell]) -> frozenset[GridCell]:
+    cells = tuple(tile_cells)
+    if not cells:
+        return frozenset()
+    return frozenset((cells[0], cells[-1]))
+
+
 def _direction_between_cells(first: GridCell, second: GridCell) -> str | None:
     dx = second.xidx - first.xidx
     dy = second.yidx - first.yidx
@@ -271,6 +308,7 @@ def _failure(
     cell: GridCell,
     required_directions: Iterable[str],
     reason: str,
+    **extra: Any,
 ) -> Mapping[str, Any]:
     return MappingProxyType(
         {
@@ -278,6 +316,10 @@ def _failure(
             "cell": (cell.xidx, cell.yidx),
             "required_directions": _ordered_directions(required_directions),
             "failure_reason": reason,
+            **{
+                key: value.value if isinstance(value, ProcessKind) else value
+                for key, value in extra.items()
+            },
         }
     )
 

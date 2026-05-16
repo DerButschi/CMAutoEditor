@@ -31,6 +31,13 @@ from terrain_extraction.osm_extraction.linear_network_state import (
     LinearNetworkState,
     LinearReservationResult,
 )
+from terrain_extraction.osm_extraction.linear_processing_plan import (
+    LinearInteractionPolicy,
+    LinearProcessingGroup,
+    LinearProcessingPlan,
+    ProcessInteractionDecision,
+    default_linear_interaction_policy,
+)
 from terrain_extraction.osm_extraction.models import (
     CMType,
     ConflictDecision,
@@ -109,7 +116,10 @@ __all__ = [
     "GridNode",
     "LayerKind",
     "LinearCellDecision",
+    "LinearInteractionPolicy",
     "LinearNetworkState",
+    "LinearProcessingGroup",
+    "LinearProcessingPlan",
     "LinearReservationResult",
     "NetworkTopologyBuilder",
     "NetworkRouter",
@@ -119,6 +129,7 @@ __all__ = [
     "OutputRowValidationError",
     "PlacementRecord",
     "ProcessKind",
+    "ProcessInteractionDecision",
     "ProgressCallback",
     "RasterSpine",
     "RouteRecord",
@@ -136,6 +147,7 @@ __all__ = [
     "append_extent_marker",
     "build_debug_layers",
     "build_raster_spine",
+    "default_linear_interaction_policy",
     "normalize_output_coordinates",
     "placements_to_output_rows",
     "validate_output_rows",

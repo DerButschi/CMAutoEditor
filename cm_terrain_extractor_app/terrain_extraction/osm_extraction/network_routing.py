@@ -13,6 +13,12 @@ from terrain_extraction.osm_extraction.linear_network_state import (
     LinearNetworkState,
     LinearReservationResult,
 )
+from terrain_extraction.osm_extraction.linear_processing_plan import (
+    LinearInteractionPolicy,
+    LinearProcessingGroup,
+    LinearProcessingPlan,
+    default_linear_interaction_policy,
+)
 from terrain_extraction.osm_extraction.models import (
     CMType,
     GridCell,
@@ -112,6 +118,7 @@ class NetworkRouter:
         split_long_edge_m: float = 256.0,
         catalogs: Mapping[ProcessKind, Any] | None = None,
         linear_state: LinearNetworkState | None = None,
+        interaction_policy: LinearInteractionPolicy | None = None,
     ) -> None:
         if corridor_deviation_m < 0:
             raise ValueError("corridor_deviation_m must be non-negative")
@@ -126,37 +133,53 @@ class NetworkRouter:
         self.split_long_edge_m = split_long_edge_m
         self.catalogs = dict(catalogs or {})
         self.linear_state = linear_state
+        self.interaction_policy = interaction_policy or default_linear_interaction_policy()
 
     def route(self, topology: TopologyGraph) -> NetworkRoutingResult:
-        anchor_selection = AnchorSelector(
-            grid_index=self.grid_index,
-            occupancy=self.occupancy,
-            catalogs=self.catalogs,
-        ).select(topology)
-        anchors = self._node_anchors(topology, anchor_selection.plans)
-        degrees = {node.node_id: topology.degree(node.node_id) for node in topology.nodes}
+        processing_plan = LinearProcessingPlan.from_topology(
+            topology,
+            interaction_policy=self.interaction_policy,
+        )
         linear_state = self.linear_state or LinearNetworkState(
             width=self.grid_index.width,
             height=self.grid_index.height,
             catalogs=self.catalogs,
+            interaction_policy=processing_plan.interaction_policy,
         )
         self.linear_state = linear_state
+        anchors = {}
+        anchor_plans = {}
+        anchor_diagnostics: list[Mapping[str, Any]] = []
         routes = []
-        for edge in self._route_order(topology.edges, degrees):
-            route = self._route_edge(edge, anchors, degrees, anchor_selection.plans)
-            if route.success:
-                reservation = linear_state.reserve_path(route)
-                if not reservation.success:
-                    route = self._reservation_failed_route(route, reservation)
-            routes.append(route)
+        for group in processing_plan.groups:
+            group_topology = group.topology(topology.nodes)
+            anchor_selection = AnchorSelector(
+                grid_index=self.grid_index,
+                occupancy=self.occupancy,
+                catalogs=self.catalogs,
+            ).select(group_topology)
+            group_anchors = self._node_anchors(group_topology, anchor_selection.plans)
+            group_degrees = {node.node_id: group_topology.degree(node.node_id) for node in group_topology.nodes}
+            anchors.update(group_anchors)
+            anchor_plans.update(anchor_selection.plans)
+            anchor_diagnostics.append(anchor_selection.diagnostics)
+            for edge in self._route_order(group.edges, group_degrees):
+                route = self._route_edge(edge, group_anchors, group_degrees, anchor_selection.plans)
+                route = self._with_processing_diagnostics(route, group)
+                if route.success:
+                    reservation = linear_state.reserve_path(route)
+                    if not reservation.success:
+                        route = self._reservation_failed_route(route, reservation)
+                routes.append(route)
 
         diagnostics = self._diagnostics(routes)
-        diagnostics.update(anchor_selection.diagnostics)
+        diagnostics.update(_combined_anchor_diagnostics(anchor_diagnostics))
         diagnostics.update(linear_state.diagnostics())
+        diagnostics.update(processing_plan.diagnostics)
         return NetworkRoutingResult(
             routes=tuple(routes),
             node_anchors=anchors,
-            anchor_plans=anchor_selection.plans,
+            anchor_plans=anchor_plans,
             diagnostics=diagnostics,
             linear_state=linear_state,
         )
@@ -303,6 +326,8 @@ class NetworkRouter:
                     state=state,
                     current=current,
                     neighbor=neighbor,
+                    start=start,
+                    goal=goal,
                     incoming_direction=incoming_direction,
                     step_direction=step.direction,
                     process=process,
@@ -485,6 +510,35 @@ class NetworkRouter:
             cm_type=route.cm_type,
         )
 
+    def _with_processing_diagnostics(
+        self,
+        route: RouteRecord,
+        group: LinearProcessingGroup,
+    ) -> RouteRecord:
+        diagnostics = {
+            **dict(route.diagnostics),
+            "processing_group": group.group_index,
+            "processing_stage": group.stage,
+            "processing_process": group.process.value,
+            "processing_config_name": group.config_name,
+            "processing_priority": group.priority,
+            "processing_rank": group.rank,
+        }
+        return RouteRecord(
+            edge_id=route.edge_id,
+            start_node_id=route.start_node_id,
+            end_node_id=route.end_node_id,
+            process=route.process,
+            config_name=route.config_name,
+            priority=route.priority,
+            nodes=route.nodes,
+            tile_cells=route.tile_cells,
+            raster_spine=route.raster_spine,
+            success=route.success,
+            diagnostics=diagnostics,
+            cm_type=route.cm_type,
+        )
+
     def _node_anchors(self, topology: TopologyGraph, anchor_plans: Mapping[int, Any]) -> dict[int, GridNode]:
         anchors = {}
         for node in topology.nodes:
@@ -610,6 +664,7 @@ class NetworkRouter:
         outgoing_dir: str | None,
         process: ProcessKind,
         priority: int,
+        allow_lower_priority_connection: bool = False,
     ) -> Any:
         if self.linear_state is None:
             return _AllowedCellDecision()
@@ -619,6 +674,7 @@ class NetworkRouter:
             outgoing_dir=outgoing_dir,
             process=process,
             priority=priority,
+            allow_lower_priority_connection=allow_lower_priority_connection,
         )
 
     def _route_step_decision(
@@ -628,6 +684,8 @@ class NetworkRouter:
         state: tuple[int, int, str],
         current: GridNode,
         neighbor: GridNode,
+        start: GridNode,
+        goal: GridNode,
         incoming_direction: str,
         step_direction: str,
         process: ProcessKind,
@@ -641,6 +699,7 @@ class NetworkRouter:
             outgoing_dir=step_direction,
             process=process,
             priority=priority,
+            allow_lower_priority_connection=current in {start, goal},
         )
         if not current_decision.allowed:
             return current_decision
@@ -650,6 +709,7 @@ class NetworkRouter:
             outgoing_dir=None,
             process=process,
             priority=priority,
+            allow_lower_priority_connection=neighbor in {start, goal},
         )
 
     def _spine_diagnostics(
@@ -781,6 +841,21 @@ def _extend_failures(
         return
     remaining = limit - len(collected)
     collected.extend(dict(failure) for failure in tuple(failures)[:remaining])
+
+
+def _combined_anchor_diagnostics(items: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    totals = {
+        "anchor_nodes": 0,
+        "single_anchor_plans": 0,
+        "split_anchor_plans": 0,
+        "failed_anchor_plans": 0,
+        "anchor_candidates": 0,
+        "anchor_retry_nodes": 0,
+    }
+    for diagnostics in items:
+        for key in totals:
+            totals[key] += int(diagnostics.get(key, 0))
+    return totals
 
 
 def _retry_mode(relaxation: str | None) -> str | None:
