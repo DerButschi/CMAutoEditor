@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from terrain_extraction.osm_extraction.direction_resolution import (
+    normalize_direction_set,
+    resolve_required_directions,
+)
 from terrain_extraction.osm_extraction.models import (
     CMType,
     GridCell,
@@ -116,8 +120,8 @@ class CompiledTileCatalog:
     def missing_direction_sets(self, required_direction_sets: Iterable[Iterable[str]]) -> tuple[tuple[str, ...], ...]:
         return tuple(
             _ordered_directions(normalized)
-            for normalized in (_normalize_direction_set(direction_set) for direction_set in required_direction_sets)
-            if not self.has_tile(normalized)
+            for normalized in (normalize_direction_set(direction_set) for direction_set in required_direction_sets)
+            if self.resolved_required_directions(normalized) is None
         )
 
     def catalog_gap_diagnostics(self, required_direction_sets: Iterable[Iterable[str]]) -> tuple[Mapping[str, Any], ...]:
@@ -131,13 +135,24 @@ class CompiledTileCatalog:
         )
 
     def candidates_for(self, required_directions: Iterable[str]) -> tuple[TileVariant, ...]:
-        normalized = _normalize_direction_set(required_directions)
+        normalized = self.resolved_required_directions(required_directions)
+        if normalized is None:
+            return ()
+        return self._exact_candidates_for(normalized)
+
+    def resolved_required_directions(self, required_directions: Iterable[str]) -> frozenset[str] | None:
+        return resolve_required_directions(required_directions, self._has_exact_tile)
+
+    def _has_exact_tile(self, required_directions: frozenset[str]) -> bool:
+        return any(variant.directions == required_directions for variant in self.variants)
+
+    def _exact_candidates_for(self, required_directions: frozenset[str]) -> tuple[TileVariant, ...]:
         return tuple(
             sorted(
-                (variant for variant in self.variants if variant.directions == normalized),
+                (variant for variant in self.variants if variant.directions == required_directions),
                 key=_variant_sort_key,
             )
-)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,7 +280,21 @@ class TileAssigner:
                     _failure(spec.process, spec.cell, spec.required_directions, "missing_catalog", hard_failure=True)
                 )
                 continue
-            variant = catalog.best_tile(spec.required_directions)
+            resolved_required_directions = catalog.resolved_required_directions(spec.required_directions)
+            if resolved_required_directions is None:
+                failures.append(
+                    _failure(spec.process, spec.cell, spec.required_directions, "catalog_gap", hard_failure=True)
+                )
+                continue
+            resolved_spec = _StateCellSpec(
+                process=spec.process,
+                cell=spec.cell,
+                required_directions=resolved_required_directions,
+                route_ids=spec.route_ids,
+                priority=spec.priority,
+                intersection_kind=spec.intersection_kind,
+            )
+            variant = catalog.best_tile(resolved_required_directions)
             if variant is None:
                 failures.append(
                     _failure(spec.process, spec.cell, spec.required_directions, "catalog_gap", hard_failure=True)
@@ -273,7 +302,7 @@ class TileAssigner:
                 continue
             placements.append(
                 self._state_placement_from_variant(
-                    spec=spec,
+                    spec=resolved_spec,
                     variant=variant,
                     contributing_routes=tuple(
                         route_by_id[route_id] for route_id in spec.route_ids if route_id in route_by_id
@@ -571,11 +600,7 @@ def _connections_from_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def _normalize_direction_set(directions: Iterable[str]) -> frozenset[str]:
-    normalized = frozenset(direction.upper() for direction in directions)
-    unsupported = normalized.difference(_OPPOSITE_DIRECTIONS)
-    if unsupported:
-        raise ValueError(f"Unsupported tile direction(s): {_ordered_directions(unsupported)}")
-    return normalized
+    return normalize_direction_set(directions)
 
 
 def _is_missing(value: Any) -> bool:

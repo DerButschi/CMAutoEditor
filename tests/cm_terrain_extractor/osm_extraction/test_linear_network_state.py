@@ -186,6 +186,59 @@ def test_tile_assignment_can_consume_state_derived_required_directions() -> None
     assert center[0].diagnostics["required_directions"] == ("E", "N", "S", "W")
 
 
+def test_short_dead_end_road_finalizes_without_catalog_gap() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import TileAssigner
+
+    catalog = _catalog()
+    state = LinearNetworkState(width=4, height=4, catalogs={ProcessKind.ROAD: catalog})
+    route = _route(1, ((0, 1), (1, 1)))
+
+    reservation = state.reserve_path(route)
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(
+        (route,),
+        linear_state=state,
+    )
+
+    assert reservation.success
+    assert result.success
+    assert result.failures == ()
+    assert {placement.cells[0] for placement in result.placements} == {GridCell(0, 1), GridCell(1, 1)}
+    assert {placement.diagnostics["required_directions"] for placement in result.placements} == {("E", "W")}
+
+
+def test_accepted_profile_catalog_endpoints_can_be_finalized() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
+
+    catalog_records = {
+        ProcessKind.ROAD: road_tiles,
+        ProcessKind.RAIL: rail_tiles,
+        ProcessKind.STREAM: stream_tiles,
+        ProcessKind.FENCE: fence_tiles,
+    }
+
+    for edge_id, (process, records) in enumerate(catalog_records.items(), start=1):
+        catalog = CompiledTileCatalog.from_records(records, process=process)
+        state = LinearNetworkState(width=4, height=4, catalogs={process: catalog})
+        route = _route(edge_id, ((0, 1), (1, 1)), process=process, config_name=process.value)
+
+        reservation = state.reserve_path(route)
+        result = TileAssigner({process: catalog}, rng=np.random.default_rng(12)).assign(
+            (route,),
+            linear_state=state,
+        )
+
+        assert reservation.success, process.value
+        assert result.success, process.value
+        assert result.failures == (), process.value
+        assert all(len(placement.diagnostics["required_directions"]) == 2 for placement in result.placements)
+
+
 def test_debug_export_exposes_connection_bits_layer() -> None:
     from terrain_extraction.osm_extraction.debug_export import build_debug_layers
     from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState

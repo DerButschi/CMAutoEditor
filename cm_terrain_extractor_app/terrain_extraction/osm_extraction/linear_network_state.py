@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from terrain_extraction.osm_extraction.direction_resolution import resolve_required_directions
 from terrain_extraction.osm_extraction.linear_processing_plan import (
     LinearInteractionPolicy,
     default_linear_interaction_policy,
@@ -218,10 +219,12 @@ class LinearNetworkState:
         return tuple(failures)
 
     def _catalog_allows(self, process: ProcessKind, directions: frozenset[str]) -> bool:
-        if len(directions) < 2:
-            return True
         catalog = self.catalogs.get(process)
-        return catalog is None or bool(catalog.has_tile(directions))
+        if catalog is None:
+            return True
+        if hasattr(catalog, "resolved_required_directions"):
+            return catalog.resolved_required_directions(directions) is not None
+        return resolve_required_directions(directions, lambda required: bool(catalog.has_tile(required))) is not None
 
     def _cell_in_bounds(self, cell: GridCell) -> bool:
         return 0 <= cell.xidx < self.width and 0 <= cell.yidx < self.height

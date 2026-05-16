@@ -80,6 +80,28 @@ def test_catalog_oracle_reports_missing_unsupported_direction_sets() -> None:
     )
 
 
+def test_one_direction_endpoint_resolves_to_supported_opposite_pair() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    catalog = CompiledTileCatalog.from_records(_full_cardinal_catalog_rows()[:2], process=ProcessKind.ROAD)
+
+    assert catalog.resolved_required_directions({"E"}) == frozenset({"E", "W"})
+    assert catalog.candidates_for({"E"})[0].directions == frozenset({"E", "W"})
+    assert catalog.missing_direction_sets(({"E"},)) == ()
+
+
+def test_one_direction_endpoint_is_missing_when_opposite_pair_is_unsupported() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    catalog = CompiledTileCatalog.from_records((_full_cardinal_catalog_rows()[0],), process=ProcessKind.ROAD)
+
+    assert catalog.resolved_required_directions({"E"}) is None
+    assert not catalog.has_tile({"E"})
+    assert catalog.missing_direction_sets(({"E"},)) == (("E",),)
+
+
 def test_allowed_step_dirs_and_can_extend_use_normalized_direction_sets() -> None:
     from terrain_extraction.osm_extraction.models import ProcessKind
     from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
