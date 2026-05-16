@@ -75,20 +75,35 @@ def append_extent_marker(
     return tuple(out_rows)
 
 
-def normalize_output_coordinates(
+def clip_output_rows_to_bounds(
     rows: Iterable[Mapping[str, Any]],
     *,
     bounds: Sequence[int | float],
 ) -> tuple[Mapping[str, Any], ...]:
     xmin, ymin, xmax, ymax = bounds
-    normalized: list[Mapping[str, Any]] = []
+    clipped: list[Mapping[str, Any]] = []
     for row in rows:
         xidx = _coordinate(row, "xidx", "x")
         yidx = _coordinate(row, "yidx", "y")
         if xidx is None or yidx is None:
             raise OutputRowValidationError(f"output row is missing coordinates: {row}")
-        if not (xmin <= xidx <= xmax and ymin <= yidx <= ymax):
-            continue
+        if xmin <= xidx <= xmax and ymin <= yidx <= ymax:
+            clipped.append(row)
+    return tuple(clipped)
+
+
+def normalize_output_coordinates(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    bounds: Sequence[int | float],
+) -> tuple[Mapping[str, Any], ...]:
+    xmin, ymin, _, _ = bounds
+    normalized: list[Mapping[str, Any]] = []
+    for row in clip_output_rows_to_bounds(rows, bounds=bounds):
+        xidx = _coordinate(row, "xidx", "x")
+        yidx = _coordinate(row, "yidx", "y")
+        if xidx is None or yidx is None:
+            raise OutputRowValidationError(f"output row is missing coordinates: {row}")
 
         normalized.append(
             {

@@ -68,6 +68,7 @@ from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.output_rows import (
     OutputRowValidationError,
     append_extent_marker,
+    clip_output_rows_to_bounds,
     normalize_output_coordinates,
     placements_to_output_rows,
     validate_output_rows,
@@ -155,6 +156,7 @@ __all__ = [
     "append_extent_marker",
     "build_debug_layers",
     "build_raster_spine",
+    "clip_output_rows_to_bounds",
     "default_linear_interaction_policy",
     "normalize_output_coordinates",
     "placements_to_output_rows",

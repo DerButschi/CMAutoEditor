@@ -307,6 +307,7 @@ class ExtractionPipeline:
         from terrain_extraction.osm_extraction.output_rows import (
             OutputRowValidationError,
             append_extent_marker,
+            clip_output_rows_to_bounds,
             normalize_output_coordinates,
             placements_to_output_rows,
             validate_output_rows,
@@ -317,11 +318,12 @@ class ExtractionPipeline:
 
         internal_rows = placements_to_output_rows(placements, include_internal=True)
         rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
-        validate_output_rows(rows_with_extent, bounds=bounds)
-        road_validation = validate_road_output_rows(rows_with_extent, profile=self.context.profile)
+        clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
+        validate_output_rows(clipped_rows, bounds=bounds)
+        road_validation = validate_road_output_rows(clipped_rows, profile=self.context.profile)
         if not road_validation.is_valid:
             raise OutputRowValidationError(road_validation.issue_summary())
-        output_rows = normalize_output_coordinates(rows_with_extent, bounds=bounds)
+        output_rows = normalize_output_coordinates(clipped_rows, bounds=bounds)
         self.context.progress("output_assembly", 1.0, "Layered output rows assembled")
         return ExtractionResult(
             placements=placements,

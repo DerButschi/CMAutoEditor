@@ -723,6 +723,7 @@ class OSMProcessor:
         from terrain_extraction.osm_extraction.output_rows import (
             OutputRowValidationError,
             append_extent_marker,
+            clip_output_rows_to_bounds,
             normalize_output_coordinates,
             placements_to_output_rows,
             validate_output_rows,
@@ -734,11 +735,12 @@ class OSMProcessor:
         bounds = tuple(self.idx_bbox)
         internal_rows = placements_to_output_rows(tuple(getattr(self, "placements", ())), include_internal=True)
         rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
-        validate_output_rows(rows_with_extent, bounds=bounds)
-        road_validation = validate_road_output_rows(rows_with_extent, profile=getattr(self, "profile", None))
+        clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
+        validate_output_rows(clipped_rows, bounds=bounds)
+        road_validation = validate_road_output_rows(clipped_rows, profile=getattr(self, "profile", None))
         if not road_validation.is_valid:
             raise OutputRowValidationError(road_validation.issue_summary())
-        return normalize_output_coordinates(rows_with_extent, bounds=bounds)
+        return normalize_output_coordinates(clipped_rows, bounds=bounds)
 
     def _get_layered_output_dataframe(self):
         from terrain_extraction.osm_extraction.output_rows import NORMALIZED_OUTPUT_ROW_COLUMNS

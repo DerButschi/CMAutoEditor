@@ -107,15 +107,19 @@ def test_placements_to_output_rows_are_layered_stable_and_skip_shadowed_defaults
 def test_extent_marker_and_coordinate_normalization_are_explicit() -> None:
     from terrain_extraction.osm_extraction.output_rows import (
         append_extent_marker,
+        clip_output_rows_to_bounds,
         normalize_output_coordinates,
     )
 
     rows = (
         {"xidx": 10, "yidx": 20, "z": -1, "menu": "Ground", "cat1": "Grass", "cat2": -1, "direction": -1, "id": -1, "name": "field", "priority": 1},
+        {"xidx": 9.75, "yidx": 20, "z": -1, "menu": "Ground", "cat1": "Grass", "cat2": -1, "direction": -1, "id": -1, "name": "outside", "priority": 1},
     )
 
-    normalized = normalize_output_coordinates(append_extent_marker(rows, bounds=(10, 20, 12, 22)), bounds=(10, 20, 12, 22))
+    clipped = clip_output_rows_to_bounds(append_extent_marker(rows, bounds=(10, 20, 12, 22)), bounds=(10, 20, 12, 22))
+    normalized = normalize_output_coordinates(clipped, bounds=(10, 20, 12, 22))
 
+    assert [row["name"] for row in clipped] == ["field", "extent_marker"]
     assert normalized == (
         {"x": 0, "y": 0, "z": -1, "menu": "Ground", "cat1": "Grass", "cat2": -1, "direction": -1, "id": -1, "name": "field", "priority": 1},
         {"x": 2, "y": 2, "z": -1, "menu": -1, "cat1": -1, "cat2": -1, "direction": -1, "id": -1, "name": "extent_marker", "priority": -999},
@@ -206,6 +210,41 @@ def test_pipeline_assembles_output_rows_without_migration_flag() -> None:
     assert result.output_rows[-1]["name"] == "extent_marker"
     assert result.output_rows[0]["x"] == 0
     assert result.stats.counts["output_rows"] == 2
+
+
+def test_pipeline_clips_diagonal_edge_rows_before_validation() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
+
+    pipeline = ExtractionPipeline(
+        ExtractionContext.create(
+            profile="cold_war",
+            bbox=object(),
+            config_path="default_osm_config.json",
+            seed=123,
+        )
+    )
+
+    result = pipeline.run_output_rows(
+        placements=(
+            _placement(
+                layer=LayerKind.BUILDING,
+                cell=GridCell(0, 15),
+                config_name="houses",
+                priority=5,
+                menu="Independent Buildings",
+                cat1="House",
+                cat2="Building 2-3",
+                direction="Direction 2",
+                grid_kind=GridKind.DIAGONAL,
+            ),
+        ),
+        bounds=(0, 0, 20, 15),
+    )
+
+    assert result.output_rows == (
+        {"x": 20, "y": 15, "z": -1, "menu": -1, "cat1": -1, "cat2": -1, "direction": -1, "id": -1, "name": "extent_marker", "priority": -999},
+    )
 
 
 def test_osm_processor_get_output_uses_layered_rows_by_default() -> None:

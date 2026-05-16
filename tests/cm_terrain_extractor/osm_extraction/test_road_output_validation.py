@@ -8,7 +8,14 @@ if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
 
 
-def _road_row(xidx: int | float, yidx: int | float, *, cat2: str = "Road Tile 1", direction: str = "Direction 2"):
+def _road_row(
+    xidx: int | float,
+    yidx: int | float,
+    *,
+    cat2: str = "Road Tile 1",
+    direction: str = "Direction 2",
+    feature_id=None,
+):
     return {
         "xidx": xidx,
         "yidx": yidx,
@@ -20,6 +27,7 @@ def _road_row(xidx: int | float, yidx: int | float, *, cat2: str = "Road Tile 1"
         "id": -1,
         "name": "road",
         "priority": 4,
+        "_feature_id": feature_id,
     }
 
 
@@ -114,3 +122,20 @@ def test_validator_reports_unsupported_diagonal_duplicate_intersection_and_overl
     assert [issue.reason for issue in report.invalid_intersections] == ["unrepresented_adjacent_road"]
     assert [issue.reason for issue in report.road_building_overlaps] == ["road_building_overlap"]
     assert not report.is_valid
+
+
+def test_validator_does_not_treat_distinct_source_road_adjacency_as_hard_intersection() -> None:
+    from terrain_extraction.osm_extraction.road_output_validation import validate_road_output_rows
+
+    report = validate_road_output_rows(
+        (
+            _road_row(0, 0, direction="Direction 1", feature_id="road-a"),
+            _road_row(0, 1, direction="Direction 1", feature_id="road-a"),
+            _road_row(1, 0, direction="Direction 1", feature_id="road-b"),
+            _road_row(1, 1, direction="Direction 1", feature_id="road-b"),
+        ),
+        profile="cold_war",
+    )
+
+    assert report.invalid_intersections == ()
+    assert report.is_valid

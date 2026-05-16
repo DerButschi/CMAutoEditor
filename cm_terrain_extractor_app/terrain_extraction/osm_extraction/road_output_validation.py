@@ -124,7 +124,7 @@ def validate_road_output_rows(rows: Iterable[Mapping[str, Any]], profile: object
     no_interpretation = _connection_interpretation_issues(road_cells, adjacency, directions_by_cell)
     one_cell_gaps = _one_cell_gap_issues(road_cells, directions_by_cell)
     dangling_arms = _dangling_arm_issues(road_cells, directions_by_cell)
-    invalid_intersections = _invalid_intersection_issues(road_cells, directions_by_cell)
+    invalid_intersections = _invalid_intersection_issues(road_cells, directions_by_cell, _feature_ids_by_cell(road_entries))
     road_building_overlaps = _road_building_overlap_issues(row_tuple, road_cells)
     return RoadValidationReport(
         road_cells=road_cells,
@@ -282,6 +282,17 @@ def _directions_by_cell(entries: tuple[_RoadEntry, ...]) -> Mapping[GridCell, fr
     return {cell: frozenset(directions) for cell, directions in by_cell.items()}
 
 
+def _feature_ids_by_cell(entries: tuple[_RoadEntry, ...]) -> Mapping[GridCell, frozenset[Any]]:
+    by_cell: dict[GridCell, set[Any]] = {}
+    for entry in entries:
+        if entry.cell is None:
+            continue
+        feature_id = entry.row.get("_feature_id")
+        if feature_id is not None:
+            by_cell.setdefault(entry.cell, set()).add(feature_id)
+    return {cell: frozenset(feature_ids) for cell, feature_ids in by_cell.items()}
+
+
 def _mutual_adjacency(
     cells: frozenset[GridCell],
     direction_sets: Mapping[GridCell, frozenset[str]],
@@ -401,6 +412,7 @@ def _dangling_arm_issues(
 def _invalid_intersection_issues(
     cells: frozenset[GridCell],
     direction_sets: Mapping[GridCell, frozenset[str]],
+    feature_ids_by_cell: Mapping[GridCell, frozenset[Any]],
 ) -> tuple[RoadValidationIssue, ...]:
     issues = []
     seen: set[tuple[GridCell, GridCell]] = set()
@@ -417,6 +429,8 @@ def _invalid_intersection_issues(
                 neighbor, frozenset()
             ):
                 continue
+            if _distinct_source_features(cell, neighbor, feature_ids_by_cell):
+                continue
             issues.append(
                 RoadValidationIssue(
                     stage="output",
@@ -427,6 +441,16 @@ def _invalid_intersection_issues(
                 )
             )
     return tuple(issues)
+
+
+def _distinct_source_features(
+    cell: GridCell,
+    neighbor: GridCell,
+    feature_ids_by_cell: Mapping[GridCell, frozenset[Any]],
+) -> bool:
+    cell_feature_ids = feature_ids_by_cell.get(cell, frozenset())
+    neighbor_feature_ids = feature_ids_by_cell.get(neighbor, frozenset())
+    return bool(cell_feature_ids and neighbor_feature_ids and cell_feature_ids.isdisjoint(neighbor_feature_ids))
 
 
 def _road_building_overlap_issues(
