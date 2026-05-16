@@ -191,15 +191,22 @@ class ExtractionPipeline:
         bounds: tuple[int | float, int | float, int | float, int | float],
     ) -> ExtractionResult:
         from terrain_extraction.osm_extraction.output_rows import (
+            OutputRowValidationError,
             append_extent_marker,
             normalize_output_coordinates,
             placements_to_output_rows,
             validate_output_rows,
         )
+        from terrain_extraction.osm_extraction.road_output_validation import (
+            validate_road_output_rows,
+        )
 
         internal_rows = placements_to_output_rows(placements, include_internal=True)
         rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
         validate_output_rows(rows_with_extent, bounds=bounds)
+        road_validation = validate_road_output_rows(rows_with_extent, profile=self.context.profile)
+        if not road_validation.is_valid:
+            raise OutputRowValidationError(road_validation.issue_summary())
         output_rows = normalize_output_coordinates(rows_with_extent, bounds=bounds)
         self.context.progress("output_assembly", 1.0, "Layered output rows assembled")
         return ExtractionResult(
@@ -208,8 +215,9 @@ class ExtractionPipeline:
             stats=ExtractionStats(
                 timings={"output_assembly": None},
                 counts={"output_rows": len(output_rows)},
-                diagnostics={"mode": "layered_output"},
+                diagnostics={"mode": "layered_output", "road_validation": road_validation.issue_summary()},
             ),
+            diagnostics={"road_validation": road_validation},
         )
 
     def run_debug_export(

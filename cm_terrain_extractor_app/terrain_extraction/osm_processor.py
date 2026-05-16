@@ -851,16 +851,23 @@ class OSMProcessor:
 
     def _get_layered_output_rows(self):
         from terrain_extraction.osm_extraction.output_rows import (
+            OutputRowValidationError,
             append_extent_marker,
             normalize_output_coordinates,
             placements_to_output_rows,
             validate_output_rows,
+        )
+        from terrain_extraction.osm_extraction.road_output_validation import (
+            validate_road_output_rows,
         )
 
         bounds = tuple(self.idx_bbox)
         internal_rows = placements_to_output_rows(tuple(getattr(self, "placements", ())), include_internal=True)
         rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
         validate_output_rows(rows_with_extent, bounds=bounds)
+        road_validation = validate_road_output_rows(rows_with_extent, profile=getattr(self, "profile", None))
+        if not road_validation.is_valid:
+            raise OutputRowValidationError(road_validation.issue_summary())
         return normalize_output_coordinates(rows_with_extent, bounds=bounds)
 
     def _get_layered_output_dataframe(self):

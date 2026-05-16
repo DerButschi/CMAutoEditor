@@ -22,6 +22,8 @@ NETWORK_RECOVERY_FIXTURES = (
     "ninety_degree_bend",
     "four_way_crossing",
     "t_junction",
+    "minor_meets_major",
+    "parallel_close_roads",
     "road_near_building",
 )
 
@@ -95,6 +97,7 @@ def test_harness_captures_debug_layers_and_structured_symptoms() -> None:
     assert result.diagnostics["route"]["successful_routes"] >= 1
     assert result.diagnostics["route"]["raster_spine_count"] >= 1
     assert result.diagnostics["output"]["road_components"] == result.road_component_count
+    assert "road_validation" in result.diagnostics
 
 
 def test_four_way_crossing_has_a_single_legal_four_way_intersection() -> None:
@@ -109,3 +112,16 @@ def test_four_way_crossing_has_a_single_legal_four_way_intersection() -> None:
     assert result.road_component_count == 1, result.ascii_grid()
     assert result.illegal_direction_sets == ()
     assert result.road_graph.max_degree >= 4, result.ascii_grid()
+
+
+@pytest.mark.parametrize("fixture_name", NETWORK_RECOVERY_FIXTURES)
+def test_network_recovery_fixtures_pass_final_output_road_validation(fixture_name: str) -> None:
+    result = run_osm_extraction_fixture(
+        fixture_name,
+        profile="cold_war",
+        config_name=Path("default_osm_config.json"),
+        bbox=None,
+        seed=123,
+    )
+
+    assert result.road_validation_report.is_valid, result.road_validation_report.issue_summary()

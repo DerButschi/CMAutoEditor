@@ -18,6 +18,7 @@ from terrain_extraction.osm_extraction.models import (
     LayerKind,
     PlacementRecord,
 )
+from terrain_extraction.osm_extraction.road_output_validation import validate_road_output_rows
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +46,8 @@ def build_debug_layers(
 ) -> DebugExportResult:
     layer_errors: list[dict[str, Any]] = []
     placement_tuple = tuple(placements)
+    output_row_tuple = tuple(output_rows)
+    road_validation = validate_road_output_rows(output_row_tuple, profile=None)
     layers = {
         **_layer("source_features", lambda: _source_features_layer(features, grid_index, layer_errors), layer_errors),
         **_layer("topology_nodes", lambda: _topology_nodes_layer(topology, grid_index), layer_errors),
@@ -60,12 +63,18 @@ def build_debug_layers(
         **_layer("tile_failures", lambda: _tile_failures_layer(tile_assignment, grid_index), layer_errors),
         **_occupancy_layers(occupancy, grid_index, layer_errors),
         **_layer("building_footprints", lambda: _building_footprints_layer(placement_tuple, grid_index, layer_errors), layer_errors),
-        **_layer("final_rows", lambda: _final_rows_layer(output_rows, grid_index, bounds=bounds, layer_errors=layer_errors), layer_errors),
+        **_layer("road_validation", lambda: _road_validation_layer(road_validation, grid_index), layer_errors),
+        **_layer("final_rows", lambda: _final_rows_layer(output_row_tuple, grid_index, bounds=bounds, layer_errors=layer_errors), layer_errors),
     }
     diagnostics = {
         "layer_errors": tuple(layer_errors),
         "topology": dict(getattr(topology, "diagnostics", {}) or {}),
         "routing": dict(getattr(routing, "diagnostics", {}) or {}),
+        "road_validation": {
+            "is_valid": road_validation.is_valid,
+            "summary": road_validation.issue_summary(),
+            "ascii_grid": road_validation.ascii_grid(),
+        },
         "stats": _stats_dict(stats),
     }
     return DebugExportResult(layers={name: layer for name, layer in layers.items() if not layer.empty}, diagnostics=diagnostics)
@@ -469,6 +478,32 @@ def _final_rows_layer(
         rows.append({key: _scalar(value) for key, value in row.items() if not str(key).startswith("_")})
         rows[-1].update({"grid_kind": grid_kind.value, "layer": row.get("_layer")})
         geometries.append(geometry)
+    return _gdf(rows, geometries, grid_index)
+
+
+def _road_validation_layer(report: Any, grid_index: Any) -> geopandas.GeoDataFrame:
+    rows = []
+    geometries = []
+    if grid_index is None:
+        return _empty_layer()
+    for issue in report.hard_issues:
+        cell = getattr(issue, "cell", None)
+        if cell is None:
+            gap_cell = issue.details.get("gap_cell")
+            if gap_cell is None:
+                continue
+            cell = GridCell(int(gap_cell[0]), int(gap_cell[1]))
+        rows.append(
+            {
+                "stage": issue.stage,
+                "reason": issue.reason,
+                "message": issue.message,
+                "xidx": cell.xidx,
+                "yidx": cell.yidx,
+                "details": _json_value(issue.details),
+            }
+        )
+        geometries.append(grid_index.cell_polygon(cell))
     return _gdf(rows, geometries, grid_index)
 
 

@@ -79,6 +79,12 @@ from terrain_extraction.osm_extraction.pipeline import (
     noop_progress,
 )
 from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
+from terrain_extraction.osm_extraction.road_output_validation import (
+    RoadValidationIssue,
+    RoadValidationReport,
+    render_road_validation_ascii,
+    validate_road_output_rows,
+)
 from terrain_extraction.osm_extraction.stats import ExtractionStats
 from terrain_extraction.osm_extraction.tile_assignment import (
     CompiledTileCatalog,
@@ -132,6 +138,8 @@ __all__ = [
     "ProcessInteractionDecision",
     "ProgressCallback",
     "RasterSpine",
+    "RoadValidationIssue",
+    "RoadValidationReport",
     "RouteRecord",
     "SingleAnchorPlan",
     "SplitAnchorPlan",
@@ -150,6 +158,8 @@ __all__ = [
     "default_linear_interaction_policy",
     "normalize_output_coordinates",
     "placements_to_output_rows",
+    "render_road_validation_ascii",
     "validate_output_rows",
+    "validate_road_output_rows",
     "write_debug_geojson",
 ]

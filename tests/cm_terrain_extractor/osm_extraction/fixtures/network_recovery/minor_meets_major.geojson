@@ -1,0 +1,37 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3007,
+        "tags": {
+          "highway": "primary"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00000, 50.00035],
+          [7.00100, 50.00035]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": 3008,
+        "tags": {
+          "highway": "track"
+        }
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [7.00050, 50.00000],
+          [7.00050, 50.00035]
+        ]
+      }
+    }
+  ]
+}

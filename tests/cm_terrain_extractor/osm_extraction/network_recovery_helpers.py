@@ -24,6 +24,7 @@ from cm_terrain_extractor_app.terrain_extraction.osm_extraction_benchmark import
 )
 from profiles.general import road_tiles  # noqa: E402
 from terrain_extraction.osm_extraction.models import CMType, GridCell, ProcessKind  # noqa: E402
+from terrain_extraction.osm_extraction.road_output_validation import validate_road_output_rows  # noqa: E402
 from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog  # noqa: E402
 
 NETWORK_RECOVERY_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "network_recovery"
@@ -75,6 +76,7 @@ class ExtractionTestResult:
     stats: Mapping[str, Any]
     diagnostics: Mapping[str, Any]
     road_graph: RoadGraph
+    road_validation_report: Any
     debug_layers: Mapping[str, Any] = field(default_factory=dict)
     topology: Any = None
     routing: Any = None
@@ -128,10 +130,12 @@ def run_osm_extraction_fixture(
     config = _load_json(config_path)
     road_config_names = _road_config_names(config)
     road_graph = reconstruct_road_graph(post_process_rows, road_config_names=road_config_names)
+    road_validation_report = validate_road_output_rows(output_rows, profile=profile)
     debug_layers = _debug_layers(processor) if debug else {}
     diagnostics = _diagnostics(
         processor=processor,
         road_graph=road_graph,
+        road_validation_report=road_validation_report,
         output_rows=output_rows,
         post_process_rows=post_process_rows,
     )
@@ -161,6 +165,7 @@ def run_osm_extraction_fixture(
         },
         diagnostics=diagnostics,
         road_graph=road_graph,
+        road_validation_report=road_validation_report,
         debug_layers=debug_layers,
         topology=getattr(processor, "topology", None),
         routing=getattr(processor, "routing", None),
@@ -355,6 +360,7 @@ def _diagnostics(
     *,
     processor: Any,
     road_graph: RoadGraph,
+    road_validation_report: Any,
     output_rows: tuple[Mapping[str, Any], ...],
     post_process_rows: tuple[Mapping[str, Any], ...],
 ) -> Mapping[str, Any]:
@@ -406,6 +412,13 @@ def _diagnostics(
                 }
                 for issue in road_graph.illegal_direction_sets
             ),
+        },
+        "road_validation": {
+            "is_valid": road_validation_report.is_valid,
+            "summary": road_validation_report.issue_summary(),
+            "ascii_grid": road_validation_report.ascii_grid(),
+            "hard_issues": len(road_validation_report.hard_issues),
+            "components": len(road_validation_report.disconnected_components),
         },
         "output": {
             "output_rows": len(output_rows),

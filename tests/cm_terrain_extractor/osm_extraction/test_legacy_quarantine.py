@@ -156,10 +156,12 @@ def test_osm_processor_run_processors_dispatches_to_typed_pipeline(monkeypatch) 
             calls.append(("routing", topology))
             return ExtractionResult(diagnostics={"network_routes": NetworkRoutingResult()})
 
-        def run_tile_assignment(self, *, routes, catalogs):
+        def run_tile_assignment(self, *, routes, catalogs, linear_state=None):
+            del linear_state
             calls.append(("tiles", tuple(catalogs)))
             return ExtractionResult(
-                placements=(_placement("road", ProcessKind.ROAD, LayerKind.LINEAR_SURFACE, GridCell(1, 0)),)
+                placements=(_placement("road", ProcessKind.ROAD, LayerKind.LINEAR_SURFACE, GridCell(1, 0)),),
+                diagnostics={"tile_assignment": SimpleNamespace()},
             )
 
         def run_building_fitter(self, *, features, catalogs, grid_index, occupancy):
