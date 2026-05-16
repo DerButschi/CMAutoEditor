@@ -36,6 +36,7 @@ _DIRECTION_STEPS = {
     "S": (0, -1),
     "W": (-1, 0),
 }
+_OPPOSITE_DIRECTIONS = {"N": "S", "S": "N", "E": "W", "W": "E"}
 _NETWORK_CLASS_RANK = {
     "motorway": 0,
     "trunk": 0,
@@ -90,6 +91,8 @@ class _RouteAttempt:
     nodes: tuple[GridNode, ...]
     blocked_cells_considered: int
     soft_crossings: int = 0
+    tile_feasible_rejections: int = 0
+    tile_feasible_failures: tuple[Mapping[str, Any], ...] = ()
 
     @property
     def success(self) -> bool:
@@ -140,7 +143,7 @@ class NetworkRouter:
         self.linear_state = linear_state
         routes = []
         for edge in self._route_order(topology.edges, degrees):
-            route = self._route_edge(edge, anchors, degrees)
+            route = self._route_edge(edge, anchors, degrees, anchor_selection.plans)
             if route.success:
                 reservation = linear_state.reserve_path(route)
                 if not reservation.success:
@@ -163,9 +166,10 @@ class NetworkRouter:
         edge: TopologyEdge,
         anchors: Mapping[int, GridNode],
         degrees: Mapping[int, int],
+        anchor_plans: Mapping[int, Any],
     ) -> RouteRecord:
-        start = anchors[edge.start_node_id]
-        goal = anchors[edge.end_node_id]
+        start = self._anchor_for_edge_node(edge, edge.start_node_id, anchors, anchor_plans)
+        goal = self._anchor_for_edge_node(edge, edge.end_node_id, anchors, anchor_plans)
         raster_spine = build_raster_spine(
             topology_edge_id=edge.edge_id,
             line=edge.geometry,
@@ -178,7 +182,13 @@ class NetworkRouter:
             attempts.append(("soft_crossing", attempts[-1][1], True))
 
         total_blocked = 0
+        total_tile_rejections = 0
+        tile_failures: list[Mapping[str, Any]] = []
+        retry_modes: list[str] = []
         for relaxation, corridor_m, soft_crossing in attempts:
+            retry_mode = _retry_mode(relaxation)
+            if retry_mode is not None:
+                retry_modes.append(retry_mode)
             attempt = self._a_star(
                 edge.geometry,
                 start,
@@ -187,8 +197,12 @@ class NetworkRouter:
                 self._layer_for_edge(edge),
                 soft_crossing,
                 raster_spine,
+                edge.process,
+                edge.priority,
             )
             total_blocked += attempt.blocked_cells_considered
+            total_tile_rejections += attempt.tile_feasible_rejections
+            tile_failures.extend(dict(failure) for failure in attempt.tile_feasible_failures)
             if attempt.success:
                 return self._record_success(
                     edge,
@@ -198,6 +212,9 @@ class NetworkRouter:
                     attempt.soft_crossings,
                     degrees,
                     raster_spine,
+                    retry_modes=tuple(retry_modes),
+                    tile_feasible_rejections=total_tile_rejections,
+                    tile_feasible_failures=tuple(tile_failures),
                 )
 
         if edge.geometry.length > self.split_long_edge_m:
@@ -205,6 +222,7 @@ class NetworkRouter:
             if split_record is not None:
                 return split_record
 
+        failure_reason = "no_tile_feasible_path" if total_tile_rejections else "no_path"
         return RouteRecord(
             edge_id=edge.edge_id,
             start_node_id=edge.start_node_id,
@@ -216,11 +234,14 @@ class NetworkRouter:
             success=False,
             cm_type=edge.cm_type,
             diagnostics={
-                "failure_reason": "no_path",
+                "failure_reason": failure_reason,
                 "source_length_m": edge.geometry.length,
                 "raster_spine_cell_count": len(raster_spine.cells),
                 "blocked_cells_considered": total_blocked,
                 "corridor_deviation_m": self.corridor_deviation_m,
+                "tile_feasible_rejections": total_tile_rejections,
+                "tile_feasible_failures": tuple(tile_failures),
+                "retry_modes": tuple(retry_modes),
             },
         )
 
@@ -233,6 +254,8 @@ class NetworkRouter:
         layer: LayerKind,
         allow_soft_crossing: bool,
         raster_spine: RasterSpine,
+        process: ProcessKind,
+        priority: int,
     ) -> _RouteAttempt:
         if start == goal:
             return _RouteAttempt(nodes=(start,), blocked_cells_considered=0)
@@ -246,6 +269,8 @@ class NetworkRouter:
         blocked_cache: dict[GridCell, bool] = {}
         blocked_cells_considered = 0
         soft_crossings = 0
+        tile_feasible_rejections = 0
+        tile_feasible_failures: list[Mapping[str, Any]] = []
 
         while open_heap:
             _estimated, cost_so_far, state = heapq.heappop(open_heap)
@@ -273,6 +298,21 @@ class NetworkRouter:
                 ):
                     continue
 
+                step_decision = self._route_step_decision(
+                    came_from=came_from,
+                    state=state,
+                    current=current,
+                    neighbor=neighbor,
+                    incoming_direction=incoming_direction,
+                    step_direction=step.direction,
+                    process=process,
+                    priority=priority,
+                )
+                if not step_decision.allowed:
+                    if step_decision.failures:
+                        tile_feasible_rejections += 1
+                        _extend_failures(tile_feasible_failures, step_decision.failures)
+                    continue
                 traversed_cell = self._cell_for_step(current, neighbor)
                 blocked = self._cached_cell_is_blocked(traversed_cell, layer, blocked_cache)
                 if blocked:
@@ -297,7 +337,13 @@ class NetworkRouter:
                 came_from[next_state] = state
                 heapq.heappush(open_heap, (next_cost + self._heuristic(neighbor, goal), next_cost, next_state))
 
-        return _RouteAttempt(nodes=(), blocked_cells_considered=blocked_cells_considered, soft_crossings=soft_crossings)
+        return _RouteAttempt(
+            nodes=(),
+            blocked_cells_considered=blocked_cells_considered,
+            soft_crossings=soft_crossings,
+            tile_feasible_rejections=tile_feasible_rejections,
+            tile_feasible_failures=tuple(tile_feasible_failures),
+        )
 
     def _try_split_route(
         self,
@@ -319,6 +365,8 @@ class NetworkRouter:
             self._layer_for_edge(edge),
             True,
             raster_spine,
+            edge.process,
+            edge.priority,
         )
         second = self._a_star(
             edge.geometry,
@@ -328,6 +376,8 @@ class NetworkRouter:
             self._layer_for_edge(edge),
             True,
             raster_spine,
+            edge.process,
+            edge.priority,
         )
         if not first.success or not second.success:
             return None
@@ -340,6 +390,9 @@ class NetworkRouter:
             first.soft_crossings + second.soft_crossings,
             degrees,
             raster_spine,
+            retry_modes=("midpoint_split",),
+            tile_feasible_rejections=first.tile_feasible_rejections + second.tile_feasible_rejections,
+            tile_feasible_failures=first.tile_feasible_failures + second.tile_feasible_failures,
         )
         diagnostics = {**dict(record.diagnostics), "split_intersections": 1}
         return RouteRecord(
@@ -366,6 +419,10 @@ class NetworkRouter:
         soft_crossings: int,
         degrees: Mapping[int, int],
         raster_spine: RasterSpine,
+        *,
+        retry_modes: tuple[str, ...] = (),
+        tile_feasible_rejections: int = 0,
+        tile_feasible_failures: tuple[Mapping[str, Any], ...] = (),
     ) -> RouteRecord:
         tile_cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
         route_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
@@ -381,6 +438,9 @@ class NetworkRouter:
             "forced_relaxation": relaxation,
             "soft_crossings": soft_crossings,
             "intersection_importance": max(degrees.get(edge.start_node_id, 0), degrees.get(edge.end_node_id, 0)),
+            "retry_modes": retry_modes,
+            "tile_feasible_rejections": tile_feasible_rejections,
+            "tile_feasible_failures": tile_feasible_failures,
             **spine_diagnostics,
         }
         return RouteRecord(
@@ -408,6 +468,7 @@ class NetworkRouter:
             **dict(route.diagnostics),
             "failure_reason": failure.get("failure_reason", "linear_state_rejected"),
             "linear_state_failures": tuple(dict(item) for item in reservation.failures),
+            "tile_feasible_failures": tuple(dict(item) for item in reservation.failures),
         }
         return RouteRecord(
             edge_id=route.edge_id,
@@ -435,6 +496,19 @@ class NetworkRouter:
             )
             anchors[node.node_id] = GridNode(cell.xidx, cell.yidx)
         return anchors
+
+    def _anchor_for_edge_node(
+        self,
+        edge: TopologyEdge,
+        node_id: int,
+        anchors: Mapping[int, GridNode],
+        anchor_plans: Mapping[int, Any],
+    ) -> GridNode:
+        plan = anchor_plans.get(node_id)
+        cell = _split_anchor_cell_for_edge(plan, edge, node_id)
+        if cell is not None:
+            return GridNode(cell.xidx, cell.yidx)
+        return anchors[node_id]
 
     def _route_order(
         self,
@@ -527,6 +601,56 @@ class NetworkRouter:
             abs(cell.xidx - spine_cell.xidx) + abs(cell.yidx - spine_cell.yidx) for spine_cell in raster_spine.cells
         )
         return nearest_cell_steps * 0.2
+
+    def _route_cell_decision(
+        self,
+        cell: GridCell,
+        *,
+        incoming_dir: str | None,
+        outgoing_dir: str | None,
+        process: ProcessKind,
+        priority: int,
+    ) -> Any:
+        if self.linear_state is None:
+            return _AllowedCellDecision()
+        return self.linear_state.can_enter_cell(
+            cell,
+            incoming_dir=incoming_dir,
+            outgoing_dir=outgoing_dir,
+            process=process,
+            priority=priority,
+        )
+
+    def _route_step_decision(
+        self,
+        *,
+        came_from: Mapping[tuple[int, int, str], tuple[int, int, str] | None],
+        state: tuple[int, int, str],
+        current: GridNode,
+        neighbor: GridNode,
+        incoming_direction: str,
+        step_direction: str,
+        process: ProcessKind,
+        priority: int,
+    ) -> Any:
+        if _state_path_contains(came_from, state, neighbor):
+            return _AllowedCellDecision(allowed=False)
+        current_decision = self._route_cell_decision(
+            GridCell(current.xidx, current.yidx),
+            incoming_dir=_opposite(incoming_direction),
+            outgoing_dir=step_direction,
+            process=process,
+            priority=priority,
+        )
+        if not current_decision.allowed:
+            return current_decision
+        return self._route_cell_decision(
+            self._cell_for_step(current, neighbor),
+            incoming_dir=_opposite(step_direction),
+            outgoing_dir=None,
+            process=process,
+            priority=priority,
+        )
 
     def _spine_diagnostics(
         self,
@@ -635,6 +759,81 @@ class NetworkRouter:
             "forced_relaxations": sum(1 for route in successful if route.diagnostics.get("forced_relaxation")),
             "soft_crossings": sum(int(route.diagnostics.get("soft_crossings", 0)) for route in successful),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class _AllowedCellDecision:
+    allowed: bool = True
+    failures: tuple[Mapping[str, Any], ...] = ()
+
+
+def _opposite(direction: str | None) -> str | None:
+    return None if not direction else _OPPOSITE_DIRECTIONS[direction]
+
+
+def _extend_failures(
+    collected: list[Mapping[str, Any]],
+    failures: Iterable[Mapping[str, Any]],
+    *,
+    limit: int = 20,
+) -> None:
+    if len(collected) >= limit:
+        return
+    remaining = limit - len(collected)
+    collected.extend(dict(failure) for failure in tuple(failures)[:remaining])
+
+
+def _retry_mode(relaxation: str | None) -> str | None:
+    if relaxation == "minor_corridor":
+        return "corridor_widening"
+    if relaxation == "soft_crossing":
+        return "soft_crossing"
+    return None
+
+
+def _state_path_contains(
+    came_from: Mapping[tuple[int, int, str], tuple[int, int, str] | None],
+    state: tuple[int, int, str],
+    node: GridNode,
+) -> bool:
+    current: tuple[int, int, str] | None = state
+    while current is not None:
+        if current[0] == node.xidx and current[1] == node.yidx:
+            return True
+        current = came_from[current]
+    return False
+
+
+def _split_anchor_cell_for_edge(plan: Any, edge: TopologyEdge, node_id: int) -> GridCell | None:
+    if getattr(plan, "plan_kind", None) != "split":
+        return None
+    direction = _edge_direction_from_node(edge, node_id)
+    if direction is None:
+        return getattr(plan, "primary_cell", None)
+    split_cells = tuple(getattr(plan, "split_anchor_cells", ()) or ())
+    for index, direction_set in enumerate(getattr(plan, "split_direction_sets", ()) or ()):
+        if direction in direction_set and index < len(split_cells):
+            return split_cells[index]
+    return getattr(plan, "primary_cell", None)
+
+
+def _edge_direction_from_node(edge: TopologyEdge, node_id: int) -> str | None:
+    coords = tuple(edge.geometry.coords)
+    if len(coords) < 2:
+        return None
+    if edge.start_node_id == node_id:
+        start, end = coords[0], coords[1]
+    elif edge.end_node_id == node_id:
+        start, end = coords[-1], coords[-2]
+    else:
+        return None
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    if math.isclose(dx, 0.0) and math.isclose(dy, 0.0):
+        return None
+    if abs(dx) >= abs(dy):
+        return "E" if dx > 0 else "W"
+    return "N" if dy > 0 else "S"
 
 
 def _normalize_direction_token(value: Any) -> set[str]:
