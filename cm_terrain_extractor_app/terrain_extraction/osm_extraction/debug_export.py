@@ -37,6 +37,7 @@ def build_debug_layers(
     routing: Any = None,
     occupancy: Any = None,
     placements: Iterable[PlacementRecord] = (),
+    tile_assignment: Any = None,
     output_rows: Iterable[Mapping[str, Any]] = (),
     grid_index: Any = None,
     stats: Any = None,
@@ -54,6 +55,9 @@ def build_debug_layers(
         **_layer("anchor_candidates", lambda: _anchor_candidates_layer(routing, grid_index), layer_errors),
         **_layer("selected_anchor_plans", lambda: _selected_anchor_plans_layer(routing, grid_index), layer_errors),
         **_layer("connection_bits", lambda: _connection_bits_layer(routing, grid_index), layer_errors),
+        **_layer("tile_required_dirs", lambda: _tile_required_dirs_layer(placement_tuple, grid_index), layer_errors),
+        **_layer("selected_tiles", lambda: _selected_tiles_layer(placement_tuple, grid_index), layer_errors),
+        **_layer("tile_failures", lambda: _tile_failures_layer(tile_assignment, grid_index), layer_errors),
         **_occupancy_layers(occupancy, grid_index, layer_errors),
         **_layer("building_footprints", lambda: _building_footprints_layer(placement_tuple, grid_index, layer_errors), layer_errors),
         **_layer("final_rows", lambda: _final_rows_layer(output_rows, grid_index, bounds=bounds, layer_errors=layer_errors), layer_errors),
@@ -289,6 +293,93 @@ def _connection_bits_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFr
         rows.append(row)
         geometries.append(grid_index.cell_polygon(cell))
     return _gdf(rows, geometries, grid_index)
+
+
+def _tile_required_dirs_layer(placements: Iterable[PlacementRecord], grid_index: Any) -> geopandas.GeoDataFrame:
+    rows = []
+    geometries = []
+    if grid_index is None:
+        return _empty_layer()
+    for placement in _linear_tile_placements(placements):
+        cell = placement.cells[0]
+        rows.append(
+            {
+                "xidx": cell.xidx,
+                "yidx": cell.yidx,
+                "config_name": placement.config_name,
+                "feature_id": placement.feature_id,
+                "process": placement.diagnostics.get("source_process") or placement.diagnostics.get("process"),
+                "required_directions": tuple(placement.diagnostics.get("required_directions", ())),
+                "connection_dirs": tuple(placement.diagnostics.get("connection_dirs", ())),
+                "role": placement.diagnostics.get("role"),
+            }
+        )
+        geometries.append(grid_index.cell_polygon(cell))
+    return _gdf(rows, geometries, grid_index)
+
+
+def _selected_tiles_layer(placements: Iterable[PlacementRecord], grid_index: Any) -> geopandas.GeoDataFrame:
+    rows = []
+    geometries = []
+    if grid_index is None:
+        return _empty_layer()
+    for placement in _linear_tile_placements(placements):
+        cell = placement.cells[0]
+        rows.append(
+            {
+                "xidx": cell.xidx,
+                "yidx": cell.yidx,
+                "config_name": placement.config_name,
+                "feature_id": placement.feature_id,
+                "selected_tile_id": placement.diagnostics.get("selected_tile_id"),
+                "catalog_direction": placement.diagnostics.get("catalog_direction"),
+                "tile_row": placement.diagnostics.get("tile_row"),
+                "tile_col": placement.diagnostics.get("tile_col"),
+                "variant": placement.diagnostics.get("variant"),
+                "role": placement.diagnostics.get("role"),
+            }
+        )
+        geometries.append(grid_index.cell_polygon(cell))
+    return _gdf(rows, geometries, grid_index)
+
+
+def _tile_failures_layer(tile_assignment: Any, grid_index: Any) -> geopandas.GeoDataFrame:
+    rows = []
+    geometries = []
+    if tile_assignment is None or grid_index is None:
+        return _empty_layer()
+    for failure in getattr(tile_assignment, "failures", ()) or ():
+        cell_value = failure.get("cell")
+        if cell_value is None:
+            continue
+        cell = GridCell(int(cell_value[0]), int(cell_value[1]))
+        rows.append(
+            {
+                "xidx": cell.xidx,
+                "yidx": cell.yidx,
+                "process": failure.get("process"),
+                "required_directions": tuple(failure.get("required_directions", ())),
+                "failure_reason": failure.get("failure_reason"),
+                "hard_failure": bool(failure.get("hard_failure")),
+            }
+        )
+        geometries.append(grid_index.cell_polygon(cell))
+    return _gdf(rows, geometries, grid_index)
+
+
+def _linear_tile_placements(placements: Iterable[PlacementRecord]) -> tuple[PlacementRecord, ...]:
+    return tuple(
+        sorted(
+            (
+                placement
+                for placement in placements
+                if placement.cells
+                and placement.layer in {LayerKind.LINEAR_SURFACE, LayerKind.LINEAR_OBJECT}
+                and placement.diagnostics.get("required_directions")
+            ),
+            key=lambda placement: (placement.cells[0].xidx, placement.cells[0].yidx, str(placement.feature_id)),
+        )
+    )
 
 
 def _occupancy_layers(

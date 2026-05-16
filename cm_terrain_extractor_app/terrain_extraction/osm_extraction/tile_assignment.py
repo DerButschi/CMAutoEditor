@@ -146,6 +146,16 @@ class _RouteCellSpec:
     required_directions: frozenset[str]
 
 
+@dataclass(frozen=True, slots=True)
+class _StateCellSpec:
+    process: ProcessKind
+    cell: GridCell
+    required_directions: frozenset[str]
+    route_ids: tuple[int | str, ...]
+    priority: int
+    intersection_kind: str
+
+
 @dataclass(slots=True)
 class _IntersectionSpec:
     process: ProcessKind
@@ -178,6 +188,9 @@ class TileAssigner:
 
     def assign(self, routes: Sequence[RouteRecord], *, linear_state: Any = None) -> TileAssignmentResult:
         successful_routes = tuple(route for route in routes if route.success and route.nodes)
+        if linear_state is not None:
+            return self._assign_from_linear_state(successful_routes, linear_state)
+
         intersections = _intersection_specs_by_process(successful_routes)
 
         placements: list[PlacementRecord] = []
@@ -236,6 +249,54 @@ class TileAssigner:
             },
         )
 
+    def _assign_from_linear_state(
+        self,
+        routes: Sequence[RouteRecord],
+        linear_state: Any,
+    ) -> TileAssignmentResult:
+        route_by_id = _routes_by_state_id(routes)
+        placements: list[PlacementRecord] = []
+        failures: list[Mapping[str, Any]] = []
+
+        for spec in _state_cell_specs(linear_state):
+            catalog = self.catalogs.get(spec.process)
+            if catalog is None:
+                failures.append(
+                    _failure(spec.process, spec.cell, spec.required_directions, "missing_catalog", hard_failure=True)
+                )
+                continue
+            variant = catalog.best_tile(spec.required_directions)
+            if variant is None:
+                failures.append(
+                    _failure(spec.process, spec.cell, spec.required_directions, "catalog_gap", hard_failure=True)
+                )
+                continue
+            placements.append(
+                self._state_placement_from_variant(
+                    spec=spec,
+                    variant=variant,
+                    contributing_routes=tuple(
+                        route_by_id[route_id] for route_id in spec.route_ids if route_id in route_by_id
+                    ),
+                )
+            )
+
+        return TileAssignmentResult(
+            placements=tuple(placements),
+            failures=tuple(failures),
+            diagnostics={
+                "tile_assignments": len(placements),
+                "failed_assignments": len(failures),
+                "intersection_assignments": sum(
+                    1
+                    for placement in placements
+                    if placement.diagnostics.get("role") in {"intersection", "t_junction"}
+                ),
+                "state_finalized_cells": len(placements),
+                "state_finalizer": True,
+            },
+        )
+
     def _variant_for(
         self,
         process: ProcessKind,
@@ -283,6 +344,49 @@ class TileAssigner:
                 "tile_row": variant.row,
                 "tile_col": variant.col,
                 "variant": variant.variant,
+                "selected_tile_id": variant.cm_type.tile_id,
+                "connection_dirs": _ordered_directions(required_directions),
+                "role": _placement_role(required_directions),
+            },
+        )
+
+    def _state_placement_from_variant(
+        self,
+        *,
+        spec: _StateCellSpec,
+        variant: TileVariant,
+        contributing_routes: tuple[RouteRecord, ...],
+    ) -> PlacementRecord:
+        primary_route = _primary_route(contributing_routes)
+        cm_type = _variant_cm_type(variant, primary_route.cm_type if primary_route is not None else None)
+        config_name = primary_route.config_name if primary_route is not None else spec.process.value
+        feature_id = primary_route.edge_id if primary_route is not None else _first_or_none(spec.route_ids)
+        source_feature_ids = _source_feature_ids(contributing_routes) or spec.route_ids
+        role = _placement_role(spec.required_directions)
+        return PlacementRecord(
+            layer=_layer_for_process(spec.process),
+            grid_kind=GridKind.NORMAL,
+            cells=(spec.cell,),
+            config_name=config_name,
+            feature_id=feature_id,
+            priority=spec.priority,
+            cm_type=cm_type,
+            score=-variant.cost,
+            diagnostics={
+                "required_directions": _ordered_directions(spec.required_directions),
+                "connection_dirs": _ordered_directions(spec.required_directions),
+                "intersection": role in {"t_junction", "intersection"},
+                "catalog_direction": variant.catalog_direction,
+                "tile_row": variant.row,
+                "tile_col": variant.col,
+                "variant": variant.variant,
+                "selected_tile_id": variant.cm_type.tile_id,
+                "source_process": spec.process.value,
+                "source_config": config_name,
+                "source_feature_ids": source_feature_ids,
+                "contributing_route_ids": spec.route_ids,
+                "intersection_kind": spec.intersection_kind,
+                "role": role,
             },
         )
 
@@ -560,6 +664,49 @@ def _state_required_dirs(linear_state: Any, cell: GridCell, route_directions: se
     return frozenset(route_directions)
 
 
+def _state_cell_specs(linear_state: Any) -> tuple[_StateCellSpec, ...]:
+    specs = []
+    for row in linear_state.as_debug_layer():
+        process = ProcessKind(row["process"])
+        cell = GridCell(int(row["xidx"]), int(row["yidx"]))
+        specs.append(
+            _StateCellSpec(
+                process=process,
+                cell=cell,
+                required_directions=frozenset(row["required_directions"]),
+                route_ids=tuple(row["route_ids"]),
+                priority=int(row["priority"]),
+                intersection_kind=str(row["intersection_kind"]),
+            )
+        )
+    return tuple(specs)
+
+
+def _routes_by_state_id(routes: Sequence[RouteRecord]) -> dict[int | str, RouteRecord]:
+    return {route.edge_id: route for route in routes}
+
+
+def _primary_route(routes: Sequence[RouteRecord]) -> RouteRecord | None:
+    if not routes:
+        return None
+    return sorted(routes, key=lambda route: (route.priority, str(route.edge_id)))[0]
+
+
+def _first_or_none(values: Sequence[int | str]) -> int | str | None:
+    return values[0] if values else None
+
+
+def _source_feature_ids(routes: Sequence[RouteRecord]) -> tuple[Any, ...]:
+    feature_ids = []
+    for route in sorted(routes, key=lambda item: (item.priority, str(item.edge_id))):
+        route_feature_ids = route.diagnostics.get("source_feature_ids", ())
+        if route_feature_ids:
+            feature_ids.extend(route_feature_ids)
+        else:
+            feature_ids.append(route.edge_id)
+    return tuple(dict.fromkeys(feature_ids))
+
+
 def _node_xy(node: GridNode | tuple[int, int]) -> tuple[int, int]:
     if isinstance(node, GridNode):
         return node.xidx, node.yidx
@@ -759,17 +906,35 @@ def _failure(
     cell: GridCell,
     required_directions: frozenset[str],
     reason: str,
+    *,
+    hard_failure: bool = False,
 ) -> Mapping[str, Any]:
-    return {
+    failure = {
         "process": process.value,
         "cell": (cell.xidx, cell.yidx),
         "required_directions": _ordered_directions(required_directions),
         "failure_reason": reason,
     }
+    if hard_failure:
+        failure["hard_failure"] = True
+    return failure
 
 
 def _ordered_directions(directions: Iterable[str]) -> tuple[str, ...]:
     return tuple(sorted(directions, key=lambda direction: _DIRECTION_ORDER.get(direction, 99)))
+
+
+def _placement_role(required_directions: Iterable[str]) -> str:
+    directions = frozenset(required_directions)
+    if len(directions) <= 1:
+        return "dead_end"
+    if len(directions) == 2:
+        return "straight" if directions in {frozenset({"N", "S"}), frozenset({"E", "W"})} else "bend"
+    if len(directions) == 3:
+        return "t_junction"
+    if len(directions) == 4:
+        return "intersection"
+    return "linear"
 
 
 def _variant_sort_key(variant: TileVariant) -> tuple[float, int, int, int, int]:

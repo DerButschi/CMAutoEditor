@@ -97,13 +97,6 @@ def test_harness_captures_debug_layers_and_structured_symptoms() -> None:
     assert result.diagnostics["output"]["road_components"] == result.road_component_count
 
 
-@pytest.mark.xfail(
-    reason=(
-        "Known M0 red fixture: four-way crossings need later tile-feasible intersection and "
-        "persistent linear-state milestones before one legal 4-way road cell is guaranteed."
-    ),
-    strict=False,
-)
 def test_four_way_crossing_has_a_single_legal_four_way_intersection() -> None:
     result = run_osm_extraction_fixture(
         "four_way_crossing",

@@ -440,7 +440,9 @@ class OSMProcessor:
             tile_result = self.pipeline.run_tile_assignment(
                 routes=self.routing.routes,
                 catalogs=linear_catalogs,
+                linear_state=self.routing.linear_state,
             )
+            self.tile_assignment = tile_result.diagnostics["tile_assignment"]
             placements.extend(tile_result.placements)
             self._reserve_output_placements(tile_result.placements)
 
@@ -901,6 +903,7 @@ class OSMProcessor:
             routing=getattr(self, "routing", None),
             occupancy=getattr(self, "occupancy", None),
             placements=tuple(getattr(self, "placements", ())),
+            tile_assignment=getattr(self, "tile_assignment", None),
             output_rows=output_rows,
             grid_index=grid_index,
             bounds=tuple(getattr(self, "idx_bbox", (0, 0, grid_index.width - 1, grid_index.height - 1))),

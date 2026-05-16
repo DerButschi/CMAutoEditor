@@ -265,6 +265,8 @@ class NetworkRouter:
                 "tile_feasible_rejections": total_tile_rejections,
                 "tile_feasible_failures": tuple(tile_failures),
                 "retry_modes": tuple(retry_modes),
+                "source_feature_ids": edge.feature_ids,
+                "source_indices": edge.source_indices,
             },
         )
 
@@ -466,6 +468,8 @@ class NetworkRouter:
             "retry_modes": retry_modes,
             "tile_feasible_rejections": tile_feasible_rejections,
             "tile_feasible_failures": tile_feasible_failures,
+            "source_feature_ids": edge.feature_ids,
+            "source_indices": edge.source_indices,
             **spine_diagnostics,
         }
         return RouteRecord(
