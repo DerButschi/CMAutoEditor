@@ -48,9 +48,7 @@ def test_osm_processor_run_processors_dispatches_to_typed_pipeline(monkeypatch) 
         ExtractionResult,
         GridCell,
         LayerKind,
-        NetworkRoutingResult,
         ProcessKind,
-        TopologyGraph,
     )
     from terrain_extraction.osm_processor import OSMProcessor
     from terrain_extraction.osm_utils import processing
@@ -130,58 +128,38 @@ def test_osm_processor_run_processors_dispatches_to_typed_pipeline(monkeypatch) 
     class FakePipeline:
         context = SimpleNamespace(rng=np.random.default_rng(123))
 
-        def run_area_rasterizer(self, *, features, config, grid_index, occupancy):
-            calls.append(("area", tuple(feature.process for feature in features)))
+        def run(self, *, features, bounds, linear_catalog_provider, building_catalog_provider, **kwargs):
+            calls.append(("run", tuple(feature.process for feature in features)))
+            assert bounds == (0, 0, 2, 2)
+            assert callable(linear_catalog_provider)
+            assert callable(building_catalog_provider)
             return ExtractionResult(
                 placements=(
                     _placement("meadow", ProcessKind.AREA, LayerKind.GROUND, GridCell(0, 0)),
                     _placement("bench", ProcessKind.POINT, LayerKind.POINT_OBJECT, GridCell(0, 0)),
-                )
+                    _placement("road", ProcessKind.ROAD, LayerKind.LINEAR_SURFACE, GridCell(1, 0)),
+                    _placement("houses", ProcessKind.BUILDING_OUTLINE, LayerKind.BUILDING, GridCell(0, 1)),
+                ),
+                output_rows=({"x": 0, "y": 0, "name": "meadow"},),
+                diagnostics={
+                    "network_topology": object(),
+                    "network_routes": object(),
+                    "tile_assignment": SimpleNamespace(),
+                },
             )
-
-        def run_network_topology(self, *, features, clip_geometry=None, snap_tolerance_m=1.0):
-            calls.append(("topology", tuple(feature.process for feature in features)))
-            return ExtractionResult(diagnostics={"network_topology": TopologyGraph()})
-
-        def run_network_router(
-            self,
-            *,
-            topology,
-            grid_index,
-            occupancy,
-            catalogs=None,
-            corridor_deviation_m=32.0,
-            minor_relaxation_m=48.0,
-        ):
-            calls.append(("routing", topology))
-            return ExtractionResult(diagnostics={"network_routes": NetworkRoutingResult()})
-
-        def run_tile_assignment(self, *, routes, catalogs, linear_state=None):
-            del linear_state
-            calls.append(("tiles", tuple(catalogs)))
-            return ExtractionResult(
-                placements=(_placement("road", ProcessKind.ROAD, LayerKind.LINEAR_SURFACE, GridCell(1, 0)),),
-                diagnostics={"tile_assignment": SimpleNamespace()},
-            )
-
-        def run_building_fitter(self, *, features, catalogs, grid_index, occupancy):
-            calls.append(("buildings", tuple(feature.process for feature in features)))
-            return ExtractionResult(
-                placements=(_placement("houses", ProcessKind.BUILDING_OUTLINE, LayerKind.BUILDING, GridCell(0, 1)),)
-            )
-
-        def run_output_rows(self, *, placements, bounds):
-            calls.append(("output", tuple(placement.config_name for placement in placements)))
-            return ExtractionResult(output_rows=({"x": 0, "y": 0, "name": "meadow"},))
 
     processor.pipeline = FakePipeline()
 
     processor.run_processors()
 
-    assert [call[0] for call in calls] == ["area", "topology", "routing", "tiles", "buildings", "output"]
-    assert calls[0][1] == (ProcessKind.AREA, ProcessKind.RANDOM, ProcessKind.POINT)
-    assert calls[1][1] == (ProcessKind.ROAD,)
-    assert calls[4][1] == (ProcessKind.BUILDING_OUTLINE,)
+    assert [call[0] for call in calls] == ["run"]
+    assert calls[0][1] == (
+        ProcessKind.AREA,
+        ProcessKind.RANDOM,
+        ProcessKind.POINT,
+        ProcessKind.ROAD,
+        ProcessKind.BUILDING_OUTLINE,
+    )
     assert processor.output_rows == ({"x": 0, "y": 0, "name": "meadow"},)
 
 

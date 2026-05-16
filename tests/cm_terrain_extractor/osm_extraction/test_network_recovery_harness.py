@@ -25,6 +25,8 @@ NETWORK_RECOVERY_FIXTURES = (
     "minor_meets_major",
     "parallel_close_roads",
     "road_near_building",
+    "staggered_near_miss",
+    "road_stream_crossing",
 )
 
 
@@ -112,6 +114,39 @@ def test_four_way_crossing_has_a_single_legal_four_way_intersection() -> None:
     assert result.road_component_count == 1, result.ascii_grid()
     assert result.illegal_direction_sets == ()
     assert result.road_graph.max_degree >= 4, result.ascii_grid()
+
+
+def test_staggered_near_miss_uses_source_snap_tolerance_without_output_gap() -> None:
+    result = run_osm_extraction_fixture(
+        "staggered_near_miss",
+        profile="cold_war",
+        config_name=Path("default_osm_config.json"),
+        bbox=None,
+        seed=123,
+    )
+
+    assert result.topology.diagnostics["snapped_points"] >= 1
+    assert result.road_component_count == 1, result.ascii_grid()
+    assert result.road_validation_report.is_valid, result.road_validation_report.issue_summary()
+
+
+def test_road_stream_crossing_keeps_road_output_valid_without_silent_stream_merge() -> None:
+    result = run_osm_extraction_fixture(
+        "road_stream_crossing",
+        profile="cold_war",
+        config_name=Path("default_osm_config.json"),
+        bbox=None,
+        seed=123,
+    )
+
+    route_diagnostics = dict(result.routing.diagnostics)
+    process_policy = route_diagnostics["process_pair_policy"]
+    row_names = {str(row.get("name")) for row in result.output_rows}
+    assert "road" in row_names
+    assert process_policy[("road", "stream")] == "avoid"
+    assert result.diagnostics["route"]["failed_routes"] >= 1
+    assert "no_tile_feasible_path" in result.diagnostics["route"]["failure_reasons"]
+    assert result.road_validation_report.is_valid, result.road_validation_report.issue_summary()
 
 
 @pytest.mark.parametrize("fixture_name", NETWORK_RECOVERY_FIXTURES)

@@ -77,6 +77,171 @@ def test_osm_processor_imports_without_streamlit_and_holds_pipeline(monkeypatch)
     assert hasattr(module.st, "progress")
 
 
+def test_pipeline_run_owns_typed_orchestration_and_catalog_gap_diagnostics() -> None:
+    from shapely.geometry import LineString, Point, Polygon
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        FeatureRecord,
+        GridCell,
+        LayerKind,
+        ProcessKind,
+    )
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+    road_cell = GridCell(1, 1)
+    building_cell = GridCell(2, 1)
+    road_placement = _placement(
+        layer=LayerKind.LINEAR_SURFACE,
+        cell=road_cell,
+        config_name="road",
+        priority=1,
+        cm_type=CMType(menu="Roads", cat1="Dirt", cat2="Road Tile 1", direction="Direction 2"),
+    )
+    building_placement = _placement(
+        layer=LayerKind.BUILDING,
+        cell=building_cell,
+        config_name="houses",
+        priority=4,
+        cm_type=CMType(menu="Buildings", cat1="House", cat2="Small House"),
+    )
+    area_placement = _placement(
+        layer=LayerKind.FOLIAGE,
+        cell=GridCell(0, 0),
+        config_name="trees",
+        priority=5,
+        cm_type=CMType(menu="Foliage", cat1="Tree"),
+    )
+    pipeline = _TypedPipelineHarness(road_placement, building_placement, area_placement)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+    grid_index = GridIndex(
+        origin_x=0,
+        origin_y=0,
+        x_axis_unit=(1.0, 0.0),
+        y_axis_unit=(0.0, 1.0),
+        width=4,
+        height=3,
+    )
+    features = (
+        FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 1, LineString([(0, 8), (24, 8)])),
+        FeatureRecord(
+            "building-1",
+            1,
+            "houses",
+            ProcessKind.BUILDING_OUTLINE,
+            4,
+            Polygon([(16, 8), (24, 8), (24, 16), (16, 16)]),
+        ),
+        FeatureRecord("area-1", 2, "trees", ProcessKind.AREA, 5, Point(8, 8).buffer(4)),
+    )
+
+    result = pipeline.run(
+        features=features,
+        config=ExtractionConfig.from_mapping({}),
+        grid_index=grid_index,
+        bounds=(0, 0, 3, 2),
+        linear_catalog_provider=lambda _features: {
+            ProcessKind.ROAD: SimpleNamespace(
+                catalog_gap_diagnostics=lambda _required_sets: (
+                    {"process": "road", "required_directions": ("E", "N", "S", "W"), "failure_reason": "catalog_gap"},
+                )
+            )
+        },
+        building_catalog_provider=lambda _features: {},
+    )
+
+    assert pipeline.calls == ["topology", "routing", "tile_assignment", "building", "area", "output"]
+    assert result.placements == (road_placement, building_placement, area_placement)
+    assert result.output_rows == ({"name": "extent_marker"},)
+    assert result.diagnostics["catalog_gaps"] == (
+        {"process": "road", "required_directions": ("E", "N", "S", "W"), "failure_reason": "catalog_gap"},
+    )
+
+
+def test_osm_processor_run_processors_delegates_to_pipeline_run() -> None:
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    pipeline = _ProcessorDelegationPipeline()
+    processor = OSMProcessor.__new__(OSMProcessor)
+    processor.pipeline = pipeline
+    processor.grid_index = GridIndex(
+        origin_x=0,
+        origin_y=0,
+        x_axis_unit=(1.0, 0.0),
+        y_axis_unit=(0.0, 1.0),
+        width=2,
+        height=2,
+    )
+    processor.idx_bbox = (0, 0, 1, 1)
+    processor.effective_bbox_polygon = None
+    processor.extraction_config = ExtractionConfig.from_mapping({})
+    processor._typed_features_from_matched_elements = lambda: ()
+    processor._tile_catalogs_for = lambda features: {}
+    processor._building_catalogs_for = lambda features: {}
+    processor._set_compatibility_df_from_placements = lambda: None
+
+    processor.run_processors()
+
+    assert pipeline.calls == ["run"]
+    assert processor.features == ()
+    assert processor.placements == ()
+    assert processor.output_rows == ({"name": "extent_marker"},)
+    assert processor.stats == "stats"
+
+
+def test_source_aware_road_validation_diagnostics_classify_topology_endpoints() -> None:
+    from shapely.geometry import LineString, Point
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import (
+        GridCell,
+        ProcessKind,
+        TopologyEdge,
+        TopologyGraph,
+        TopologyNode,
+    )
+    from terrain_extraction.osm_extraction.pipeline import _source_aware_road_validation_diagnostics
+
+    grid_index = GridIndex(
+        origin_x=0,
+        origin_y=0,
+        x_axis_unit=(1.0, 0.0),
+        y_axis_unit=(0.0, 1.0),
+        width=4,
+        height=1,
+    )
+    topology = TopologyGraph(
+        nodes=(
+            TopologyNode(0, Point(0.5, 0.5)),
+            TopologyNode(1, Point(16.5, 0.5)),
+        ),
+        edges=(TopologyEdge(0, 0, 1, LineString([(0.5, 0.5), (16.5, 0.5)]), ("road-1",), (0,), "road", ProcessKind.ROAD, 1),),
+    )
+    road_validation = SimpleNamespace(
+        dangling_arms=(
+            SimpleNamespace(cell=GridCell(0, 0)),
+            SimpleNamespace(cell=GridCell(2, 0)),
+            SimpleNamespace(cell=GridCell(3, 0)),
+        )
+    )
+
+    diagnostics = _source_aware_road_validation_diagnostics(
+        road_validation=road_validation,
+        topology=topology,
+        grid_index=grid_index,
+    )
+
+    assert diagnostics["topology_endpoint_cells"] == ((0, 0), (2, 0))
+    assert diagnostics["unexplained_dangling_arm_cells"] == ((3, 0),)
+
+
 class _LegacyProcessor:
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -93,3 +258,129 @@ class _LegacyProcessor:
     def get_output(self) -> pd.DataFrame:
         self.calls.append("get_output")
         return pd.DataFrame([{"x": 1, "y": 2, "name": "forest"}])
+
+
+class _TypedPipelineHarness:
+    def __init__(self, road_placement, building_placement, area_placement) -> None:
+        from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+        self.context = ExtractionContext.create(
+            profile="cold_war",
+            bbox=object(),
+            config_path="default_osm_config.json",
+            seed=0,
+        )
+        self.calls: list[str] = []
+        self.road_placement = road_placement
+        self.building_placement = building_placement
+        self.area_placement = area_placement
+
+    from terrain_extraction.osm_extraction.pipeline import ExtractionPipeline
+
+    run = ExtractionPipeline.run
+
+    def run_network_topology(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        self.calls.append("topology")
+        return ExtractionResult(diagnostics={"network_topology": object()})
+
+    def run_network_router(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        self.calls.append("routing")
+        return ExtractionResult(
+            diagnostics={
+                "network_routes": SimpleNamespace(
+                    routes=(object(),),
+                    linear_state=object(),
+                )
+            }
+        )
+
+    def run_tile_assignment(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        self.calls.append("tile_assignment")
+        return ExtractionResult(
+            placements=(self.road_placement,),
+            diagnostics={"tile_assignment": object()},
+        )
+
+    def run_building_fitter(self, *, occupancy, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult, LayerKind
+
+        self.calls.append("building")
+        assert occupancy.object_id_at(LayerKind.LINEAR_SURFACE, self.road_placement.cells[0]) is not None
+        occupancy.place(self.building_placement, object_id=self.building_placement.feature_id)
+        return ExtractionResult(
+            placements=(self.building_placement,),
+            diagnostics={"building_fitting": object()},
+        )
+
+    def run_area_rasterizer(self, *, occupancy, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult, LayerKind
+
+        self.calls.append("area")
+        assert occupancy.object_id_at(LayerKind.LINEAR_SURFACE, self.road_placement.cells[0]) is not None
+        assert occupancy.object_id_at(LayerKind.BUILDING, self.building_placement.cells[0]) is not None
+        occupancy.place(self.area_placement, object_id=self.area_placement.feature_id)
+        return ExtractionResult(placements=(self.area_placement,))
+
+    def run_output_rows(self, *, placements, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        self.calls.append("output")
+        return ExtractionResult(
+            placements=placements,
+            output_rows=({"name": "extent_marker"},),
+            stats="stats",
+            diagnostics={"road_validation": object()},
+        )
+
+
+class _ProcessorDelegationPipeline:
+    def __init__(self) -> None:
+        from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+        self.context = ExtractionContext.create(
+            profile="cold_war",
+            bbox=object(),
+            config_path="default_osm_config.json",
+            seed=0,
+        )
+        self.calls: list[str] = []
+
+    def run(self, **kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        self.calls.append("run")
+        assert kwargs["features"] == ()
+        assert kwargs["bounds"] == (0, 0, 1, 1)
+        assert callable(kwargs["linear_catalog_provider"])
+        assert callable(kwargs["building_catalog_provider"])
+        return ExtractionResult(
+            output_rows=({"name": "extent_marker"},),
+            stats="stats",
+            diagnostics={
+                "occupancy": object(),
+                "network_topology": object(),
+                "network_routes": object(),
+                "tile_assignment": object(),
+            },
+        )
+
+
+def _placement(*, layer, cell, config_name, priority, cm_type):
+    from terrain_extraction.osm_extraction.models import GridKind, PlacementRecord
+
+    return PlacementRecord(
+        layer=layer,
+        grid_kind=GridKind.NORMAL,
+        cells=(cell,),
+        config_name=config_name,
+        feature_id=f"{config_name}-1",
+        priority=priority,
+        cm_type=cm_type,
+        score=1.0,
+    )

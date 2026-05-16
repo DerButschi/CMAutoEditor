@@ -16,10 +16,6 @@ from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
     CMType,
     FeatureRecord,
-    GridCell,
-    GridKind,
-    LayerKind,
-    PlacementRecord,
     ProcessKind,
 )
 from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
@@ -398,76 +394,25 @@ class OSMProcessor:
             grid_index = GridIndex.from_bbox(self.bbox)
             self.grid_index = grid_index
 
-        from terrain_extraction.osm_extraction.occupancy import OccupancyModel
-
-        self.occupancy = OccupancyModel.from_grid_index(grid_index)
         features = self._typed_features_from_matched_elements()
-        self.features = features
-
-        placements = []
-        area_features = tuple(
-            feature
-            for feature in features
-            if feature.process in {ProcessKind.AREA, ProcessKind.RANDOM, ProcessKind.POINT}
-        )
-
-        linear_features = tuple(
-            feature
-            for feature in features
-            if feature.process in {ProcessKind.ROAD, ProcessKind.RAIL, ProcessKind.STREAM, ProcessKind.FENCE}
-        )
-        if linear_features:
-            linear_catalogs = self._tile_catalogs_for(linear_features)
-            topology_result = self.pipeline.run_network_topology(
-                features=linear_features,
-                clip_geometry=getattr(self, "effective_bbox_polygon", None),
-            )
-            self.topology = topology_result.diagnostics["network_topology"]
-            routing_result = self.pipeline.run_network_router(
-                topology=self.topology,
-                grid_index=grid_index,
-                occupancy=self.occupancy,
-                catalogs=linear_catalogs,
-            )
-            self.routing = routing_result.diagnostics["network_routes"]
-            tile_result = self.pipeline.run_tile_assignment(
-                routes=self.routing.routes,
-                catalogs=linear_catalogs,
-                linear_state=self.routing.linear_state,
-            )
-            self.tile_assignment = tile_result.diagnostics["tile_assignment"]
-            placements.extend(tile_result.placements)
-            self._reserve_output_placements(tile_result.placements)
-
-        linear_dependent_placements = self._typed_linear_feature_placements(tuple(placements))
-        placements.extend(linear_dependent_placements)
-        self._reserve_output_placements(linear_dependent_placements)
-
-        building_features = tuple(feature for feature in features if feature.process is ProcessKind.BUILDING_OUTLINE)
-        if building_features:
-            building_result = self.pipeline.run_building_fitter(
-                features=building_features,
-                catalogs=self._building_catalogs_for(building_features),
-                grid_index=grid_index,
-                occupancy=self.occupancy,
-            )
-            placements.extend(building_result.placements)
-
-        area_result = self.pipeline.run_area_rasterizer(
-            features=area_features,
+        result = self.pipeline.run(
+            features=features,
             config=self.extraction_config,
             grid_index=grid_index,
-            occupancy=self.occupancy,
-        )
-        placements.extend(area_result.placements)
-
-        self.placements = self._resolve_output_layer_conflicts(tuple(placements))
-        output_result = self.pipeline.run_output_rows(
-            placements=self.placements,
             bounds=tuple(self.idx_bbox),
+            clip_geometry=getattr(self, "effective_bbox_polygon", None),
+            linear_catalog_provider=self._tile_catalogs_for,
+            building_catalog_provider=self._building_catalogs_for,
         )
-        self.output_rows = output_result.output_rows
-        self.stats = output_result.stats
+        self.features = result.features
+        self.placements = result.placements
+        self.output_rows = result.output_rows
+        self.stats = result.stats
+        self.occupancy = result.diagnostics.get("occupancy")
+        self.topology = result.diagnostics.get("network_topology")
+        self.routing = result.diagnostics.get("network_routes")
+        self.tile_assignment = result.diagnostics.get("tile_assignment")
+        self.pipeline_diagnostics = result.diagnostics
         self._set_compatibility_df_from_placements()
 
     def _set_compatibility_df_from_placements(self):
@@ -573,117 +518,41 @@ class OSMProcessor:
         return catalogs
 
     def _typed_linear_feature_placements(self, placements):
-        linear_placements = []
-        cells_by_name = {}
-        for placement in placements:
-            for cell in placement.cells:
-                cells_by_name.setdefault(placement.config_name, set()).add(cell)
+        from terrain_extraction.osm_extraction.pipeline import _linear_feature_placements
 
-        for entry in self.extraction_config.entries:
-            if ProcessKind.LINEAR not in entry.processes:
-                continue
-            source_name = entry.modifiers.get("linear_name")
-            if not source_name:
-                continue
-            for cell in sorted(cells_by_name.get(source_name, ()), key=lambda item: (item.xidx, item.yidx)):
-                cm_type = self._choose_cm_type(entry.cm_types)
-                if cm_type is None:
-                    continue
-                linear_placements.append(
-                    PlacementRecord(
-                        layer=self._layer_for_cm_type(cm_type),
-                        grid_kind=GridKind.NORMAL,
-                        cells=(GridCell(cell.xidx, cell.yidx),),
-                        config_name=entry.name,
-                        feature_id=f"{entry.name}:{source_name}:{cell.xidx}:{cell.yidx}",
-                        priority=entry.priority,
-                        cm_type=cm_type,
-                        score=1.0,
-                        diagnostics={"derived_from_linear": source_name},
-                    )
-                )
-        return tuple(linear_placements)
+        return _linear_feature_placements(
+            config=self.extraction_config,
+            source_placements=tuple(placements),
+            rng=self.pipeline.context.rng,
+        )
 
     def _choose_cm_type(self, cm_types):
-        if not cm_types:
-            return None
-        weights = np.array([float(cm_type.modifiers.get("weight", 1.0)) for cm_type in cm_types], dtype=float)
-        probabilities = weights / weights.sum()
-        cm_type = cm_types[int(self.pipeline.context.rng.choice(len(cm_types), p=probabilities))]
-        return None if cm_type.modifiers.get("dummy") is True else cm_type
+        from terrain_extraction.osm_extraction.pipeline import _choose_cm_type
+
+        return _choose_cm_type(tuple(cm_types), self.pipeline.context.rng)
 
     @staticmethod
     def _layer_for_cm_type(cm_type: CMType):
-        menu = cm_type.menu.lower()
-        if menu.startswith("foliage") or menu.startswith("brush"):
-            return LayerKind.FOLIAGE
-        if menu.startswith("flavor objects"):
-            return LayerKind.POINT_OBJECT
-        if menu.startswith("walls") or menu.startswith("fence"):
-            return LayerKind.LINEAR_OBJECT
-        if menu.startswith("roads"):
-            return LayerKind.LINEAR_SURFACE
-        if "building" in menu:
-            return LayerKind.BUILDING
-        return LayerKind.GROUND
+        from terrain_extraction.osm_extraction.pipeline import _layer_for_cm_type
+
+        return _layer_for_cm_type(cm_type)
 
     def _reserve_output_placements(self, placements):
-        occupancy = getattr(self, "occupancy", None)
-        if occupancy is None:
-            return
-        for placement in placements:
-            object_id = (
-                placement.feature_id
-                if placement.feature_id is not None
-                else f"{placement.config_name}:{placement.cells[0].xidx}:{placement.cells[0].yidx}"
-            )
-            occupancy.place(placement, object_id=object_id, allow_replace=False)
+        from terrain_extraction.osm_extraction.pipeline import _reserve_output_placements
+
+        _reserve_output_placements(getattr(self, "occupancy", None), tuple(placements))
 
     @staticmethod
     def _resolve_output_layer_conflicts(placements):
-        winners_by_cell = {}
-        for placement_idx, placement in enumerate(placements):
-            for cell in placement.cells:
-                key = (placement.layer, cell)
-                winner = winners_by_cell.get(key)
-                candidate = (OSMProcessor._output_priority_key(placement), placement_idx)
-                if winner is None or candidate < winner[0]:
-                    winners_by_cell[key] = (candidate, placement)
+        from terrain_extraction.osm_extraction.pipeline import _resolve_output_layer_conflicts
 
-        resolved = []
-        for placement in placements:
-            cells = tuple(
-                cell
-                for cell in placement.cells
-                if winners_by_cell.get((placement.layer, cell), (None, None))[1] is placement
-            )
-            if not cells:
-                continue
-            if cells == placement.cells:
-                resolved.append(placement)
-                continue
-            resolved.append(
-                PlacementRecord(
-                    layer=placement.layer,
-                    grid_kind=placement.grid_kind,
-                    cells=cells,
-                    config_name=placement.config_name,
-                    feature_id=placement.feature_id,
-                    priority=placement.priority,
-                    cm_type=placement.cm_type,
-                    score=placement.score,
-                    diagnostics=placement.diagnostics,
-                )
-            )
-        return tuple(resolved)
+        return _resolve_output_layer_conflicts(tuple(placements))
 
     @staticmethod
     def _output_priority_key(placement):
-        if placement.priority > 0:
-            return 0, placement.priority
-        if placement.priority > -999:
-            return 1, -placement.priority
-        return 2, 0
+        from terrain_extraction.osm_extraction.pipeline import _output_priority_key
+
+        return _output_priority_key(placement)
 
     def post_process(self):
         if self._uses_layered_output():

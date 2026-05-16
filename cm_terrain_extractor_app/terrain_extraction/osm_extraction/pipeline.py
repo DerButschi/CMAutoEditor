@@ -8,7 +8,15 @@ from typing import Any, Protocol
 import numpy as np
 from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
 from terrain_extraction.osm_extraction.grid_index import GridIndex
-from terrain_extraction.osm_extraction.models import ExtractionResult
+from terrain_extraction.osm_extraction.models import (
+    CMType,
+    ExtractionResult,
+    GridCell,
+    GridKind,
+    LayerKind,
+    PlacementRecord,
+    ProcessKind,
+)
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.stats import (
     ExtractionStats,
@@ -71,8 +79,114 @@ class ExtractionContext:
 class ExtractionPipeline:
     context: ExtractionContext
 
-    def run(self) -> ExtractionResult:
-        return ExtractionResult(stats=ExtractionStats(diagnostics={"mode": "stub"}))
+    def run(
+        self,
+        *,
+        features: tuple[Any, ...],
+        config: ExtractionConfig,
+        grid_index: GridIndex,
+        bounds: tuple[int | float, int | float, int | float, int | float],
+        clip_geometry: Any | None = None,
+        occupancy: OccupancyModel | None = None,
+        linear_catalog_provider: Callable[[tuple[Any, ...]], Mapping[Any, Any]] | None = None,
+        building_catalog_provider: Callable[[tuple[Any, ...]], Mapping[str, Any]] | None = None,
+    ) -> ExtractionResult:
+        occupancy_model = occupancy or OccupancyModel.from_grid_index(grid_index)
+        placements: list[PlacementRecord] = []
+        diagnostics: dict[str, Any] = {"occupancy": occupancy_model, "catalog_gaps": ()}
+
+        area_features = tuple(
+            feature
+            for feature in features
+            if feature.process in {ProcessKind.AREA, ProcessKind.RANDOM, ProcessKind.POINT}
+        )
+        linear_features = tuple(
+            feature
+            for feature in features
+            if feature.process in {ProcessKind.ROAD, ProcessKind.RAIL, ProcessKind.STREAM, ProcessKind.FENCE}
+        )
+        building_features = tuple(feature for feature in features if feature.process is ProcessKind.BUILDING_OUTLINE)
+
+        if linear_features:
+            linear_catalogs = (
+                self._tile_catalogs_for(linear_features, config)
+                if linear_catalog_provider is None
+                else linear_catalog_provider(linear_features)
+            )
+            diagnostics["catalog_gaps"] = _catalog_gap_diagnostics(linear_catalogs)
+            topology_result = self.run_network_topology(
+                features=linear_features,
+                clip_geometry=clip_geometry,
+            )
+            topology = topology_result.diagnostics["network_topology"]
+            diagnostics["network_topology"] = topology
+            routing_result = self.run_network_router(
+                topology=topology,
+                grid_index=grid_index,
+                occupancy=occupancy_model,
+                catalogs=linear_catalogs,
+            )
+            routing = routing_result.diagnostics["network_routes"]
+            diagnostics["network_routes"] = routing
+            tile_result = self.run_tile_assignment(
+                routes=routing.routes,
+                catalogs=linear_catalogs,
+                linear_state=routing.linear_state,
+            )
+            diagnostics["tile_assignment"] = tile_result.diagnostics["tile_assignment"]
+            placements.extend(tile_result.placements)
+            _reserve_output_placements(occupancy_model, tile_result.placements)
+
+        linear_dependent_placements = _linear_feature_placements(
+            config=config,
+            source_placements=tuple(placements),
+            rng=self.context.rng,
+        )
+        placements.extend(linear_dependent_placements)
+        _reserve_output_placements(occupancy_model, linear_dependent_placements)
+
+        if building_features:
+            building_catalogs = (
+                self._building_catalogs_for(building_features, config)
+                if building_catalog_provider is None
+                else building_catalog_provider(building_features)
+            )
+            building_result = self.run_building_fitter(
+                features=building_features,
+                catalogs=building_catalogs,
+                grid_index=grid_index,
+                occupancy=occupancy_model,
+            )
+            placements.extend(building_result.placements)
+            diagnostics["building_fitting"] = building_result.diagnostics.get("building_fitting")
+
+        area_result = self.run_area_rasterizer(
+            features=area_features,
+            config=config,
+            grid_index=grid_index,
+            occupancy=occupancy_model,
+        )
+        placements.extend(area_result.placements)
+
+        resolved_placements = _resolve_output_layer_conflicts(tuple(placements))
+        output_result = self.run_output_rows(
+            placements=resolved_placements,
+            bounds=bounds,
+        )
+        diagnostics.update(output_result.diagnostics)
+        if "network_topology" in diagnostics and "road_validation" in diagnostics:
+            diagnostics["source_aware_road_validation"] = _source_aware_road_validation_diagnostics(
+                road_validation=diagnostics["road_validation"],
+                topology=diagnostics["network_topology"],
+                grid_index=grid_index,
+            )
+        return ExtractionResult(
+            features=features,
+            placements=resolved_placements,
+            output_rows=output_result.output_rows,
+            stats=output_result.stats,
+            diagnostics=diagnostics,
+        )
 
     def run_area_rasterizer(
         self,
@@ -312,6 +426,44 @@ class ExtractionPipeline:
         timings[stage] = time.perf_counter() - start
         self.context.progress(stage, 1.0, message)
 
+    def _tile_catalogs_for(self, features: tuple[Any, ...], config: ExtractionConfig) -> Mapping[Any, Any]:
+        from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+        from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
+
+        tile_sources = {
+            ProcessKind.ROAD: road_tiles,
+            ProcessKind.RAIL: rail_tiles,
+            ProcessKind.STREAM: stream_tiles,
+            ProcessKind.FENCE: fence_tiles,
+        }
+        processes = {feature.process for feature in features}
+        return {
+            process: CompiledTileCatalog.from_records(
+                tile_sources[process],
+                process=process,
+                base_cm_type=_base_cm_type_for_process(config, process),
+            )
+            for process in sorted(processes, key=lambda item: item.value)
+        }
+
+    def _building_catalogs_for(self, features: tuple[Any, ...], config: ExtractionConfig) -> Mapping[str, Any]:
+        from profiles import get_building_tiles, process_to_building_type
+
+        catalogs = {}
+        for feature in features:
+            if feature.config_name in catalogs:
+                continue
+            entry = config.entry_by_name(feature.config_name)
+            building_type = None
+            for legacy_process in entry.legacy_processes:
+                if legacy_process in process_to_building_type:
+                    building_type = process_to_building_type[legacy_process]
+                    break
+            if building_type is not None:
+                catalogs[feature.config_name] = get_building_tiles(building_type, self.context.profile)
+        return catalogs
+
 
 def _records_from_output(output: Any) -> tuple[Mapping[str, Any], ...]:
     if hasattr(output, "to_dict"):
@@ -341,3 +493,194 @@ def _topology_component_count(topology: Any) -> int:
     for edge in topology.edges:
         union(edge.start_node_id, edge.end_node_id)
     return len({find(node.node_id) for node in topology.nodes})
+
+
+def _catalog_gap_diagnostics(catalogs: Mapping[Any, Any]) -> tuple[Mapping[str, Any], ...]:
+    required_direction_sets = (
+        ("N",),
+        ("E",),
+        ("S",),
+        ("W",),
+        ("N", "S"),
+        ("E", "W"),
+        ("N", "E"),
+        ("E", "S"),
+        ("S", "W"),
+        ("N", "W"),
+        ("N", "E", "S"),
+        ("E", "S", "W"),
+        ("N", "S", "W"),
+        ("N", "E", "W"),
+        ("N", "E", "S", "W"),
+    )
+    diagnostics: list[Mapping[str, Any]] = []
+    for catalog in catalogs.values():
+        if hasattr(catalog, "catalog_gap_diagnostics"):
+            diagnostics.extend(catalog.catalog_gap_diagnostics(required_direction_sets))
+    return tuple(diagnostics)
+
+
+def _base_cm_type_for_process(config: ExtractionConfig, process: ProcessKind) -> CMType | None:
+    for entry in config.entries:
+        if process in entry.processes and entry.cm_types:
+            return entry.cm_types[0]
+    return None
+
+
+def _linear_feature_placements(
+    *,
+    config: ExtractionConfig,
+    source_placements: tuple[PlacementRecord, ...],
+    rng: np.random.Generator,
+) -> tuple[PlacementRecord, ...]:
+    linear_placements = []
+    cells_by_name: dict[str, set[GridCell]] = {}
+    for placement in source_placements:
+        for cell in placement.cells:
+            cells_by_name.setdefault(placement.config_name, set()).add(cell)
+
+    for entry in config.entries:
+        if ProcessKind.LINEAR not in entry.processes:
+            continue
+        source_name = entry.modifiers.get("linear_name")
+        if not source_name:
+            continue
+        for cell in sorted(cells_by_name.get(source_name, ()), key=lambda item: (item.xidx, item.yidx)):
+            cm_type = _choose_cm_type(entry.cm_types, rng)
+            if cm_type is None:
+                continue
+            linear_placements.append(
+                PlacementRecord(
+                    layer=_layer_for_cm_type(cm_type),
+                    grid_kind=GridKind.NORMAL,
+                    cells=(GridCell(cell.xidx, cell.yidx),),
+                    config_name=entry.name,
+                    feature_id=f"{entry.name}:{source_name}:{cell.xidx}:{cell.yidx}",
+                    priority=entry.priority,
+                    cm_type=cm_type,
+                    score=1.0,
+                    diagnostics={"derived_from_linear": source_name},
+                )
+            )
+    return tuple(linear_placements)
+
+
+def _choose_cm_type(cm_types: tuple[CMType, ...], rng: np.random.Generator) -> CMType | None:
+    if not cm_types:
+        return None
+    weights = np.array([float(cm_type.modifiers.get("weight", 1.0)) for cm_type in cm_types], dtype=float)
+    probabilities = weights / weights.sum()
+    cm_type = cm_types[int(rng.choice(len(cm_types), p=probabilities))]
+    return None if cm_type.modifiers.get("dummy") is True else cm_type
+
+
+def _layer_for_cm_type(cm_type: CMType) -> LayerKind:
+    menu = cm_type.menu.lower()
+    if menu.startswith("foliage") or menu.startswith("brush"):
+        return LayerKind.FOLIAGE
+    if menu.startswith("flavor objects"):
+        return LayerKind.POINT_OBJECT
+    if menu.startswith("walls") or menu.startswith("fence"):
+        return LayerKind.LINEAR_OBJECT
+    if menu.startswith("roads"):
+        return LayerKind.LINEAR_SURFACE
+    if "building" in menu:
+        return LayerKind.BUILDING
+    return LayerKind.GROUND
+
+
+def _reserve_output_placements(occupancy: OccupancyModel | None, placements: tuple[PlacementRecord, ...]) -> None:
+    if occupancy is None:
+        return
+    for placement in placements:
+        object_id = (
+            placement.feature_id
+            if placement.feature_id is not None
+            else f"{placement.config_name}:{placement.cells[0].xidx}:{placement.cells[0].yidx}"
+        )
+        occupancy.place(placement, object_id=object_id, allow_replace=False)
+
+
+def _resolve_output_layer_conflicts(placements: tuple[PlacementRecord, ...]) -> tuple[PlacementRecord, ...]:
+    winners_by_cell = {}
+    for placement_idx, placement in enumerate(placements):
+        for cell in placement.cells:
+            key = (placement.layer, cell)
+            winner = winners_by_cell.get(key)
+            candidate = (_output_priority_key(placement), placement_idx)
+            if winner is None or candidate < winner[0]:
+                winners_by_cell[key] = (candidate, placement)
+
+    resolved = []
+    for placement in placements:
+        cells = tuple(
+            cell
+            for cell in placement.cells
+            if winners_by_cell.get((placement.layer, cell), (None, None))[1] is placement
+        )
+        if not cells:
+            continue
+        if cells == placement.cells:
+            resolved.append(placement)
+            continue
+        resolved.append(
+            PlacementRecord(
+                layer=placement.layer,
+                grid_kind=placement.grid_kind,
+                cells=cells,
+                config_name=placement.config_name,
+                feature_id=placement.feature_id,
+                priority=placement.priority,
+                cm_type=placement.cm_type,
+                score=placement.score,
+                diagnostics=placement.diagnostics,
+            )
+        )
+    return tuple(resolved)
+
+
+def _output_priority_key(placement: PlacementRecord) -> tuple[int, int]:
+    if placement.priority > 0:
+        return 0, placement.priority
+    if placement.priority > -999:
+        return 1, -placement.priority
+    return 2, 0
+
+
+def _source_aware_road_validation_diagnostics(
+    *,
+    road_validation: Any,
+    topology: Any,
+    grid_index: GridIndex,
+) -> Mapping[str, Any]:
+    endpoint_cells = _road_topology_endpoint_cells(topology, grid_index)
+    dangling_cells = frozenset(
+        issue.cell
+        for issue in getattr(road_validation, "dangling_arms", ()) or ()
+        if getattr(issue, "cell", None) is not None
+    )
+    unexplained = tuple(sorted(dangling_cells - endpoint_cells, key=lambda cell: (cell.xidx, cell.yidx)))
+    return {
+        "topology_endpoint_cells": tuple((cell.xidx, cell.yidx) for cell in sorted(endpoint_cells)),
+        "dangling_arm_cells": tuple((cell.xidx, cell.yidx) for cell in sorted(dangling_cells)),
+        "unexplained_dangling_arm_cells": tuple((cell.xidx, cell.yidx) for cell in unexplained),
+    }
+
+
+def _road_topology_endpoint_cells(topology: Any, grid_index: GridIndex) -> frozenset[GridCell]:
+    nodes = tuple(getattr(topology, "nodes", ()) or ())
+    edges = tuple(edge for edge in (getattr(topology, "edges", ()) or ()) if edge.process is ProcessKind.ROAD)
+    if not nodes or not edges:
+        return frozenset()
+    degree_by_node = {node.node_id: 0 for node in nodes}
+    for edge in edges:
+        degree_by_node[edge.start_node_id] = degree_by_node.get(edge.start_node_id, 0) + 1
+        degree_by_node[edge.end_node_id] = degree_by_node.get(edge.end_node_id, 0) + 1
+
+    node_by_id = {node.node_id: node for node in nodes}
+    return frozenset(
+        grid_index.projected_to_cell(node.point.x, node.point.y)
+        for node_id, degree in degree_by_node.items()
+        if degree == 1
+        for node in (node_by_id[node_id],)
+    )

@@ -125,6 +125,10 @@ class _CrossFeaturePipeline:
         self.area_placement = area_placement
         self.context = SimpleNamespace(rng=None)
 
+    from terrain_extraction.osm_extraction.pipeline import ExtractionPipeline
+
+    run = ExtractionPipeline.run
+
     def run_network_topology(self, **_kwargs):
         from terrain_extraction.osm_extraction.models import ExtractionResult
 
