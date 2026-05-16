@@ -162,6 +162,7 @@ def test_state_finalizer_reports_missing_state_tile_as_hard_failure() -> None:
             "required_directions": ("E", "N", "S", "W"),
             "failure_reason": "catalog_gap",
             "hard_failure": True,
+            "route_ids": (1, 2),
         },
     )
     assert GridCell(1, 1) not in {placement.cells[0] for placement in result.placements}

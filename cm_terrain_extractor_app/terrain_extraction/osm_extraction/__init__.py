@@ -77,6 +77,7 @@ from terrain_extraction.osm_extraction.pipeline import (
     ExtractionContext,
     ExtractionPipeline,
     ProgressCallback,
+    TileAssignmentError,
     noop_progress,
 )
 from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
@@ -148,6 +149,7 @@ __all__ = [
     "noop_progress",
     "TagSelector",
     "TileAssigner",
+    "TileAssignmentError",
     "TileAssignmentResult",
     "TileVariant",
     "TopologyEdge",

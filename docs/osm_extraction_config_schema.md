@@ -6,7 +6,7 @@ Top-level options:
 
 | Field | Type | Purpose |
 | --- | --- | --- |
-| `road_validation_mode` | `"warn"` or `"strict"` | Controls final road-structure validation. Defaults to `"warn"` for normal OSM extraction so invalid local road output is returned with diagnostics instead of aborting. Use `"strict"` for tests and debugging that should fail on invalid road output. |
+| `road_validation_mode` | `"warn"` or `"strict"` | Controls final road-structure validation and tile-assignment failure handling. Defaults to `"warn"` for normal OSM extraction so invalid local road output is returned with diagnostics instead of aborting, and tile-assignment catalog gaps suppress only affected local route pieces. Use `"strict"` for tests and debugging that should fail on invalid road or tile output. |
 
 ## Entry Shape
 
@@ -85,6 +85,8 @@ New modifiers should be validated in `config_schema.py` when they become part of
 Processors emit `PlacementRecord` objects. `output_rows.py` validates conflicts, appends the explicit extent marker, and normalizes coordinates. Public CSV columns remain `x`, `y`, `z`, `menu`, `cat1`, `cat2`, `direction`, `id`, `name`, and `priority`.
 
 Road-structure validation is controlled by `road_validation_mode`. Both modes return `road_validation` and `road_validation_status` diagnostics when output assembly returns. `"strict"` raises `OutputRowValidationError` for invalid road structures; `"warn"` returns the rows unchanged and records the validation summary, validity, mode, and hard issue count in diagnostics.
+
+Tile assignment failures are reported through `tile_assignment_failures` with the affected process, route ID or route IDs when known, cell, required directions, and failure reason. `"strict"` raises `TileAssignmentError` before output assembly when tile assignment cannot finalize a local linear piece. `"warn"` suppresses the failed cell or route-local placements and keeps unrelated valid tile placements.
 
 `debug_export.py` can expose source features, topology, routes, occupancy, building footprints, and final rows. Debug layers are derived views and must not become required hot-path inputs.
 

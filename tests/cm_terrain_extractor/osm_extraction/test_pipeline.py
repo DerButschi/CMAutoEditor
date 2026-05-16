@@ -268,6 +268,95 @@ def test_pipeline_run_strict_mode_rejects_invalid_road_output(config, explicit_m
         )
 
 
+def test_pipeline_warn_mode_contains_tile_assignment_failures_locally() -> None:
+    from shapely.geometry import LineString
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import FeatureRecord, ProcessKind
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+    routes, linear_state = _tile_failure_routes_and_state()
+    pipeline = _TileFailureContainmentPipelineHarness(routes, linear_state)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+
+    result = pipeline.run(
+        features=(FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 1, LineString([(0, 0), (16, 0)])),),
+        config=ExtractionConfig.from_mapping({}),
+        grid_index=GridIndex(
+            origin_x=0,
+            origin_y=0,
+            x_axis_unit=(1.0, 0.0),
+            y_axis_unit=(0.0, 1.0),
+            width=6,
+            height=6,
+        ),
+        bounds=(0, 0, 5, 5),
+        linear_catalog_provider=lambda _features: {ProcessKind.ROAD: _tile_failure_catalog(include_four_way=False)},
+        road_validation_mode="warn",
+    )
+
+    assert result.diagnostics["tile_assignment_failures"] == (
+        {
+            "process": "road",
+            "cell": (1, 1),
+            "required_directions": ("E", "N", "S", "W"),
+            "failure_reason": "catalog_gap",
+            "hard_failure": True,
+            "route_ids": (1, 2),
+        },
+    )
+    road_rows = {
+        (row["x"], row["y"])
+        for row in result.output_rows
+        if isinstance(row.get("cat2"), str) and row["cat2"].startswith("Road Tile ")
+    }
+    assert road_rows == {(0, 4), (1, 4), (2, 4)}
+    assert {placement.feature_id for placement in result.placements} == {3}
+    assert all(
+        not {1, 2}.intersection(placement.diagnostics.get("contributing_route_ids", ()))
+        for placement in result.placements
+    )
+
+
+def test_pipeline_strict_mode_fails_on_tile_assignment_failures() -> None:
+    from shapely.geometry import LineString
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import FeatureRecord, ProcessKind
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext, TileAssignmentError
+
+    routes, linear_state = _tile_failure_routes_and_state()
+    pipeline = _TileFailureContainmentPipelineHarness(routes, linear_state)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+
+    with pytest.raises(TileAssignmentError, match="tile assignment failures.*catalog_gap"):
+        pipeline.run(
+            features=(FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 1, LineString([(0, 0), (16, 0)])),),
+            config=ExtractionConfig.from_mapping({}),
+            grid_index=GridIndex(
+                origin_x=0,
+                origin_y=0,
+                x_axis_unit=(1.0, 0.0),
+                y_axis_unit=(0.0, 1.0),
+                width=6,
+                height=6,
+            ),
+            bounds=(0, 0, 5, 5),
+            linear_catalog_provider=lambda _features: {ProcessKind.ROAD: _tile_failure_catalog(include_four_way=False)},
+            road_validation_mode="strict",
+        )
+
+
 def test_osm_processor_run_processors_delegates_to_pipeline_run() -> None:
     from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
     from terrain_extraction.osm_extraction.grid_index import GridIndex
@@ -491,6 +580,48 @@ class _TypedPipelineHarness:
         )
 
 
+class _TileFailureContainmentPipelineHarness:
+    def __init__(self, routes, linear_state) -> None:
+        from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+        self.context = ExtractionContext.create(
+            profile="cold_war",
+            bbox=object(),
+            config_path="default_osm_config.json",
+            seed=0,
+        )
+        self.routes = routes
+        self.linear_state = linear_state
+
+    from terrain_extraction.osm_extraction.pipeline import ExtractionPipeline
+
+    run = ExtractionPipeline.run
+    run_tile_assignment = ExtractionPipeline.run_tile_assignment
+    run_output_rows = ExtractionPipeline.run_output_rows
+
+    def run_network_topology(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        return ExtractionResult(diagnostics={"network_topology": object()})
+
+    def run_network_router(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult, NetworkRoutingResult
+
+        return ExtractionResult(
+            diagnostics={
+                "network_routes": NetworkRoutingResult(
+                    routes=self.routes,
+                    linear_state=self.linear_state,
+                )
+            }
+        )
+
+    def run_area_rasterizer(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        return ExtractionResult()
+
+
 class _ProcessorDelegationPipeline:
     def __init__(self) -> None:
         from terrain_extraction.osm_extraction.pipeline import ExtractionContext
@@ -536,3 +667,66 @@ def _placement(*, layer, cell, config_name, priority, cm_type):
         cm_type=cm_type,
         score=1.0,
     )
+
+
+def _tile_failure_catalog(*, include_four_way: bool):
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    rows = [
+        {"direction": 6, "row": 0, "col": 2, "r": (2, 3), "cost": 1.0},
+        {"direction": 7, "row": 0, "col": 2, "l": (2, 3), "cost": 1.0},
+        {"direction": 8, "row": 0, "col": 2, "u": (2, 3), "cost": 1.0},
+        {"direction": 9, "row": 0, "col": 2, "d": (2, 3), "cost": 1.0},
+        {"direction": 1, "row": 0, "col": 0, "l": (2, 3), "r": (2, 3), "cost": 1.0},
+        {"direction": 0, "row": 0, "col": 1, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+    ]
+    if include_four_way:
+        rows.append(
+            {
+                "direction": 5,
+                "row": 2,
+                "col": 2,
+                "l": (2, 3),
+                "r": (2, 3),
+                "u": (2, 3),
+                "d": (2, 3),
+                "cost": 2.0,
+            }
+        )
+    return CompiledTileCatalog.from_records(rows, process=ProcessKind.ROAD)
+
+
+def _tile_failure_routes_and_state():
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import (
+        GridCell,
+        GridNode,
+        ProcessKind,
+        RouteRecord,
+    )
+
+    def route(edge_id: int, cells: tuple[tuple[int, int], ...]) -> RouteRecord:
+        tile_cells = tuple(GridCell(xidx, yidx) for xidx, yidx in cells)
+        return RouteRecord(
+            edge_id=edge_id,
+            start_node_id=edge_id * 2,
+            end_node_id=edge_id * 2 + 1,
+            process=ProcessKind.ROAD,
+            config_name="road",
+            priority=1,
+            nodes=tuple(GridNode(cell.xidx, cell.yidx) for cell in tile_cells),
+            tile_cells=tile_cells,
+            diagnostics={"source_feature_ids": (f"osm-{edge_id}",)},
+        )
+
+    routes = (
+        route(1, ((0, 1), (1, 1), (2, 1))),
+        route(2, ((1, 0), (1, 1), (1, 2))),
+        route(3, ((0, 4), (1, 4), (2, 4))),
+    )
+    full_catalog = _tile_failure_catalog(include_four_way=True)
+    state = LinearNetworkState(width=6, height=6, catalogs={ProcessKind.ROAD: full_catalog})
+    for candidate in routes:
+        assert state.reserve_path(candidate).success
+    return routes, state

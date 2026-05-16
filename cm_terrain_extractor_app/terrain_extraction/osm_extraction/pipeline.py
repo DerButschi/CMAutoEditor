@@ -39,6 +39,12 @@ class LegacyProcessor(Protocol):
     def get_output(self) -> Any: ...
 
 
+class TileAssignmentError(ValueError):
+    def __init__(self, failures: tuple[Mapping[str, Any], ...]) -> None:
+        self.failures = failures
+        super().__init__(_tile_assignment_error_message(failures))
+
+
 def noop_progress(stage: str, value: float, message: str | None = None) -> None:
     return None
 
@@ -135,9 +141,19 @@ class ExtractionPipeline:
                 catalogs=linear_catalogs,
                 linear_state=routing.linear_state,
             )
-            diagnostics["tile_assignment"] = tile_result.diagnostics["tile_assignment"]
-            placements.extend(tile_result.placements)
-            _reserve_output_placements(occupancy_model, tile_result.placements)
+            tile_assignment = tile_result.diagnostics["tile_assignment"]
+            tile_failures = _normalize_tile_assignment_failures(tile_assignment)
+            diagnostics["tile_assignment"] = tile_assignment
+            diagnostics["tile_assignment_failures"] = tile_failures
+            if tile_failures and resolved_road_validation_mode == "strict":
+                raise TileAssignmentError(tile_failures)
+            tile_placements, suppressed_tile_placements = _suppress_failed_tile_placements(
+                tile_result.placements,
+                tile_failures,
+            )
+            diagnostics["tile_assignment_suppressed_placements"] = suppressed_tile_placements
+            placements.extend(tile_placements)
+            _reserve_output_placements(occupancy_model, tile_placements)
 
         linear_dependent_placements = _linear_feature_placements(
             config=config,
@@ -485,6 +501,113 @@ def _road_validation_status(report: Any, *, mode: RoadValidationMode) -> dict[st
         "summary": report.issue_summary(),
         "hard_issues": len(report.hard_issues),
     }
+
+
+def _normalize_tile_assignment_failures(tile_assignment: Any) -> tuple[Mapping[str, Any], ...]:
+    return tuple(_normalize_tile_assignment_failure(failure) for failure in getattr(tile_assignment, "failures", ()) or ())
+
+
+def _normalize_tile_assignment_failure(failure: Mapping[str, Any]) -> Mapping[str, Any]:
+    normalized = dict(failure)
+    if "cell" in normalized:
+        normalized["cell"] = _cell_tuple(normalized["cell"])
+    if "required_directions" in normalized:
+        normalized["required_directions"] = tuple(normalized["required_directions"])
+    if "route_ids" in normalized:
+        normalized["route_ids"] = tuple(normalized["route_ids"])
+    return normalized
+
+
+def _suppress_failed_tile_placements(
+    placements: tuple[PlacementRecord, ...],
+    failures: tuple[Mapping[str, Any], ...],
+) -> tuple[tuple[PlacementRecord, ...], tuple[Mapping[str, Any], ...]]:
+    if not failures:
+        return placements, ()
+
+    failed_process_cells = {
+        (failure.get("process"), failure.get("cell"))
+        for failure in failures
+        if failure.get("process") is not None and failure.get("cell") is not None
+    }
+    failed_route_ids = _failed_tile_route_ids(failures)
+    kept = []
+    suppressed = []
+    for placement in placements:
+        if _placement_matches_failed_tile_piece(
+            placement,
+            failed_process_cells=failed_process_cells,
+            failed_route_ids=failed_route_ids,
+        ):
+            suppressed.append(_tile_suppression_diagnostic(placement))
+            continue
+        kept.append(placement)
+    return tuple(kept), tuple(suppressed)
+
+
+def _failed_tile_route_ids(failures: tuple[Mapping[str, Any], ...]) -> frozenset[Any]:
+    route_ids = set()
+    for failure in failures:
+        if failure.get("route_id") is not None:
+            route_ids.add(failure["route_id"])
+        route_ids.update(failure.get("route_ids", ()) or ())
+    return frozenset(route_ids)
+
+
+def _placement_matches_failed_tile_piece(
+    placement: PlacementRecord,
+    *,
+    failed_process_cells: set[tuple[Any, Any]],
+    failed_route_ids: frozenset[Any],
+) -> bool:
+    placement_process = placement.diagnostics.get("source_process")
+    if placement_process is not None:
+        for cell in placement.cells:
+            if (placement_process, _cell_tuple(cell)) in failed_process_cells:
+                return True
+
+    placement_route_ids = set(placement.diagnostics.get("contributing_route_ids", ()) or ())
+    if placement.feature_id is not None:
+        placement_route_ids.add(placement.feature_id)
+    return bool(placement_route_ids.intersection(failed_route_ids))
+
+
+def _tile_suppression_diagnostic(placement: PlacementRecord) -> Mapping[str, Any]:
+    diagnostic: dict[str, Any] = {
+        "process": placement.diagnostics.get("source_process"),
+        "feature_id": placement.feature_id,
+        "cells": tuple(_cell_tuple(cell) for cell in placement.cells),
+        "reason": "tile_assignment_failure",
+    }
+    contributing_route_ids = placement.diagnostics.get("contributing_route_ids")
+    if contributing_route_ids:
+        diagnostic["route_ids"] = tuple(contributing_route_ids)
+    return diagnostic
+
+
+def _cell_tuple(cell: Any) -> tuple[int, int]:
+    if isinstance(cell, GridCell):
+        return cell.xidx, cell.yidx
+    if isinstance(cell, tuple) and len(cell) == 2:
+        return int(cell[0]), int(cell[1])
+    return int(cell.xidx), int(cell.yidx)
+
+
+def _tile_assignment_error_message(failures: tuple[Mapping[str, Any], ...]) -> str:
+    details = "; ".join(_tile_failure_summary(failure) for failure in failures[:5])
+    suffix = "" if len(failures) <= 5 else f"; +{len(failures) - 5} more"
+    return f"tile assignment failures ({len(failures)}): {details}{suffix}"
+
+
+def _tile_failure_summary(failure: Mapping[str, Any]) -> str:
+    route_ids = failure.get("route_ids")
+    route_label = f" route_ids={tuple(route_ids)}" if route_ids else ""
+    if failure.get("route_id") is not None:
+        route_label = f" route_id={failure['route_id']}"
+    return (
+        f"process={failure.get('process')}{route_label} cell={failure.get('cell')} "
+        f"required_directions={failure.get('required_directions')} reason={failure.get('failure_reason')}"
+    )
 
 
 def _records_from_output(output: Any) -> tuple[Mapping[str, Any], ...]:

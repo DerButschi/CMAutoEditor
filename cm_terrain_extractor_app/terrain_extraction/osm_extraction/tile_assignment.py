@@ -240,7 +240,15 @@ class TileAssigner:
             if catalog is None:
                 for spec in _route_cell_specs(route):
                     if (route.process, spec.cell) not in used_cells:
-                        failures.append(_failure(route.process, spec.cell, spec.required_directions, "missing_catalog"))
+                        failures.append(
+                            _failure(
+                                route.process,
+                                spec.cell,
+                                spec.required_directions,
+                                "missing_catalog",
+                                route_id=route.edge_id,
+                            )
+                        )
                 continue
             route_placements = self._placements_for_route(
                 route=route,
@@ -277,13 +285,27 @@ class TileAssigner:
             catalog = self.catalogs.get(spec.process)
             if catalog is None:
                 failures.append(
-                    _failure(spec.process, spec.cell, spec.required_directions, "missing_catalog", hard_failure=True)
+                    _failure(
+                        spec.process,
+                        spec.cell,
+                        spec.required_directions,
+                        "missing_catalog",
+                        hard_failure=True,
+                        route_ids=spec.route_ids,
+                    )
                 )
                 continue
             resolved_required_directions = catalog.resolved_required_directions(spec.required_directions)
             if resolved_required_directions is None:
                 failures.append(
-                    _failure(spec.process, spec.cell, spec.required_directions, "catalog_gap", hard_failure=True)
+                    _failure(
+                        spec.process,
+                        spec.cell,
+                        spec.required_directions,
+                        "catalog_gap",
+                        hard_failure=True,
+                        route_ids=spec.route_ids,
+                    )
                 )
                 continue
             resolved_spec = _StateCellSpec(
@@ -297,7 +319,14 @@ class TileAssigner:
             variant = catalog.best_tile(resolved_required_directions)
             if variant is None:
                 failures.append(
-                    _failure(spec.process, spec.cell, spec.required_directions, "catalog_gap", hard_failure=True)
+                    _failure(
+                        spec.process,
+                        spec.cell,
+                        spec.required_directions,
+                        "catalog_gap",
+                        hard_failure=True,
+                        route_ids=spec.route_ids,
+                    )
                 )
                 continue
             placements.append(
@@ -375,6 +404,7 @@ class TileAssigner:
                 "variant": variant.variant,
                 "selected_tile_id": variant.cm_type.tile_id,
                 "connection_dirs": _ordered_directions(required_directions),
+                "source_process": process.value,
                 "role": _placement_role(required_directions),
             },
         )
@@ -442,7 +472,15 @@ class TileAssigner:
                 if not spec.required_directions.issubset(fixed_variant.directions):
                     if spec.cell in {specs[0].cell, specs[-1].cell}:
                         continue
-                    failures.append(_failure(route.process, spec.cell, spec.required_directions, "fixed_tile_mismatch"))
+                    failures.append(
+                        _failure(
+                            route.process,
+                            spec.cell,
+                            spec.required_directions,
+                            "fixed_tile_mismatch",
+                            route_id=route.edge_id,
+                        )
+                    )
                     return ()
                 active_specs.append(spec)
                 fixed_columns.add(len(candidate_columns))
@@ -451,7 +489,15 @@ class TileAssigner:
 
             candidates = catalog.candidates_for(spec.required_directions)
             if not candidates:
-                failures.append(_failure(route.process, spec.cell, spec.required_directions, "catalog_gap"))
+                failures.append(
+                    _failure(
+                        route.process,
+                        spec.cell,
+                        spec.required_directions,
+                        "catalog_gap",
+                        route_id=route.edge_id,
+                    )
+                )
                 return ()
             active_specs.append(spec)
             candidate_columns.append(candidates)
@@ -462,7 +508,15 @@ class TileAssigner:
 
         selected = self._least_cost_compatible_path(specs, candidate_columns, fixed_columns=fixed_columns)
         if selected is None:
-            failures.append(_failure(route.process, specs[0].cell, specs[0].required_directions, "no_compatible_tile_path"))
+            failures.append(
+                _failure(
+                    route.process,
+                    specs[0].cell,
+                    specs[0].required_directions,
+                    "no_compatible_tile_path",
+                    route_id=route.edge_id,
+                )
+            )
             return ()
 
         placements = []
@@ -929,10 +983,12 @@ def _layer_for_process(process: ProcessKind) -> LayerKind:
 def _failure(
     process: ProcessKind,
     cell: GridCell,
-    required_directions: frozenset[str],
+    required_directions: Iterable[str],
     reason: str,
     *,
     hard_failure: bool = False,
+    route_id: int | str | None = None,
+    route_ids: Sequence[int | str] = (),
 ) -> Mapping[str, Any]:
     failure = {
         "process": process.value,
@@ -942,6 +998,10 @@ def _failure(
     }
     if hard_failure:
         failure["hard_failure"] = True
+    if route_id is not None:
+        failure["route_id"] = route_id
+    if route_ids:
+        failure["route_ids"] = tuple(route_ids)
     return failure
 
 
