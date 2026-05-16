@@ -410,13 +410,6 @@ class OSMProcessor:
             for feature in features
             if feature.process in {ProcessKind.AREA, ProcessKind.RANDOM, ProcessKind.POINT}
         )
-        area_result = self.pipeline.run_area_rasterizer(
-            features=area_features,
-            config=self.extraction_config,
-            grid_index=grid_index,
-            occupancy=self.occupancy,
-        )
-        placements.extend(area_result.placements)
 
         linear_features = tuple(
             feature
@@ -459,6 +452,14 @@ class OSMProcessor:
                 occupancy=self.occupancy,
             )
             placements.extend(building_result.placements)
+
+        area_result = self.pipeline.run_area_rasterizer(
+            features=area_features,
+            config=self.extraction_config,
+            grid_index=grid_index,
+            occupancy=self.occupancy,
+        )
+        placements.extend(area_result.placements)
 
         self.placements = self._resolve_output_layer_conflicts(tuple(placements))
         output_result = self.pipeline.run_output_rows(
