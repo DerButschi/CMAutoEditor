@@ -163,7 +163,12 @@ class NetworkRouter:
             anchors.update(group_anchors)
             anchor_plans.update(anchor_selection.plans)
             anchor_diagnostics.append(anchor_selection.diagnostics)
-            for edge in self._route_order(group.edges, group_degrees):
+            ordered_edges = self._fallback_route_order(self._route_order(group.edges, group_degrees), anchor_selection.plans)
+            for edge in ordered_edges:
+                dropped_route = self._anchor_fallback_dropped_route(edge, anchor_selection.plans)
+                if dropped_route is not None:
+                    routes.append(dropped_route)
+                    continue
                 route = self._route_edge(edge, group_anchors, group_degrees, anchor_selection.plans)
                 route = self._with_processing_diagnostics(route, group)
                 if route.success:
@@ -586,6 +591,47 @@ class NetworkRouter:
             )
         )
 
+    def _fallback_route_order(
+        self,
+        edges: Sequence[TopologyEdge],
+        anchor_plans: Mapping[int, Any],
+    ) -> tuple[TopologyEdge, ...]:
+        edge_positions = {edge.edge_id: index for index, edge in enumerate(edges)}
+        return tuple(
+            sorted(
+                edges,
+                key=lambda edge: (
+                    _fallback_edge_rank(edge, anchor_plans),
+                    edge_positions[edge.edge_id],
+                ),
+            )
+        )
+
+    def _anchor_fallback_dropped_route(
+        self,
+        edge: TopologyEdge,
+        anchor_plans: Mapping[int, Any],
+    ) -> RouteRecord | None:
+        decision = _anchor_fallback_drop_decision(edge, anchor_plans)
+        if decision is None:
+            return None
+        return RouteRecord(
+            edge_id=edge.edge_id,
+            start_node_id=edge.start_node_id,
+            end_node_id=edge.end_node_id,
+            process=edge.process,
+            config_name=edge.config_name,
+            priority=edge.priority,
+            success=False,
+            diagnostics={
+                "failure_reason": "anchor_fallback_drop",
+                "intersection_fallback_decision": decision,
+                "source_feature_ids": edge.feature_ids,
+                "source_indices": edge.source_indices,
+            },
+            cm_type=edge.cm_type,
+        )
+
     def _node_window(self, line: LineString, corridor_m: float) -> tuple[int, int, int, int]:
         min_x, min_y, max_x, max_y = line.bounds
         local_points = [
@@ -853,6 +899,9 @@ def _combined_anchor_diagnostics(items: Iterable[Mapping[str, Any]]) -> dict[str
         "single_anchor_plans": 0,
         "split_anchor_plans": 0,
         "failed_anchor_plans": 0,
+        "intersection_fallbacks": 0,
+        "intersection_fallback_attached_arms": 0,
+        "intersection_fallback_dropped_arms": 0,
         "anchor_candidates": 0,
         "anchor_retry_nodes": 0,
     }
@@ -886,6 +935,9 @@ def _state_path_contains(
 def _split_anchor_cell_for_edge(plan: Any, edge: TopologyEdge, node_id: int) -> GridCell | None:
     if getattr(plan, "plan_kind", None) != "split":
         return None
+    edge_anchor_cells = getattr(plan, "edge_anchor_cells", None) or {}
+    if edge.edge_id in edge_anchor_cells:
+        return edge_anchor_cells[edge.edge_id]
     direction = _edge_direction_from_node(edge, node_id)
     if direction is None:
         return getattr(plan, "primary_cell", None)
@@ -894,6 +946,40 @@ def _split_anchor_cell_for_edge(plan: Any, edge: TopologyEdge, node_id: int) -> 
         if direction in direction_set and index < len(split_cells):
             return split_cells[index]
     return getattr(plan, "primary_cell", None)
+
+
+def _fallback_edge_rank(edge: TopologyEdge, anchor_plans: Mapping[int, Any]) -> int:
+    actions = tuple(_fallback_actions_for_edge(edge, anchor_plans))
+    if "preserve" in actions:
+        return 0
+    if "attach" in actions:
+        return 1
+    if "drop" in actions:
+        return 3
+    return 2
+
+
+def _fallback_actions_for_edge(edge: TopologyEdge, anchor_plans: Mapping[int, Any]) -> tuple[str, ...]:
+    actions = []
+    for node_id in (edge.start_node_id, edge.end_node_id):
+        plan = anchor_plans.get(node_id)
+        for decision in getattr(plan, "fallback_decisions", ()) or ():
+            if decision.get("edge_id") == edge.edge_id:
+                actions.append(str(decision.get("action")))
+    return tuple(actions)
+
+
+def _anchor_fallback_drop_decision(edge: TopologyEdge, anchor_plans: Mapping[int, Any]) -> Mapping[str, Any] | None:
+    for node_id in (edge.start_node_id, edge.end_node_id):
+        plan = anchor_plans.get(node_id)
+        for decision in getattr(plan, "fallback_decisions", ()) or ():
+            if decision.get("edge_id") == edge.edge_id and decision.get("action") == "drop":
+                return {
+                    "node_id": node_id,
+                    "edge_id": edge.edge_id,
+                    **dict(decision),
+                }
+    return None
 
 
 def _edge_direction_from_node(edge: TopologyEdge, node_id: int) -> str | None:

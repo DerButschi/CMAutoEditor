@@ -53,6 +53,30 @@ def _catalog(*, include_four_way: bool = True):
     return CompiledTileCatalog.from_records(rows, process=ProcessKind.ROAD)
 
 
+def _straight_ew_catalog():
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    return CompiledTileCatalog.from_records(
+        ({"direction": 0, "row": 0, "col": 0, "l": (2, 3), "r": (2, 3), "cost": 1.0},),
+        process=ProcessKind.ROAD,
+    )
+
+
+def _ew_with_north_t_catalog():
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    return CompiledTileCatalog.from_records(
+        (
+            {"direction": 0, "row": 0, "col": 0, "l": (2, 3), "r": (2, 3), "cost": 1.0},
+            {"direction": 1, "row": 0, "col": 1, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+            {"direction": 2, "row": 0, "col": 2, "l": (2, 3), "r": (2, 3), "u": (2, 3), "cost": 1.0},
+        ),
+        process=ProcessKind.ROAD,
+    )
+
+
 def _cross_graph():
     from terrain_extraction.osm_extraction.models import (
         ProcessKind,
@@ -78,6 +102,27 @@ def _cross_graph():
     )
 
 
+def _offset_anchor_graph():
+    from terrain_extraction.osm_extraction.models import (
+        ProcessKind,
+        TopologyEdge,
+        TopologyGraph,
+        TopologyNode,
+    )
+
+    return TopologyGraph(
+        nodes=(
+            TopologyNode(0, Point(28, 28)),
+            TopologyNode(1, Point(52, 28)),
+            TopologyNode(2, Point(28, 52)),
+        ),
+        edges=(
+            TopologyEdge(0, 0, 1, LineString([(28, 28), (52, 28)]), ("e",), (0,), "primary", ProcessKind.ROAD, 1),
+            TopologyEdge(1, 0, 2, LineString([(28, 28), (28, 52)]), ("n",), (1,), "primary", ProcessKind.ROAD, 1),
+        ),
+    )
+
+
 def test_anchor_candidates_include_radius_one_cells_and_select_closest_feasible() -> None:
     from terrain_extraction.osm_extraction.anchor_selection import AnchorSelector, SingleAnchorPlan
     from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
@@ -93,6 +138,29 @@ def test_anchor_candidates_include_radius_one_cells_and_select_closest_feasible(
     assert plan.selected_candidate.required_dirs_estimate == frozenset({"E", "N", "S", "W"})
     assert plan.selected_candidate.tile_feasible
     assert len([candidate for candidate in plan.candidates if candidate.search_radius == 1]) == 9
+
+
+def test_anchor_selection_uses_candidate_specific_stub_directions() -> None:
+    from terrain_extraction.osm_extraction.anchor_selection import AnchorSelector, SingleAnchorPlan
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+
+    result = AnchorSelector(
+        grid_index=_grid(),
+        catalogs={ProcessKind.ROAD: _straight_ew_catalog()},
+    ).select(_offset_anchor_graph())
+    plan = result.plans[0]
+
+    assert isinstance(plan, SingleAnchorPlan)
+    assert plan.anchor_cell == GridCell(4, 3)
+    assert plan.selected_candidate.required_dirs == frozenset({"E", "W"})
+    direct_candidate = next(candidate for candidate in plan.candidates if candidate.cell == GridCell(3, 3))
+    assert direct_candidate.required_dirs == frozenset({"E", "N"})
+    assert direct_candidate.tile_feasible is False
+    assert "catalog_gap" in direct_candidate.reasons
+    assert any(
+        any(reason.startswith("duplicate_arm_direction:") for reason in candidate.reasons)
+        for candidate in plan.candidates
+    )
 
 
 def test_anchor_selection_retries_radius_two_or_three_when_nearest_cells_are_blocked() -> None:
@@ -119,7 +187,7 @@ def test_anchor_selection_retries_radius_two_or_three_when_nearest_cells_are_blo
 
 def test_four_way_without_catalog_support_produces_split_anchor_plan() -> None:
     from terrain_extraction.osm_extraction.anchor_selection import AnchorSelector, SplitAnchorPlan
-    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
 
     result = AnchorSelector(
         grid_index=_grid(),
@@ -128,9 +196,40 @@ def test_four_way_without_catalog_support_produces_split_anchor_plan() -> None:
     plan = result.plans[0]
 
     assert isinstance(plan, SplitAnchorPlan)
-    assert plan.reason == "single_anchor_catalog_gap"
+    assert plan.reason == "intersection_degraded"
     assert set(plan.required_dirs_estimate) == {"E", "N", "S", "W"}
-    assert set(plan.split_direction_sets) == {("E", "W"), ("N", "S")}
+    assert plan.preserved_direction_set == ("E", "W")
+    assert plan.preserved_edge_ids == (1, 3)
+    assert set(plan.split_direction_sets) == {("E", "N", "W"), ("E", "S", "W")}
+    assert plan.edge_anchor_cells[1] == GridCell(3, 3)
+    assert plan.edge_anchor_cells[3] == GridCell(3, 3)
+    assert plan.attached_edge_ids == (0, 2)
+    assert plan.dropped_edge_ids == ()
+    assert {decision["action"] for decision in plan.fallback_decisions} == {"preserve", "attach"}
+    assert result.diagnostics["intersection_fallbacks"] == 1
+    assert result.diagnostics["intersection_fallback_attached_arms"] == 2
+
+
+def test_four_way_fallback_drops_only_unattachable_minor_arm() -> None:
+    from terrain_extraction.osm_extraction.anchor_selection import AnchorSelector, SplitAnchorPlan
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+
+    result = AnchorSelector(
+        grid_index=_grid(),
+        catalogs={ProcessKind.ROAD: _ew_with_north_t_catalog()},
+    ).select(_cross_graph())
+    plan = result.plans[0]
+
+    assert isinstance(plan, SplitAnchorPlan)
+    assert plan.preserved_direction_set == ("E", "W")
+    assert plan.edge_anchor_cells[1] == GridCell(3, 3)
+    assert plan.edge_anchor_cells[3] == GridCell(3, 3)
+    assert plan.attached_edge_ids == (0,)
+    assert plan.dropped_edge_ids == (2,)
+    drop = next(decision for decision in plan.fallback_decisions if decision["action"] == "drop")
+    assert drop["edge_id"] == 2
+    assert drop["reason"] == "no_legal_t_junction_attachment"
+    assert result.diagnostics["intersection_fallback_dropped_arms"] == 1
 
 
 def test_router_uses_selected_anchor_plan_cells() -> None:
@@ -170,6 +269,12 @@ def test_debug_export_exposes_anchor_candidates_and_selected_plans() -> None:
     assert "anchor_candidates" in result.layers
     assert "selected_anchor_plans" in result.layers
     assert result.layers["selected_anchor_plans"].loc[0, "plan_kind"] == "single"
-    assert {"score", "tile_feasible", "occupancy_feasible", "required_dirs_estimate"} <= set(
-        result.layers["anchor_candidates"].columns
-    )
+    assert {
+        "score",
+        "tile_feasible",
+        "occupancy_feasible",
+        "required_dirs",
+        "required_dirs_estimate",
+        "impossible_arm_count",
+        "impossible_arm_severity",
+    } <= set(result.layers["anchor_candidates"].columns)

@@ -219,9 +219,12 @@ def _anchor_candidates_layer(routing: Any, grid_index: Any) -> geopandas.GeoData
                     "yidx": candidate.cell.yidx,
                     "score": candidate.score,
                     "search_radius": candidate.search_radius,
+                    "required_dirs": _json_value(getattr(candidate, "required_dirs", ())),
                     "required_dirs_estimate": _json_value(candidate.required_dirs_estimate),
                     "tile_feasible": candidate.tile_feasible,
                     "occupancy_feasible": candidate.occupancy_feasible,
+                    "impossible_arm_count": getattr(candidate, "impossible_arm_count", 0),
+                    "impossible_arm_severity": getattr(candidate, "impossible_arm_severity", 0.0),
                     "reasons": _json_value(candidate.reasons),
                 }
             )
@@ -246,6 +249,11 @@ def _selected_anchor_plans_layer(routing: Any, grid_index: Any) -> geopandas.Geo
                     "reason": getattr(plan, "reason", None),
                     "required_dirs_estimate": _json_value(getattr(plan, "required_dirs_estimate", ())),
                     "split_direction_sets": _json_value(getattr(plan, "split_direction_sets", ())),
+                    "edge_anchor_cells": _json_value(_edge_anchor_cells_for_debug(plan)),
+                    "preserved_direction_set": _json_value(getattr(plan, "preserved_direction_set", ())),
+                    "attached_edge_ids": _json_value(getattr(plan, "attached_edge_ids", ())),
+                    "dropped_edge_ids": _json_value(getattr(plan, "dropped_edge_ids", ())),
+                    "fallback_decisions": _json_value(getattr(plan, "fallback_decisions", ())),
                 }
             )
             geometries.append(grid_index.cell_polygon(cell))
@@ -286,6 +294,17 @@ def _plan_cells(plan: Any) -> tuple[GridCell, ...]:
         return tuple(split_anchor_cells)
     fallback_cell = getattr(plan, "fallback_cell", None)
     return () if fallback_cell is None else (fallback_cell,)
+
+
+def _edge_anchor_cells_for_debug(plan: Any) -> tuple[Mapping[str, Any], ...]:
+    edge_anchor_cells = getattr(plan, "edge_anchor_cells", None) or {}
+    return tuple(
+        {
+            "edge_id": edge_id,
+            "cell": (cell.xidx, cell.yidx),
+        }
+        for edge_id, cell in sorted(edge_anchor_cells.items())
+    )
 
 
 def _connection_bits_layer(routing: Any, grid_index: Any) -> geopandas.GeoDataFrame:

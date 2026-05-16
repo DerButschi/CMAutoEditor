@@ -45,6 +45,12 @@ class TileAssignmentError(ValueError):
         super().__init__(_tile_assignment_error_message(failures))
 
 
+class IntersectionFallbackError(ValueError):
+    def __init__(self, failures: tuple[Mapping[str, Any], ...]) -> None:
+        self.failures = failures
+        super().__init__(_intersection_fallback_error_message(failures))
+
+
 def noop_progress(stage: str, value: float, message: str | None = None) -> None:
     return None
 
@@ -136,6 +142,10 @@ class ExtractionPipeline:
             )
             routing = routing_result.diagnostics["network_routes"]
             diagnostics["network_routes"] = routing
+            intersection_fallback_failures = _routing_intersection_fallback_failures(routing)
+            diagnostics["intersection_fallback_failures"] = intersection_fallback_failures
+            if intersection_fallback_failures and resolved_road_validation_mode == "strict":
+                raise IntersectionFallbackError(intersection_fallback_failures)
             tile_result = self.run_tile_assignment(
                 routes=routing.routes,
                 catalogs=linear_catalogs,
@@ -507,6 +517,25 @@ def _normalize_tile_assignment_failures(tile_assignment: Any) -> tuple[Mapping[s
     return tuple(_normalize_tile_assignment_failure(failure) for failure in getattr(tile_assignment, "failures", ()) or ())
 
 
+def _routing_intersection_fallback_failures(routing: Any) -> tuple[Mapping[str, Any], ...]:
+    failures = []
+    for route in getattr(routing, "routes", ()) or ():
+        diagnostics = getattr(route, "diagnostics", {}) or {}
+        if diagnostics.get("failure_reason") != "anchor_fallback_drop":
+            continue
+        decision = dict(diagnostics.get("intersection_fallback_decision", {}) or {})
+        failures.append(
+            {
+                "process": getattr(route.process, "value", route.process),
+                "route_id": route.edge_id,
+                "config_name": route.config_name,
+                "failure_reason": "anchor_fallback_drop",
+                "decision": decision,
+            }
+        )
+    return tuple(failures)
+
+
 def _normalize_tile_assignment_failure(failure: Mapping[str, Any]) -> Mapping[str, Any]:
     normalized = dict(failure)
     if "cell" in normalized:
@@ -597,6 +626,15 @@ def _tile_assignment_error_message(failures: tuple[Mapping[str, Any], ...]) -> s
     details = "; ".join(_tile_failure_summary(failure) for failure in failures[:5])
     suffix = "" if len(failures) <= 5 else f"; +{len(failures) - 5} more"
     return f"tile assignment failures ({len(failures)}): {details}{suffix}"
+
+
+def _intersection_fallback_error_message(failures: tuple[Mapping[str, Any], ...]) -> str:
+    details = "; ".join(
+        f"process={failure.get('process')} route_id={failure.get('route_id')} reason={failure.get('failure_reason')}"
+        for failure in failures[:5]
+    )
+    suffix = "" if len(failures) <= 5 else f"; +{len(failures) - 5} more"
+    return f"intersection fallback failures ({len(failures)}): {details}{suffix}"
 
 
 def _tile_failure_summary(failure: Mapping[str, Any]) -> str:

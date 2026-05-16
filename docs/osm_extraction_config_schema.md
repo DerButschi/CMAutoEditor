@@ -86,7 +86,7 @@ Processors emit `PlacementRecord` objects. `output_rows.py` validates conflicts,
 
 Road-structure validation is controlled by `road_validation_mode`. Both modes return `road_validation` and `road_validation_status` diagnostics when output assembly returns. `"strict"` raises `OutputRowValidationError` for invalid road structures; `"warn"` returns the rows unchanged and records the validation summary, validity, mode, and hard issue count in diagnostics.
 
-Tile assignment failures are reported through `tile_assignment_failures` with the affected process, route ID or route IDs when known, cell, required directions, and failure reason. `"strict"` raises `TileAssignmentError` before output assembly when tile assignment cannot finalize a local linear piece. `"warn"` suppresses the failed cell or route-local placements and keeps unrelated valid tile placements.
+Tile assignment failures are reported through `tile_assignment_failures` with the affected process, route ID or route IDs when known, cell, required directions, and failure reason. Intersection degradation drops are reported through `intersection_fallback_failures` with the affected route and fallback decision. `"strict"` raises before output assembly for either local tile assignment failures or intersection fallback drops. `"warn"` suppresses only the failed local pieces and keeps unrelated valid tile placements.
 
 `debug_export.py` can expose source features, topology, routes, occupancy, building footprints, and final rows. Debug layers are derived views and must not become required hot-path inputs.
 

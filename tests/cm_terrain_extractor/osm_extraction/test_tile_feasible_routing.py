@@ -58,6 +58,20 @@ def _catalog(*, include_four_way: bool = True, include_ns: bool = True):
     return CompiledTileCatalog.from_records(rows, process=ProcessKind.ROAD)
 
 
+def _ew_with_north_t_catalog():
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    return CompiledTileCatalog.from_records(
+        (
+            {"direction": 0, "row": 0, "col": 0, "l": (2, 3), "r": (2, 3), "cost": 1.0},
+            {"direction": 1, "row": 0, "col": 1, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+            {"direction": 2, "row": 0, "col": 2, "l": (2, 3), "r": (2, 3), "u": (2, 3), "cost": 1.0},
+        ),
+        process=ProcessKind.ROAD,
+    )
+
+
 def _edge(edge_id, start, end, *, config_name="primary", priority=1):
     from terrain_extraction.osm_extraction.models import ProcessKind, TopologyEdge
 
@@ -97,6 +111,16 @@ def _cross_graph():
             _edge(1, (0, (24, 24)), (2, (40, 24))),
             _edge(2, (3, (24, 8)), (0, (24, 24))),
             _edge(3, (4, (8, 24)), (0, (24, 24))),
+        )
+    )
+
+
+def _skewed_y_graph():
+    return _graph(
+        (
+            _edge(0, (0, (24, 24)), (1, (40, 24))),
+            _edge(1, (0, (24, 24)), (2, (24, 40))),
+            _edge(2, (0, (24, 24)), (3, (28, 40)), config_name="track", priority=6),
         )
     )
 
@@ -207,13 +231,59 @@ def test_split_anchor_plan_routes_incident_edges_to_split_cells() -> None:
     assert plan.plan_kind == "split"
     assert result.failed_count == 0
     assert len(split_cells) == 2
-    assert result.routes[0].tile_cells[0] == split_cells[1]
-    assert result.routes[2].tile_cells[-1] == split_cells[1]
-    assert result.routes[1].tile_cells[0] == split_cells[0]
-    assert result.routes[3].tile_cells[-1] == split_cells[0]
+    routes = {route.edge_id: route for route in result.routes}
+    assert routes[1].tile_cells[0] == GridCell(3, 3)
+    assert routes[3].tile_cells[-1] == GridCell(3, 3)
+    assert routes[0].tile_cells[0] == GridCell(3, 3)
+    assert routes[2].tile_cells[-1] == GridCell(4, 3)
+    assert plan.preserved_direction_set == ("E", "W")
+    assert plan.attached_edge_ids == (0, 2)
+    assert plan.dropped_edge_ids == ()
     assert result.linear_state is not None
-    assert result.linear_state.required_dirs(GridCell(split_cells[0].xidx, split_cells[0].yidx))
-    assert result.linear_state.required_dirs(GridCell(split_cells[1].xidx, split_cells[1].yidx))
+    assert result.linear_state.required_dirs(GridCell(3, 3)) == frozenset({"E", "N", "W"})
+    assert result.linear_state.required_dirs(GridCell(4, 3)) == frozenset({"E", "S", "W"})
+    assert result.diagnostics["intersection_fallbacks"] == 1
+
+
+def test_split_anchor_plan_drops_unattachable_arm_with_route_diagnostic() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    result = NetworkRouter(
+        grid_index=_grid(width=7, height=7),
+        catalogs={ProcessKind.ROAD: _ew_with_north_t_catalog()},
+        corridor_deviation_m=16.0,
+    ).route(_cross_graph())
+    plan = result.anchor_plans[0]
+    routes = {route.edge_id: route for route in result.routes}
+
+    assert plan.preserved_direction_set == ("E", "W")
+    assert plan.attached_edge_ids == (0,)
+    assert plan.dropped_edge_ids == (2,)
+    assert result.failed_count == 1
+    assert routes[2].diagnostics["failure_reason"] == "anchor_fallback_drop"
+    assert routes[2].diagnostics["intersection_fallback_decision"]["action"] == "drop"
+    assert result.linear_state is not None
+    assert result.linear_state.required_dirs(GridCell(3, 3)) == frozenset({"E", "N", "W"})
+    assert result.diagnostics["intersection_fallback_dropped_arms"] == 1
+
+
+def test_skewed_y_junction_fallback_is_deterministic_and_does_not_crash() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    kwargs = {
+        "grid_index": _grid(width=7, height=7),
+        "catalogs": {ProcessKind.ROAD: _catalog(include_four_way=False)},
+        "corridor_deviation_m": 16.0,
+    }
+    first = NetworkRouter(**kwargs).route(_skewed_y_graph())
+    second = NetworkRouter(**kwargs).route(_skewed_y_graph())
+
+    assert first.routes
+    assert first.failed_count == 0
+    assert tuple(route.tile_cells for route in first.routes) == tuple(route.tile_cells for route in second.routes)
+    assert first.diagnostics == second.diagnostics
 
 
 def test_minor_corridor_retry_is_recorded_as_route_retry_mode() -> None:

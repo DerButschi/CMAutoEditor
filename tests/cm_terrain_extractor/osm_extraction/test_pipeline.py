@@ -357,6 +357,92 @@ def test_pipeline_strict_mode_fails_on_tile_assignment_failures() -> None:
         )
 
 
+def test_pipeline_warn_mode_reports_intersection_fallback_drops() -> None:
+    from shapely.geometry import LineString
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import FeatureRecord, ProcessKind
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+    routes, linear_state = _intersection_fallback_routes_and_state()
+    pipeline = _TileFailureContainmentPipelineHarness(routes, linear_state)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+
+    result = pipeline.run(
+        features=(FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 1, LineString([(0, 0), (16, 0)])),),
+        config=ExtractionConfig.from_mapping({}),
+        grid_index=GridIndex(
+            origin_x=0,
+            origin_y=0,
+            x_axis_unit=(1.0, 0.0),
+            y_axis_unit=(0.0, 1.0),
+            width=6,
+            height=6,
+        ),
+        bounds=(0, 0, 5, 5),
+        linear_catalog_provider=lambda _features: {ProcessKind.ROAD: _tile_failure_catalog(include_four_way=False)},
+        road_validation_mode="warn",
+    )
+
+    assert result.diagnostics["intersection_fallback_failures"] == (
+        {
+            "process": "road",
+            "route_id": 2,
+            "config_name": "road",
+            "failure_reason": "anchor_fallback_drop",
+            "decision": {
+                "node_id": 99,
+                "edge_id": 2,
+                "action": "drop",
+                "reason": "no_legal_t_junction_attachment",
+            },
+        },
+    )
+    assert result.output_rows
+
+
+def test_pipeline_strict_mode_fails_on_intersection_fallback_drops() -> None:
+    from shapely.geometry import LineString
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import FeatureRecord, ProcessKind
+    from terrain_extraction.osm_extraction.pipeline import (
+        ExtractionContext,
+        IntersectionFallbackError,
+    )
+
+    routes, linear_state = _intersection_fallback_routes_and_state()
+    pipeline = _TileFailureContainmentPipelineHarness(routes, linear_state)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+
+    with pytest.raises(IntersectionFallbackError, match="intersection fallback failures.*anchor_fallback_drop"):
+        pipeline.run(
+            features=(FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 1, LineString([(0, 0), (16, 0)])),),
+            config=ExtractionConfig.from_mapping({}),
+            grid_index=GridIndex(
+                origin_x=0,
+                origin_y=0,
+                x_axis_unit=(1.0, 0.0),
+                y_axis_unit=(0.0, 1.0),
+                width=6,
+                height=6,
+            ),
+            bounds=(0, 0, 5, 5),
+            linear_catalog_provider=lambda _features: {ProcessKind.ROAD: _tile_failure_catalog(include_four_way=False)},
+            road_validation_mode="strict",
+        )
+
+
 def test_osm_processor_run_processors_delegates_to_pipeline_run() -> None:
     from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
     from terrain_extraction.osm_extraction.grid_index import GridIndex
@@ -730,3 +816,47 @@ def _tile_failure_routes_and_state():
     for candidate in routes:
         assert state.reserve_path(candidate).success
     return routes, state
+
+
+def _intersection_fallback_routes_and_state():
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import (
+        GridCell,
+        GridNode,
+        ProcessKind,
+        RouteRecord,
+    )
+
+    def route(edge_id: int, cells: tuple[tuple[int, int], ...], *, success: bool = True, diagnostics=None) -> RouteRecord:
+        tile_cells = tuple(GridCell(xidx, yidx) for xidx, yidx in cells)
+        return RouteRecord(
+            edge_id=edge_id,
+            start_node_id=99,
+            end_node_id=edge_id,
+            process=ProcessKind.ROAD,
+            config_name="road",
+            priority=1,
+            nodes=tuple(GridNode(cell.xidx, cell.yidx) for cell in tile_cells),
+            tile_cells=tile_cells,
+            success=success,
+            diagnostics={} if diagnostics is None else diagnostics,
+        )
+
+    kept = route(1, ((0, 1), (1, 1), (2, 1)))
+    dropped = route(
+        2,
+        (),
+        success=False,
+        diagnostics={
+            "failure_reason": "anchor_fallback_drop",
+            "intersection_fallback_decision": {
+                "node_id": 99,
+                "edge_id": 2,
+                "action": "drop",
+                "reason": "no_legal_t_junction_attachment",
+            },
+        },
+    )
+    state = LinearNetworkState(width=6, height=6, catalogs={ProcessKind.ROAD: _tile_failure_catalog(include_four_way=False)})
+    assert state.reserve_path(kept).success
+    return (kept, dropped), state
