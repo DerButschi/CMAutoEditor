@@ -212,6 +212,118 @@ def test_pipeline_assembles_output_rows_without_migration_flag() -> None:
     assert result.stats.counts["output_rows"] == 2
 
 
+def test_pipeline_output_rows_strict_mode_rejects_invalid_road_output() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import OutputRowValidationError
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
+
+    pipeline = ExtractionPipeline(
+        ExtractionContext.create(
+            profile="cold_war",
+            bbox=object(),
+            config_path="default_osm_config.json",
+            seed=123,
+        )
+    )
+
+    with pytest.raises(OutputRowValidationError, match="road output issues"):
+        pipeline.run_output_rows(
+            placements=(
+                _placement(
+                    layer=LayerKind.LINEAR_SURFACE,
+                    cell=GridCell(0, 0),
+                    config_name="road",
+                    priority=4,
+                    menu="Roads",
+                    cat1="Paved 2",
+                    cat2="Road Tile 1",
+                    direction="Direction 2",
+                    feature_id="road-1",
+                ),
+            ),
+            bounds=(0, 0, 2, 2),
+        )
+
+
+def test_pipeline_output_rows_warn_mode_returns_invalid_road_diagnostics() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, LayerKind
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
+
+    pipeline = ExtractionPipeline(
+        ExtractionContext.create(
+            profile="cold_war",
+            bbox=object(),
+            config_path="default_osm_config.json",
+            seed=123,
+        )
+    )
+
+    result = pipeline.run_output_rows(
+        placements=(
+            _placement(
+                layer=LayerKind.LINEAR_SURFACE,
+                cell=GridCell(0, 0),
+                config_name="road",
+                priority=4,
+                menu="Roads",
+                cat1="Paved 2",
+                cat2="Road Tile 1",
+                direction="Direction 2",
+                feature_id="road-1",
+            ),
+        ),
+        bounds=(0, 0, 2, 2),
+        road_validation_mode="warn",
+    )
+
+    assert result.output_rows[0]["name"] == "road"
+    assert not result.diagnostics["road_validation"].is_valid
+    assert result.diagnostics["road_validation_status"] == {
+        "mode": "warn",
+        "is_valid": False,
+        "summary": result.diagnostics["road_validation"].issue_summary(),
+        "hard_issues": len(result.diagnostics["road_validation"].hard_issues),
+    }
+    assert result.stats.diagnostics["road_validation_status"] == result.diagnostics["road_validation_status"]
+
+
+def test_pipeline_output_rows_valid_roads_remain_unchanged() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, LayerKind
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
+
+    pipeline = ExtractionPipeline(
+        ExtractionContext.create(
+            profile="cold_war",
+            bbox=object(),
+            config_path="default_osm_config.json",
+            seed=123,
+        )
+    )
+
+    result = pipeline.run_output_rows(
+        placements=tuple(
+            _placement(
+                layer=LayerKind.LINEAR_SURFACE,
+                cell=GridCell(xidx, 0),
+                config_name="road",
+                priority=4,
+                menu="Roads",
+                cat1="Paved 2",
+                cat2="Road Tile 1",
+                direction="Direction 2",
+                feature_id="road-1",
+            )
+            for xidx in range(3)
+        ),
+        bounds=(0, 0, 3, 1),
+    )
+
+    assert [row["x"] for row in result.output_rows if row["name"] == "road"] == [0, 1, 2]
+    assert result.diagnostics["road_validation"].is_valid
+    assert result.diagnostics["road_validation_status"]["mode"] == "strict"
+    assert result.diagnostics["road_validation_status"]["is_valid"] is True
+
+
 def test_pipeline_clips_diagonal_edge_rows_before_validation() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
     from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline

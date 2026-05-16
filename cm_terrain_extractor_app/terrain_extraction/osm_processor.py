@@ -728,6 +728,7 @@ class OSMProcessor:
             placements_to_output_rows,
             validate_output_rows,
         )
+        from terrain_extraction.osm_extraction.pipeline import _road_validation_status
         from terrain_extraction.osm_extraction.road_output_validation import (
             validate_road_output_rows,
         )
@@ -738,7 +739,14 @@ class OSMProcessor:
         clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
         validate_output_rows(clipped_rows, bounds=bounds)
         road_validation = validate_road_output_rows(clipped_rows, profile=getattr(self, "profile", None))
-        if not road_validation.is_valid:
+        road_validation_mode = getattr(getattr(self, "extraction_config", None), "road_validation_mode", "warn")
+        road_validation_status = _road_validation_status(road_validation, mode=road_validation_mode)
+        self.pipeline_diagnostics = {
+            **dict(getattr(self, "pipeline_diagnostics", {}) or {}),
+            "road_validation": road_validation,
+            "road_validation_status": road_validation_status,
+        }
+        if road_validation_mode == "strict" and not road_validation.is_valid:
             raise OutputRowValidationError(road_validation.issue_summary())
         return normalize_output_coordinates(clipped_rows, bounds=bounds)
 

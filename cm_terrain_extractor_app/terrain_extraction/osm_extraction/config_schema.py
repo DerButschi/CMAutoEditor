@@ -5,13 +5,16 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from terrain_extraction.osm_extraction.models import CMType, ProcessKind
 
 
 class ConfigValidationError(ValueError):
     """Raised when an OSM extraction config cannot be compiled safely."""
+
+
+RoadValidationMode = Literal["strict", "warn"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +77,7 @@ class ConfigEntry:
 class ExtractionConfig:
     entries: tuple[ConfigEntry, ...]
     seed: int | None = None
+    road_validation_mode: RoadValidationMode = "warn"
     feature_flags: Mapping[str, bool] = field(default_factory=dict)
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
@@ -97,7 +101,11 @@ class ExtractionConfig:
             for name, raw_entry in raw_config.items()
             if _is_config_entry(raw_entry)
         ]
-        return cls(entries=tuple(entries), seed=seed)
+        return cls(
+            entries=tuple(entries),
+            seed=seed,
+            road_validation_mode=_road_validation_mode(raw_config.get("road_validation_mode", "warn")),
+        )
 
     def entry_by_name(self, name: str) -> ConfigEntry:
         for entry in self.entries:
@@ -245,6 +253,12 @@ def _optional_id_set(raw: object) -> frozenset[Any] | None:
     if not isinstance(raw, Sequence) or isinstance(raw, str):
         raise ConfigValidationError("allowed_ids must be a list")
     return frozenset(raw)
+
+
+def _road_validation_mode(raw: object) -> RoadValidationMode:
+    if isinstance(raw, str) and raw in {"strict", "warn"}:
+        return raw
+    raise ConfigValidationError("road_validation_mode must be 'strict' or 'warn'")
 
 
 def _is_config_entry(raw_entry: object) -> bool:

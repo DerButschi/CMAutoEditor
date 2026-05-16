@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 APP_DIR = Path(__file__).parents[3] / "cm_terrain_extractor_app"
 if str(APP_DIR) not in sys.path:
@@ -164,6 +165,109 @@ def test_pipeline_run_owns_typed_orchestration_and_catalog_gap_diagnostics() -> 
     )
 
 
+def test_pipeline_run_defaults_to_warn_for_invalid_road_output() -> None:
+    from shapely.geometry import LineString
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        FeatureRecord,
+        GridCell,
+        LayerKind,
+        ProcessKind,
+    )
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+    road_placement = _placement(
+        layer=LayerKind.LINEAR_SURFACE,
+        cell=GridCell(0, 0),
+        config_name="road",
+        priority=4,
+        cm_type=CMType(menu="Roads", cat1="Paved 2", cat2="Road Tile 1", direction="Direction 2"),
+    )
+    pipeline = _RoadValidationPipelineHarness(road_placement)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+
+    result = pipeline.run(
+        features=(FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 4, LineString([(0, 0), (8, 0)])),),
+        config=ExtractionConfig.from_mapping({}),
+        grid_index=GridIndex(
+            origin_x=0,
+            origin_y=0,
+            x_axis_unit=(1.0, 0.0),
+            y_axis_unit=(0.0, 1.0),
+            width=3,
+            height=3,
+        ),
+        bounds=(0, 0, 2, 2),
+        linear_catalog_provider=lambda _features: {},
+    )
+
+    assert result.output_rows[0]["name"] == "road"
+    assert result.diagnostics["road_validation_status"]["mode"] == "warn"
+    assert result.diagnostics["road_validation_status"]["is_valid"] is False
+    assert not result.diagnostics["road_validation"].is_valid
+
+
+@pytest.mark.parametrize(
+    ("config", "explicit_mode"),
+    [
+        ({"road_validation_mode": "strict"}, None),
+        ({}, "strict"),
+    ],
+)
+def test_pipeline_run_strict_mode_rejects_invalid_road_output(config, explicit_mode) -> None:
+    from shapely.geometry import LineString
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        FeatureRecord,
+        GridCell,
+        LayerKind,
+        ProcessKind,
+    )
+    from terrain_extraction.osm_extraction.output_rows import OutputRowValidationError
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+    road_placement = _placement(
+        layer=LayerKind.LINEAR_SURFACE,
+        cell=GridCell(0, 0),
+        config_name="road",
+        priority=4,
+        cm_type=CMType(menu="Roads", cat1="Paved 2", cat2="Road Tile 1", direction="Direction 2"),
+    )
+    pipeline = _RoadValidationPipelineHarness(road_placement)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+
+    with pytest.raises(OutputRowValidationError, match="road output issues"):
+        pipeline.run(
+            features=(FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 4, LineString([(0, 0), (8, 0)])),),
+            config=ExtractionConfig.from_mapping(config),
+            grid_index=GridIndex(
+                origin_x=0,
+                origin_y=0,
+                x_axis_unit=(1.0, 0.0),
+                y_axis_unit=(0.0, 1.0),
+                width=3,
+                height=3,
+            ),
+            bounds=(0, 0, 2, 2),
+            linear_catalog_provider=lambda _features: {},
+            road_validation_mode=explicit_mode,
+        )
+
+
 def test_osm_processor_run_processors_delegates_to_pipeline_run() -> None:
     from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
     from terrain_extraction.osm_extraction.grid_index import GridIndex
@@ -258,6 +362,54 @@ class _LegacyProcessor:
     def get_output(self) -> pd.DataFrame:
         self.calls.append("get_output")
         return pd.DataFrame([{"x": 1, "y": 2, "name": "forest"}])
+
+
+class _RoadValidationPipelineHarness:
+    def __init__(self, road_placement) -> None:
+        from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+        self.context = ExtractionContext.create(
+            profile="cold_war",
+            bbox=object(),
+            config_path="default_osm_config.json",
+            seed=0,
+        )
+        self.road_placement = road_placement
+
+    from terrain_extraction.osm_extraction.pipeline import ExtractionPipeline
+
+    run = ExtractionPipeline.run
+    run_output_rows = ExtractionPipeline.run_output_rows
+
+    def run_network_topology(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        return ExtractionResult(diagnostics={"network_topology": object()})
+
+    def run_network_router(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        return ExtractionResult(
+            diagnostics={
+                "network_routes": SimpleNamespace(
+                    routes=(object(),),
+                    linear_state=object(),
+                )
+            }
+        )
+
+    def run_tile_assignment(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        return ExtractionResult(
+            placements=(self.road_placement,),
+            diagnostics={"tile_assignment": object()},
+        )
+
+    def run_area_rasterizer(self, **_kwargs):
+        from terrain_extraction.osm_extraction.models import ExtractionResult
+
+        return ExtractionResult()
 
 
 class _TypedPipelineHarness:

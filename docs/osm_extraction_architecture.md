@@ -12,7 +12,7 @@ The OSM extractor keeps `OSMProcessor` as the app-facing compatibility boundary 
 4. `TileAssigner` converts successful routes to process-specific tile `PlacementRecord` objects.
 5. The linear-dependent placement pass handles `type_from_linear` entries from existing linear placements.
 6. `BuildingFitter` scores and places building outlines against current occupancy.
-7. `output_rows.py` validates layered conflicts, emits explicit extent markers, and normalizes rows for CM AutoEditor.
+7. `output_rows.py` validates layered conflicts, emits explicit extent markers, validates road structure according to `road_validation_mode`, and normalizes rows for CM AutoEditor.
 8. `debug_export.py` builds debug layers for source features, topology, routes, occupancy, buildings, and final rows.
 
 The active data path is therefore:
@@ -42,7 +42,7 @@ OSMProcessor
 
 Linear tile assignment uses the profile catalog's direction, cost, and connection tokens. Candidate routes are solved as least-cost compatible tile paths, so adjacent road, stream, rail, and fence cells from the same or unknown source must expose matching connection values rather than merely sharing a broad north/south/east/west direction set. Adjacent road cells from disjoint known source features are ambiguous in row-only validation and are left to topology/source-aware diagnostics instead of being treated as hard output defects. Intersections are anchored only at shared routed topology endpoints with three or more incident directions whose arms continue into the next grid square from the selected intersection cell; one-cell stubs are ignored. Ordinary bends and intermediate path nodes stay as corner or straight route cells. Cardinal-only catalogs reject diagonal route steps instead of coercing them into north/south or east/west tiles.
 
-Layered output assembly appends the extent marker, clips rows to `idx_bbox`, and only then runs row, layer-conflict, and road validation. This preserves the legacy output contract for fractional diagonal or sub-square placements whose display coordinate can fall just outside the map edge even when their source grid cell was a valid in-bounds candidate.
+Layered output assembly appends the extent marker, clips rows to `idx_bbox`, and only then runs row, layer-conflict, and road validation. This preserves the legacy output contract for fractional diagonal or sub-square placements whose display coordinate can fall just outside the map edge even when their source grid cell was a valid in-bounds candidate. Row and layer-conflict validation remain strict. Road-structure validation supports `"strict"` and `"warn"` modes: strict raises `OutputRowValidationError`, while warn returns the rows and records `road_validation` plus `road_validation_status` diagnostics with mode, validity, summary, and hard issue count.
 
 Building fitting scores footprint candidates by IoU and placement penalties against occupancy. Modular multi-cell candidates are considered only when the outline is larger than the largest independent footprint in the active catalog; equivalent top candidates use profile weights for deterministic seeded variation.
 

@@ -43,6 +43,33 @@ def test_config_schema_validates_matching_filters_and_allowed_ids() -> None:
     assert not entry.matches_tags({"landuse": "forest", "leaf_type": "broadleaved"}, "way/2")
 
 
+def test_config_schema_defaults_road_validation_mode_to_warn() -> None:
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+
+    config = ExtractionConfig.from_mapping({})
+
+    assert config.road_validation_mode == "warn"
+
+
+@pytest.mark.parametrize("mode", ["strict", "warn"])
+def test_config_schema_accepts_road_validation_modes(mode: str) -> None:
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+
+    config = ExtractionConfig.from_mapping({"road_validation_mode": mode})
+
+    assert config.road_validation_mode == mode
+
+
+def test_config_schema_rejects_unknown_road_validation_mode() -> None:
+    from terrain_extraction.osm_extraction.config_schema import (
+        ConfigValidationError,
+        ExtractionConfig,
+    )
+
+    with pytest.raises(ConfigValidationError, match="road_validation_mode"):
+        ExtractionConfig.from_mapping({"road_validation_mode": "repair"})
+
+
 def test_config_schema_fails_unknown_process_early() -> None:
     from terrain_extraction.osm_extraction.config_schema import (
         ConfigValidationError,

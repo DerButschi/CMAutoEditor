@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
-from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+from terrain_extraction.osm_extraction.config_schema import ExtractionConfig, RoadValidationMode
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
     CMType,
@@ -90,10 +90,12 @@ class ExtractionPipeline:
         occupancy: OccupancyModel | None = None,
         linear_catalog_provider: Callable[[tuple[Any, ...]], Mapping[Any, Any]] | None = None,
         building_catalog_provider: Callable[[tuple[Any, ...]], Mapping[str, Any]] | None = None,
+        road_validation_mode: RoadValidationMode | None = None,
     ) -> ExtractionResult:
         occupancy_model = occupancy or OccupancyModel.from_grid_index(grid_index)
         placements: list[PlacementRecord] = []
         diagnostics: dict[str, Any] = {"occupancy": occupancy_model, "catalog_gaps": ()}
+        resolved_road_validation_mode = road_validation_mode or getattr(config, "road_validation_mode", "warn")
 
         area_features = tuple(
             feature
@@ -172,6 +174,7 @@ class ExtractionPipeline:
         output_result = self.run_output_rows(
             placements=resolved_placements,
             bounds=bounds,
+            road_validation_mode=resolved_road_validation_mode,
         )
         diagnostics.update(output_result.diagnostics)
         if "network_topology" in diagnostics and "road_validation" in diagnostics:
@@ -303,6 +306,7 @@ class ExtractionPipeline:
         *,
         placements: tuple[Any, ...],
         bounds: tuple[int | float, int | float, int | float, int | float],
+        road_validation_mode: RoadValidationMode = "strict",
     ) -> ExtractionResult:
         from terrain_extraction.osm_extraction.output_rows import (
             OutputRowValidationError,
@@ -321,7 +325,8 @@ class ExtractionPipeline:
         clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
         validate_output_rows(clipped_rows, bounds=bounds)
         road_validation = validate_road_output_rows(clipped_rows, profile=self.context.profile)
-        if not road_validation.is_valid:
+        road_validation_status = _road_validation_status(road_validation, mode=road_validation_mode)
+        if road_validation_mode == "strict" and not road_validation.is_valid:
             raise OutputRowValidationError(road_validation.issue_summary())
         output_rows = normalize_output_coordinates(clipped_rows, bounds=bounds)
         self.context.progress("output_assembly", 1.0, "Layered output rows assembled")
@@ -331,9 +336,13 @@ class ExtractionPipeline:
             stats=ExtractionStats(
                 timings={"output_assembly": None},
                 counts={"output_rows": len(output_rows)},
-                diagnostics={"mode": "layered_output", "road_validation": road_validation.issue_summary()},
+                diagnostics={
+                    "mode": "layered_output",
+                    "road_validation": road_validation.issue_summary(),
+                    "road_validation_status": road_validation_status,
+                },
             ),
-            diagnostics={"road_validation": road_validation},
+            diagnostics={"road_validation": road_validation, "road_validation_status": road_validation_status},
         )
 
     def run_debug_export(
@@ -465,6 +474,17 @@ class ExtractionPipeline:
             if building_type is not None:
                 catalogs[feature.config_name] = get_building_tiles(building_type, self.context.profile)
         return catalogs
+
+
+def _road_validation_status(report: Any, *, mode: RoadValidationMode) -> dict[str, Any]:
+    if mode not in {"strict", "warn"}:
+        raise ValueError("road_validation_mode must be 'strict' or 'warn'")
+    return {
+        "mode": mode,
+        "is_valid": bool(report.is_valid),
+        "summary": report.issue_summary(),
+        "hard_issues": len(report.hard_issues),
+    }
 
 
 def _records_from_output(output: Any) -> tuple[Mapping[str, Any], ...]:

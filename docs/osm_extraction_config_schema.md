@@ -2,6 +2,12 @@
 
 OSM extraction config is loaded from JSON and compiled by `ExtractionConfig` in `terrain_extraction.osm_extraction.config_schema`. New hot-path code should use compiled entries rather than raw nested dict access.
 
+Top-level options:
+
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `road_validation_mode` | `"warn"` or `"strict"` | Controls final road-structure validation. Defaults to `"warn"` for normal OSM extraction so invalid local road output is returned with diagnostics instead of aborting. Use `"strict"` for tests and debugging that should fail on invalid road output. |
+
 ## Entry Shape
 
 Each active OSM config entry is keyed by name and must include:
@@ -77,6 +83,8 @@ New modifiers should be validated in `config_schema.py` when they become part of
 ## Output And Debug Contracts
 
 Processors emit `PlacementRecord` objects. `output_rows.py` validates conflicts, appends the explicit extent marker, and normalizes coordinates. Public CSV columns remain `x`, `y`, `z`, `menu`, `cat1`, `cat2`, `direction`, `id`, `name`, and `priority`.
+
+Road-structure validation is controlled by `road_validation_mode`. Both modes return `road_validation` and `road_validation_status` diagnostics when output assembly returns. `"strict"` raises `OutputRowValidationError` for invalid road structures; `"warn"` returns the rows unchanged and records the validation summary, validity, mode, and hard issue count in diagnostics.
 
 `debug_export.py` can expose source features, topology, routes, occupancy, building footprints, and final rows. Debug layers are derived views and must not become required hot-path inputs.
 
