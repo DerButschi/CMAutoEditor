@@ -24,6 +24,7 @@ from cm_terrain_extractor_app.app_core.actions import (
 )
 from cm_terrain_extractor_app.app_core.exports import (
     dataframe_to_csv_bytes,
+    parse_bbox_csv_bytes,
     suggest_elevation_filename,
     suggest_osm_filename,
 )
@@ -40,6 +41,7 @@ from cm_terrain_extractor_app.app_core.state import (
 from cm_terrain_extractor_app.app_core.validation import (
     compute_bbox_metrics,
     is_selected_area_valid,
+    update_state_from_bbox,
     update_state_from_uploaded_osm_data,
 )
 from cm_terrain_extractor_app.streamlit_ui.widgets import (
@@ -63,7 +65,7 @@ def render_sidebar(
     with st.sidebar:
         _render_mode_selector(state)
         if state.map_mode == "Bounding Box Selection":
-            _render_bbox_controls(state)
+            _render_bbox_controls(state, resources)
         if state.map_mode == "Elevations":
             _render_elevation_controls(state, resources, status_update_area)
         if state.map_mode == "OpenStreetMap":
@@ -90,9 +92,15 @@ def _render_mode_selector(state: AppState) -> None:
             state.map_mode = map_mode
 
 
-def _render_bbox_controls(state: AppState) -> None:
+def _render_bbox_controls(state: AppState, resources: AppResources) -> None:
     with st.container(border=True):
         render_bbox_editor(state)
+        bbox_file = st.file_uploader("Import bounding box .csv-file", type="csv")
+        if bbox_file is not None:
+            try:
+                _handle_uploaded_bbox_file(state, resources, bbox_file)
+            except ValueError as exc:
+                st.error(str(exc))
         st.button(
             "Cycle bounding box origin",
             disabled=not state.selected_area_valid,
@@ -287,7 +295,7 @@ def _handle_uploaded_osm_file(
     osm_file: Any,
 ) -> None:
     upload_bytes = osm_file.getvalue()
-    upload_signature = _uploaded_osm_file_signature(
+    upload_signature = _uploaded_file_signature(
         filename=getattr(osm_file, "name", None),
         data=upload_bytes,
     )
@@ -307,8 +315,45 @@ def _handle_uploaded_osm_file(
 
 
 def _uploaded_osm_file_signature(*, filename: str | None, data: bytes) -> str:
+    return _uploaded_file_signature(filename=filename, data=data)
+
+
+def _uploaded_file_signature(*, filename: str | None, data: bytes) -> str:
     digest = hashlib.sha256(data).hexdigest()
     return f"{filename or ''}:{len(data)}:{digest}"
+
+
+def _handle_uploaded_bbox_file(
+    state: AppState,
+    resources: AppResources,
+    bbox_file: Any,
+) -> None:
+    upload_bytes = bbox_file.getvalue()
+    upload_signature = _uploaded_file_signature(
+        filename=getattr(bbox_file, "name", None),
+        data=upload_bytes,
+    )
+    if upload_signature == state.bbox_uploaded_file_signature:
+        return
+
+    bbox_dataframe = parse_bbox_csv_bytes(upload_bytes)
+    update_state_from_bbox(
+        state,
+        _bbox_from_bbox_dataframe(dataframe=bbox_dataframe, resources=resources),
+    )
+    state.bbox_uploaded_file_signature = upload_signature
+    st.rerun()
+
+
+def _bbox_from_bbox_dataframe(*, dataframe: Any, resources: AppResources) -> Any:
+    _ensure_legacy_app_path(resources)
+    from shapely import Polygon
+    from terrain_extraction.bbox_utils import BoundingBox
+
+    polygon = Polygon(list(zip(dataframe.x.values, dataframe.y.values, strict=False)))
+    if polygon.minimum_rotated_rectangle.geom_type == "LineString":
+        raise ValueError("The bounding box CSV file must describe an area, not a line.")
+    return BoundingBox(polygon)
 
 
 def _get_osm_data(
@@ -335,6 +380,7 @@ def _permute_bbox(state: AppState) -> None:
     state.len_y = metrics["len_y"]
     state.selected_area_valid = is_selected_area_valid(state.len_x, state.len_y)
     state.bbox_origin = (state.bbox_origin + 1) % 4
+    state.bbox_uploaded_file_signature = None
 
 
 def _get_bounding_box(osm_data: dict, resources: AppResources) -> Any:

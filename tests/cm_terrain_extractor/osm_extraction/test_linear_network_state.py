@@ -366,6 +366,31 @@ def test_accepted_profile_catalog_endpoints_can_be_finalized() -> None:
         assert all(len(placement.diagnostics["required_directions"]) == 2 for placement in result.placements)
 
 
+def test_large_branched_linear_state_finalization_does_not_recurse() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import TileAssigner
+
+    length = 1_050
+    branch_x = length // 2
+    catalog = _catalog()
+    state = LinearNetworkState(width=length + 1, height=4, catalogs={ProcessKind.ROAD: catalog})
+    horizontal = _route(1, tuple((xidx, 1) for xidx in range(length)))
+    branch = _route(2, ((branch_x, 1), (branch_x, 0)))
+
+    assert state.reserve_path(horizontal).success
+    assert state.reserve_path(branch).success
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(
+        (horizontal, branch),
+        linear_state=state,
+    )
+
+    assert result.success
+    assert result.failures == ()
+    assert len(result.placements) == len(state.occupied)
+
+
 def test_debug_export_exposes_connection_bits_layer() -> None:
     from terrain_extraction.osm_extraction.debug_export import build_debug_layers
     from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState

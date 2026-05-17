@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -188,6 +188,156 @@ class _StateAdjacency:
     first: GridCell
     direction: str
     second: GridCell
+
+
+@dataclass(frozen=True, slots=True)
+class _BranchedSearchFrame:
+    action: str
+    cost: float
+    cell: GridCell | None = None
+    candidate: TileVariant | None = None
+
+
+@dataclass(slots=True)
+class _BranchedStateSearch:
+    component: tuple[GridCell, ...]
+    options_by_cell: Mapping[GridCell, _StateCellOptions]
+    neighbors: Mapping[GridCell, tuple[tuple[GridCell, _StateAdjacency], ...]]
+    rng: np.random.Generator
+    min_remaining_cost: dict[GridCell, float] = field(init=False)
+    assigned: dict[GridCell, TileVariant] = field(init=False, default_factory=dict)
+    best: dict[GridCell, TileVariant] | None = None
+    best_cost: float = math.inf
+    tie_count: int = 0
+
+    def __post_init__(self) -> None:
+        self.min_remaining_cost = {
+            cell: min(candidate.cost for candidate in self.options_by_cell[cell].candidates)
+            for cell in self.component
+        }
+
+    def run(self) -> dict[GridCell, TileVariant] | None:
+        stack = [_BranchedSearchFrame("search", 0.0)]
+        while stack:
+            frame = stack.pop()
+            if frame.action == "cleanup":
+                self._cleanup(frame.cell)
+            elif frame.action == "branch":
+                self._enter_branch(frame, stack)
+            else:
+                self._search(frame.cost, stack)
+        return self.best
+
+    def viable_candidates(self, cell: GridCell) -> tuple[TileVariant, ...]:
+        viable = []
+        for candidate in self.options_by_cell[cell].candidates:
+            if all(
+                _state_edge_compatible(cell, candidate, edge, self.assigned[neighbor])
+                for neighbor, edge in self.neighbors[cell]
+                if neighbor in self.assigned
+            ):
+                viable.append(candidate)
+        return tuple(viable)
+
+    def has_forward_candidate(self, cell: GridCell, candidate: TileVariant) -> bool:
+        for neighbor, edge in self.neighbors[cell]:
+            if neighbor in self.assigned:
+                continue
+            if not self._has_compatible_neighbor_candidate(cell, candidate, neighbor, edge):
+                return False
+        return True
+
+    def _has_compatible_neighbor_candidate(
+        self,
+        cell: GridCell,
+        candidate: TileVariant,
+        neighbor: GridCell,
+        edge: _StateAdjacency,
+    ) -> bool:
+        neighbor_candidates = (
+            neighbor_candidate
+            for neighbor_candidate in self.options_by_cell[neighbor].candidates
+            if _state_edge_compatible(cell, candidate, edge, neighbor_candidate)
+        )
+        return any(
+            all(
+                _state_edge_compatible(neighbor, neighbor_candidate, neighbor_edge, self.assigned[other])
+                for other, neighbor_edge in self.neighbors[neighbor]
+                if other in self.assigned and other != cell
+            )
+            for neighbor_candidate in neighbor_candidates
+        )
+
+    def _search(
+        self,
+        cost_so_far: float,
+        stack: list[_BranchedSearchFrame],
+    ) -> None:
+        if len(self.assigned) == len(self.component):
+            self._record_solution(cost_so_far)
+            return
+
+        selection = self._select_next_cell(cost_so_far)
+        if selection is None:
+            return
+
+        cell, candidates = selection
+        for candidate in reversed(candidates):
+            self._push_branch(cell, candidate, cost_so_far, stack)
+
+    def _select_next_cell(self, cost_so_far: float) -> tuple[GridCell, tuple[TileVariant, ...]] | None:
+        unassigned = tuple(cell for cell in self.component if cell not in self.assigned)
+        lower_bound = cost_so_far + sum(self.min_remaining_cost[cell] for cell in unassigned)
+        if self._cost_exceeds_best(lower_bound):
+            return None
+
+        viable_by_cell = {cell: self.viable_candidates(cell) for cell in unassigned}
+        cell = min(unassigned, key=lambda item: (len(viable_by_cell[item]), _cell_sort_key(item)))
+        candidates = viable_by_cell[cell]
+        if not candidates:
+            return None
+        return cell, candidates
+
+    def _push_branch(
+        self,
+        cell: GridCell,
+        candidate: TileVariant,
+        cost_so_far: float,
+        stack: list[_BranchedSearchFrame],
+    ) -> None:
+        next_cost = cost_so_far + candidate.cost
+        if self._cost_exceeds_best(next_cost) or not self.has_forward_candidate(cell, candidate):
+            return
+        stack.append(_BranchedSearchFrame("branch", next_cost, cell, candidate))
+
+    def _enter_branch(
+        self,
+        frame: _BranchedSearchFrame,
+        stack: list[_BranchedSearchFrame],
+    ) -> None:
+        if frame.cell is None or frame.candidate is None or self._cost_exceeds_best(frame.cost):
+            return
+        self.assigned[frame.cell] = frame.candidate
+        stack.append(_BranchedSearchFrame("cleanup", frame.cost, frame.cell))
+        stack.append(_BranchedSearchFrame("search", frame.cost))
+
+    def _cleanup(self, cell: GridCell | None) -> None:
+        if cell is not None:
+            del self.assigned[cell]
+
+    def _record_solution(self, cost_so_far: float) -> None:
+        if cost_so_far < self.best_cost and not math.isclose(cost_so_far, self.best_cost):
+            self.best = dict(self.assigned)
+            self.best_cost = cost_so_far
+            self.tie_count = 1
+            return
+        if math.isclose(cost_so_far, self.best_cost):
+            self.tie_count += 1
+            if int(self.rng.integers(0, self.tie_count)) == 0:
+                self.best = dict(self.assigned)
+
+    def _cost_exceeds_best(self, cost: float) -> bool:
+        return cost > self.best_cost and not math.isclose(cost, self.best_cost)
 
 
 @dataclass(slots=True)
@@ -719,81 +869,12 @@ class TileAssigner:
         options_by_cell: Mapping[GridCell, _StateCellOptions],
     ) -> dict[GridCell, TileVariant] | None:
         neighbors = _state_neighbor_edges(edges)
-        min_remaining_cost = {
-            cell: min(candidate.cost for candidate in options_by_cell[cell].candidates)
-            for cell in component
-        }
-        assigned: dict[GridCell, TileVariant] = {}
-        best: dict[GridCell, TileVariant] | None = None
-        best_cost = math.inf
-        tie_count = 0
-
-        def viable_candidates(cell: GridCell) -> tuple[TileVariant, ...]:
-            viable = []
-            for candidate in options_by_cell[cell].candidates:
-                if all(
-                    _state_edge_compatible(cell, candidate, edge, assigned[neighbor])
-                    for neighbor, edge in neighbors[cell]
-                    if neighbor in assigned
-                ):
-                    viable.append(candidate)
-            return tuple(viable)
-
-        def has_forward_candidate(cell: GridCell, candidate: TileVariant) -> bool:
-            for neighbor, edge in neighbors[cell]:
-                if neighbor in assigned:
-                    continue
-                neighbor_candidates = (
-                    neighbor_candidate
-                    for neighbor_candidate in options_by_cell[neighbor].candidates
-                    if _state_edge_compatible(cell, candidate, edge, neighbor_candidate)
-                )
-                if not any(
-                    all(
-                        _state_edge_compatible(neighbor, neighbor_candidate, neighbor_edge, assigned[other])
-                        for other, neighbor_edge in neighbors[neighbor]
-                        if other in assigned and other != cell
-                    )
-                    for neighbor_candidate in neighbor_candidates
-                ):
-                    return False
-            return True
-
-        def search(cost_so_far: float) -> None:
-            nonlocal best, best_cost, tie_count
-            if len(assigned) == len(component):
-                if cost_so_far < best_cost and not math.isclose(cost_so_far, best_cost):
-                    best = dict(assigned)
-                    best_cost = cost_so_far
-                    tie_count = 1
-                elif math.isclose(cost_so_far, best_cost):
-                    tie_count += 1
-                    if int(self.rng.integers(0, tie_count)) == 0:
-                        best = dict(assigned)
-                return
-
-            unassigned = tuple(cell for cell in component if cell not in assigned)
-            lower_bound = cost_so_far + sum(min_remaining_cost[cell] for cell in unassigned)
-            if lower_bound > best_cost and not math.isclose(lower_bound, best_cost):
-                return
-
-            cell = min(unassigned, key=lambda item: (len(viable_candidates(item)), _cell_sort_key(item)))
-            candidates = viable_candidates(cell)
-            if not candidates:
-                return
-
-            for candidate in candidates:
-                next_cost = cost_so_far + candidate.cost
-                if next_cost > best_cost and not math.isclose(next_cost, best_cost):
-                    continue
-                if not has_forward_candidate(cell, candidate):
-                    continue
-                assigned[cell] = candidate
-                search(next_cost)
-                del assigned[cell]
-
-        search(0.0)
-        return best
+        return _BranchedStateSearch(
+            component=component,
+            options_by_cell=options_by_cell,
+            neighbors=neighbors,
+            rng=self.rng,
+        ).run()
 
     def _choose_candidate(self, candidates: tuple[TileVariant, ...]) -> TileVariant:
         min_cost = min(candidate.cost for candidate in candidates)

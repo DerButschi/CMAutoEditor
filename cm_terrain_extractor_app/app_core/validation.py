@@ -41,6 +41,7 @@ def update_state_from_bbox(state: AppState, bbox_object: Any) -> None:
     state.len_y = metrics["len_y"]
     state.selected_area_valid = is_selected_area_valid(state.len_x, state.len_y)
     state.bbox_origin = 0
+    state.bbox_uploaded_file_signature = None
     clear_bbox_dependent_results(state)
 
 

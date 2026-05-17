@@ -20,6 +20,7 @@ class AppState:
     len_y: float | None = None
     selected_area_valid: bool = False
     bbox_origin: int = 0
+    bbox_uploaded_file_signature: str | None = None
     map_center: tuple[float, float] = (0.0, 0.0)
     map_zoom: int = 2
     map_key: int = 0

@@ -68,12 +68,14 @@ Steps:
 1. If `bbox_object` exists, show its corner dataframe.
 2. Otherwise, show a four-row empty dataframe.
 3. Store edits in `st.session_state["edited_df"]`.
-4. `Cycle bounding box origin` button calls `permute_bbox()`.
-5. Show x length, y length, and area metrics.
+4. The bounding box CSV uploader parses a four-row `x`/`y` dataframe and updates `bbox_object`.
+5. `Cycle bounding box origin` button calls `permute_bbox()`.
+6. Show x length, y length, and area metrics.
 
 Callback interfaces:
 
 ```text
+handle_uploaded_bbox_file(file_object) -> None
 permute_bbox() -> None
 update_bbox_from_df() -> None
 update_bounding_box(points) -> None
@@ -132,6 +134,14 @@ process_osm_data(status_update_area) -> None
 1. `map_view_tab()` compares `edited_df` against `bbox_object.get_dataframe()`.
 2. If values changed and all are non-null, call `update_bbox_from_df()`.
 3. `update_bbox_from_df()` converts the dataframe rows to `(x, y)` points and calls `update_bounding_box(points)`.
+
+### From Bounding Box CSV Upload
+
+1. The sidebar uploader reads the uploaded CSV bytes.
+2. `parse_bbox_csv_bytes()` accepts the exported dataframe format, including an optional index column.
+3. The parsed `x`/`y` rows are converted to a `shapely.Polygon`.
+4. A `BoundingBox` is constructed and stored through `update_state_from_bbox()`.
+5. The upload signature is cached so the retained Streamlit uploader value is ignored on unchanged reruns.
 
 ### `update_bounding_box(points)`
 
