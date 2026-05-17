@@ -357,6 +357,81 @@ def test_pipeline_strict_mode_fails_on_tile_assignment_failures() -> None:
         )
 
 
+def test_pipeline_warn_mode_reports_side_signature_component_failures() -> None:
+    from shapely.geometry import LineString
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import FeatureRecord, ProcessKind
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext
+
+    routes, linear_state = _side_signature_failure_routes_and_state()
+    pipeline = _TileFailureContainmentPipelineHarness(routes, linear_state)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+
+    result = pipeline.run(
+        features=(FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 1, LineString([(0, 0), (16, 0)])),),
+        config=ExtractionConfig.from_mapping({}),
+        grid_index=GridIndex(
+            origin_x=0,
+            origin_y=0,
+            x_axis_unit=(1.0, 0.0),
+            y_axis_unit=(0.0, 1.0),
+            width=6,
+            height=6,
+        ),
+        bounds=(0, 0, 5, 5),
+        linear_catalog_provider=lambda _features: {ProcessKind.ROAD: _side_signature_failure_catalog()},
+        road_validation_mode="warn",
+    )
+
+    failures = result.diagnostics["tile_assignment_failures"]
+    assert len(failures) == 1
+    assert failures[0]["failure_reason"] == "no_compatible_tile_component"
+    assert failures[0]["component_cells"] == ((0, 1), (1, 1))
+    assert failures[0]["incompatible_edges"] == (
+        {"cell_a": (0, 1), "direction": "E", "cell_b": (1, 1)},
+    )
+
+
+def test_pipeline_strict_mode_fails_on_side_signature_component_failures() -> None:
+    from shapely.geometry import LineString
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import FeatureRecord, ProcessKind
+    from terrain_extraction.osm_extraction.pipeline import ExtractionContext, TileAssignmentError
+
+    routes, linear_state = _side_signature_failure_routes_and_state()
+    pipeline = _TileFailureContainmentPipelineHarness(routes, linear_state)
+    pipeline.context = ExtractionContext.create(
+        profile="cold_war",
+        bbox=object(),
+        config_path="default_osm_config.json",
+        seed=0,
+    )
+
+    with pytest.raises(TileAssignmentError, match="no_compatible_tile_component"):
+        pipeline.run(
+            features=(FeatureRecord("road-1", 0, "road", ProcessKind.ROAD, 1, LineString([(0, 0), (16, 0)])),),
+            config=ExtractionConfig.from_mapping({}),
+            grid_index=GridIndex(
+                origin_x=0,
+                origin_y=0,
+                x_axis_unit=(1.0, 0.0),
+                y_axis_unit=(0.0, 1.0),
+                width=6,
+                height=6,
+            ),
+            bounds=(0, 0, 5, 5),
+            linear_catalog_provider=lambda _features: {ProcessKind.ROAD: _side_signature_failure_catalog()},
+            road_validation_mode="strict",
+        )
+
+
 def test_pipeline_warn_mode_reports_intersection_fallback_drops() -> None:
     from shapely.geometry import LineString
     from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
@@ -816,6 +891,38 @@ def _tile_failure_routes_and_state():
     for candidate in routes:
         assert state.reserve_path(candidate).success
     return routes, state
+
+
+def _side_signature_failure_catalog():
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    return CompiledTileCatalog.from_records(
+        ({"direction": 1, "row": 0, "col": 0, "l": ("left-only",), "r": ("right-only",), "cost": 1.0},),
+        process=ProcessKind.ROAD,
+    )
+
+
+def _side_signature_failure_routes_and_state():
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import GridCell, GridNode, ProcessKind, RouteRecord
+
+    tile_cells = (GridCell(0, 1), GridCell(1, 1))
+    route = RouteRecord(
+        edge_id=1,
+        start_node_id=0,
+        end_node_id=1,
+        process=ProcessKind.ROAD,
+        config_name="road",
+        priority=1,
+        nodes=tuple(GridNode(cell.xidx, cell.yidx) for cell in tile_cells),
+        tile_cells=tile_cells,
+        diagnostics={"source_feature_ids": ("osm-1",)},
+    )
+    catalog = _side_signature_failure_catalog()
+    state = LinearNetworkState(width=6, height=6, catalogs={ProcessKind.ROAD: catalog})
+    assert state.reserve_path(route).success
+    return (route,), state
 
 
 def _intersection_fallback_routes_and_state():

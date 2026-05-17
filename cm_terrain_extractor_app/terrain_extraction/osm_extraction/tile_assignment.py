@@ -60,7 +60,9 @@ _DEFAULT_CM_TYPES = {
 @dataclass(frozen=True, slots=True)
 class TileVariant:
     variant_id: str
+    process: ProcessKind
     directions: frozenset[str]
+    side_signatures: Mapping[str, Any]
     cm_type: CMType
     cost: float
     catalog_direction: int | None
@@ -68,6 +70,10 @@ class TileVariant:
     col: int
     variant: int
     connections: Mapping[str, Any]
+
+    @property
+    def open_directions(self) -> frozenset[str]:
+        return self.directions
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +175,19 @@ class _StateCellSpec:
     route_ids: tuple[int | str, ...]
     priority: int
     intersection_kind: str
+
+
+@dataclass(frozen=True, slots=True)
+class _StateCellOptions:
+    spec: _StateCellSpec
+    candidates: tuple[TileVariant, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _StateAdjacency:
+    first: GridCell
+    direction: str
+    second: GridCell
 
 
 @dataclass(slots=True)
@@ -278,10 +297,12 @@ class TileAssigner:
         linear_state: Any,
     ) -> TileAssignmentResult:
         route_by_id = _routes_by_state_id(routes)
-        placements: list[PlacementRecord] = []
         failures: list[Mapping[str, Any]] = []
+        options_by_cell: dict[GridCell, _StateCellOptions] = {}
+        state_required_dirs_by_cell: dict[GridCell, frozenset[str]] = {}
 
         for spec in _state_cell_specs(linear_state):
+            state_required_dirs_by_cell[spec.cell] = spec.required_directions
             catalog = self.catalogs.get(spec.process)
             if catalog is None:
                 failures.append(
@@ -308,16 +329,8 @@ class TileAssigner:
                     )
                 )
                 continue
-            resolved_spec = _StateCellSpec(
-                process=spec.process,
-                cell=spec.cell,
-                required_directions=resolved_required_directions,
-                route_ids=spec.route_ids,
-                priority=spec.priority,
-                intersection_kind=spec.intersection_kind,
-            )
-            variant = catalog.best_tile(resolved_required_directions)
-            if variant is None:
+            candidates = catalog.candidates_for(resolved_required_directions)
+            if not candidates:
                 failures.append(
                     _failure(
                         spec.process,
@@ -329,12 +342,32 @@ class TileAssigner:
                     )
                 )
                 continue
+            resolved_spec = _StateCellSpec(
+                process=spec.process,
+                cell=spec.cell,
+                required_directions=resolved_required_directions,
+                route_ids=spec.route_ids,
+                priority=spec.priority,
+                intersection_kind=spec.intersection_kind,
+            )
+            options_by_cell[spec.cell] = _StateCellOptions(spec=resolved_spec, candidates=candidates)
+
+        selected_variants, compatibility_failures = self._solve_state_components(
+            options_by_cell,
+            state_required_dirs_by_cell,
+        )
+        failures.extend(compatibility_failures)
+
+        placements: list[PlacementRecord] = []
+        for cell in sorted(selected_variants, key=_cell_sort_key):
+            option = options_by_cell[cell]
+            variant = selected_variants[cell]
             placements.append(
                 self._state_placement_from_variant(
-                    spec=resolved_spec,
+                    spec=option.spec,
                     variant=variant,
                     contributing_routes=tuple(
-                        route_by_id[route_id] for route_id in spec.route_ids if route_id in route_by_id
+                        route_by_id[route_id] for route_id in option.spec.route_ids if route_id in route_by_id
                     ),
                 )
             )
@@ -588,6 +621,180 @@ class TileAssigner:
         selected.reverse()
         return tuple(selected)
 
+    def _solve_state_components(
+        self,
+        options_by_cell: Mapping[GridCell, _StateCellOptions],
+        state_required_dirs_by_cell: Mapping[GridCell, frozenset[str]],
+    ) -> tuple[dict[GridCell, TileVariant], tuple[Mapping[str, Any], ...]]:
+        if not options_by_cell:
+            return {}, ()
+
+        edges = _state_adjacencies(options_by_cell, state_required_dirs_by_cell)
+        components = _state_components(options_by_cell, edges)
+        edges_by_component = _edges_by_component(components, edges)
+        selected: dict[GridCell, TileVariant] = {}
+        failures: list[Mapping[str, Any]] = []
+
+        for component in components:
+            component_edges = edges_by_component[frozenset(component)]
+            component_selection = self._solve_state_component(component, component_edges, options_by_cell)
+            if component_selection is None:
+                failures.append(_state_component_failure(component, component_edges, options_by_cell))
+                continue
+            selected.update(component_selection)
+        return selected, tuple(failures)
+
+    def _solve_state_component(
+        self,
+        component: tuple[GridCell, ...],
+        edges: tuple[_StateAdjacency, ...],
+        options_by_cell: Mapping[GridCell, _StateCellOptions],
+    ) -> dict[GridCell, TileVariant] | None:
+        if len(component) == 1:
+            return {component[0]: self._choose_candidate(options_by_cell[component[0]].candidates)}
+
+        ordered_path = _ordered_simple_component_path(component, edges)
+        if ordered_path is not None:
+            return self._solve_state_path_component(ordered_path, options_by_cell)
+
+        ordered_cycle = _ordered_simple_component_cycle(component, edges)
+        if ordered_cycle is not None:
+            return self._solve_state_cycle_component(ordered_cycle, options_by_cell)
+
+        return self._solve_state_branched_component(component, edges, options_by_cell)
+
+    def _solve_state_path_component(
+        self,
+        ordered_cells: tuple[GridCell, ...],
+        options_by_cell: Mapping[GridCell, _StateCellOptions],
+    ) -> dict[GridCell, TileVariant] | None:
+        specs = tuple(_RouteCellSpec(cell=cell, required_directions=options_by_cell[cell].spec.required_directions) for cell in ordered_cells)
+        candidate_columns = tuple(options_by_cell[cell].candidates for cell in ordered_cells)
+        selected = self._least_cost_compatible_path(specs, candidate_columns)
+        if selected is None:
+            return None
+        return dict(zip(ordered_cells, selected, strict=True))
+
+    def _solve_state_cycle_component(
+        self,
+        ordered_cells: tuple[GridCell, ...],
+        options_by_cell: Mapping[GridCell, _StateCellOptions],
+    ) -> dict[GridCell, TileVariant] | None:
+        first_cell = ordered_cells[0]
+        first_candidates = options_by_cell[first_cell].candidates
+        best: dict[GridCell, TileVariant] | None = None
+        best_cost = math.inf
+        tie_count = 0
+
+        for first_variant in first_candidates:
+            candidate_columns = [(first_variant,)]
+            candidate_columns.extend(options_by_cell[cell].candidates for cell in ordered_cells[1:])
+            selected = self._least_cost_compatible_path(
+                tuple(
+                    _RouteCellSpec(cell=cell, required_directions=options_by_cell[cell].spec.required_directions)
+                    for cell in ordered_cells
+                ),
+                tuple(candidate_columns),
+            )
+            if selected is None:
+                continue
+            closing_direction = _direction_between_cells(ordered_cells[-1], ordered_cells[0])
+            if closing_direction is None or not compatible_neighbor(selected[-1], closing_direction, selected[0]):
+                continue
+            path_cost = sum(variant.cost for variant in selected)
+            if path_cost < best_cost and not math.isclose(path_cost, best_cost):
+                best = dict(zip(ordered_cells, selected, strict=True))
+                best_cost = path_cost
+                tie_count = 1
+            elif math.isclose(path_cost, best_cost):
+                tie_count += 1
+                if int(self.rng.integers(0, tie_count)) == 0:
+                    best = dict(zip(ordered_cells, selected, strict=True))
+        return best
+
+    def _solve_state_branched_component(
+        self,
+        component: tuple[GridCell, ...],
+        edges: tuple[_StateAdjacency, ...],
+        options_by_cell: Mapping[GridCell, _StateCellOptions],
+    ) -> dict[GridCell, TileVariant] | None:
+        neighbors = _state_neighbor_edges(edges)
+        min_remaining_cost = {
+            cell: min(candidate.cost for candidate in options_by_cell[cell].candidates)
+            for cell in component
+        }
+        assigned: dict[GridCell, TileVariant] = {}
+        best: dict[GridCell, TileVariant] | None = None
+        best_cost = math.inf
+        tie_count = 0
+
+        def viable_candidates(cell: GridCell) -> tuple[TileVariant, ...]:
+            viable = []
+            for candidate in options_by_cell[cell].candidates:
+                if all(
+                    _state_edge_compatible(cell, candidate, edge, assigned[neighbor])
+                    for neighbor, edge in neighbors[cell]
+                    if neighbor in assigned
+                ):
+                    viable.append(candidate)
+            return tuple(viable)
+
+        def has_forward_candidate(cell: GridCell, candidate: TileVariant) -> bool:
+            for neighbor, edge in neighbors[cell]:
+                if neighbor in assigned:
+                    continue
+                neighbor_candidates = (
+                    neighbor_candidate
+                    for neighbor_candidate in options_by_cell[neighbor].candidates
+                    if _state_edge_compatible(cell, candidate, edge, neighbor_candidate)
+                )
+                if not any(
+                    all(
+                        _state_edge_compatible(neighbor, neighbor_candidate, neighbor_edge, assigned[other])
+                        for other, neighbor_edge in neighbors[neighbor]
+                        if other in assigned and other != cell
+                    )
+                    for neighbor_candidate in neighbor_candidates
+                ):
+                    return False
+            return True
+
+        def search(cost_so_far: float) -> None:
+            nonlocal best, best_cost, tie_count
+            if len(assigned) == len(component):
+                if cost_so_far < best_cost and not math.isclose(cost_so_far, best_cost):
+                    best = dict(assigned)
+                    best_cost = cost_so_far
+                    tie_count = 1
+                elif math.isclose(cost_so_far, best_cost):
+                    tie_count += 1
+                    if int(self.rng.integers(0, tie_count)) == 0:
+                        best = dict(assigned)
+                return
+
+            unassigned = tuple(cell for cell in component if cell not in assigned)
+            lower_bound = cost_so_far + sum(min_remaining_cost[cell] for cell in unassigned)
+            if lower_bound > best_cost and not math.isclose(lower_bound, best_cost):
+                return
+
+            cell = min(unassigned, key=lambda item: (len(viable_candidates(item)), _cell_sort_key(item)))
+            candidates = viable_candidates(cell)
+            if not candidates:
+                return
+
+            for candidate in candidates:
+                next_cost = cost_so_far + candidate.cost
+                if next_cost > best_cost and not math.isclose(next_cost, best_cost):
+                    continue
+                if not has_forward_candidate(cell, candidate):
+                    continue
+                assigned[cell] = candidate
+                search(next_cost)
+                del assigned[cell]
+
+        search(0.0)
+        return best
+
     def _choose_candidate(self, candidates: tuple[TileVariant, ...]) -> TileVariant:
         min_cost = min(candidate.cost for candidate in candidates)
         best = tuple(candidate for candidate in candidates if math.isclose(candidate.cost, min_cost))
@@ -600,6 +807,184 @@ def _records_from_any(records: Iterable[Mapping[str, Any]] | Any) -> tuple[Mappi
     if hasattr(records, "to_dict"):
         return tuple(records.to_dict("records"))
     return tuple(records)
+
+
+def _state_adjacencies(
+    options_by_cell: Mapping[GridCell, _StateCellOptions],
+    state_required_dirs_by_cell: Mapping[GridCell, frozenset[str]],
+) -> tuple[_StateAdjacency, ...]:
+    edges = []
+    cells = frozenset(options_by_cell)
+    for cell in sorted(cells, key=_cell_sort_key):
+        process = options_by_cell[cell].spec.process
+        for direction in _ordered_directions(state_required_dirs_by_cell.get(cell, ())):
+            neighbor = _next_cell(cell, direction)
+            if neighbor not in cells or _cell_sort_key(neighbor) <= _cell_sort_key(cell):
+                continue
+            if options_by_cell[neighbor].spec.process is not process:
+                continue
+            opposite = _OPPOSITE_DIRECTIONS.get(direction)
+            if opposite in state_required_dirs_by_cell.get(neighbor, frozenset()):
+                edges.append(_StateAdjacency(first=cell, direction=direction, second=neighbor))
+    return tuple(edges)
+
+
+def _state_components(
+    options_by_cell: Mapping[GridCell, _StateCellOptions],
+    edges: tuple[_StateAdjacency, ...],
+) -> tuple[tuple[GridCell, ...], ...]:
+    neighbors: dict[GridCell, set[GridCell]] = {cell: set() for cell in options_by_cell}
+    for edge in edges:
+        neighbors[edge.first].add(edge.second)
+        neighbors[edge.second].add(edge.first)
+
+    remaining = set(options_by_cell)
+    components = []
+    while remaining:
+        start = min(remaining, key=_cell_sort_key)
+        stack = [start]
+        component = set()
+        remaining.remove(start)
+        while stack:
+            cell = stack.pop()
+            component.add(cell)
+            for neighbor in neighbors[cell]:
+                if neighbor in remaining:
+                    remaining.remove(neighbor)
+                    stack.append(neighbor)
+        components.append(tuple(sorted(component, key=_cell_sort_key)))
+    return tuple(components)
+
+
+def _edges_by_component(
+    components: tuple[tuple[GridCell, ...], ...],
+    edges: tuple[_StateAdjacency, ...],
+) -> dict[frozenset[GridCell], tuple[_StateAdjacency, ...]]:
+    result = {}
+    for component in components:
+        cells = frozenset(component)
+        result[cells] = tuple(edge for edge in edges if edge.first in cells and edge.second in cells)
+    return result
+
+
+def _state_neighbor_edges(edges: tuple[_StateAdjacency, ...]) -> dict[GridCell, tuple[tuple[GridCell, _StateAdjacency], ...]]:
+    neighbors: dict[GridCell, list[tuple[GridCell, _StateAdjacency]]] = {}
+    for edge in edges:
+        neighbors.setdefault(edge.first, []).append((edge.second, edge))
+        neighbors.setdefault(edge.second, []).append((edge.first, edge))
+    return {
+        cell: tuple(sorted(cell_neighbors, key=lambda item: _cell_sort_key(item[0])))
+        for cell, cell_neighbors in neighbors.items()
+    }
+
+
+def _ordered_simple_component_path(
+    component: tuple[GridCell, ...],
+    edges: tuple[_StateAdjacency, ...],
+) -> tuple[GridCell, ...] | None:
+    neighbors = _state_neighbor_edges(edges)
+    degrees = {cell: len(neighbors.get(cell, ())) for cell in component}
+    if any(degree > 2 for degree in degrees.values()):
+        return None
+    endpoints = tuple(sorted((cell for cell, degree in degrees.items() if degree == 1), key=_cell_sort_key))
+    if len(endpoints) != 2:
+        return None
+    return _walk_simple_component(endpoints[0], component, neighbors)
+
+
+def _ordered_simple_component_cycle(
+    component: tuple[GridCell, ...],
+    edges: tuple[_StateAdjacency, ...],
+) -> tuple[GridCell, ...] | None:
+    neighbors = _state_neighbor_edges(edges)
+    if len(component) < 3 or any(len(neighbors.get(cell, ())) != 2 for cell in component):
+        return None
+    return _walk_simple_component(min(component, key=_cell_sort_key), component, neighbors)
+
+
+def _walk_simple_component(
+    start: GridCell,
+    component: tuple[GridCell, ...],
+    neighbors: Mapping[GridCell, tuple[tuple[GridCell, _StateAdjacency], ...]],
+) -> tuple[GridCell, ...] | None:
+    ordered = [start]
+    previous: GridCell | None = None
+    while len(ordered) < len(component):
+        candidates = tuple(neighbor for neighbor, _edge in neighbors.get(ordered[-1], ()) if neighbor != previous)
+        if not candidates:
+            return None
+        next_cell = min(candidates, key=_cell_sort_key)
+        previous = ordered[-1]
+        ordered.append(next_cell)
+    return tuple(ordered)
+
+
+def _state_edge_compatible(
+    cell: GridCell,
+    variant: TileVariant,
+    edge: _StateAdjacency,
+    neighbor_variant: TileVariant,
+) -> bool:
+    if cell == edge.first:
+        return compatible_neighbor(variant, edge.direction, neighbor_variant)
+    return compatible_neighbor(neighbor_variant, edge.direction, variant)
+
+
+def _state_component_failure(
+    component: tuple[GridCell, ...],
+    edges: tuple[_StateAdjacency, ...],
+    options_by_cell: Mapping[GridCell, _StateCellOptions],
+) -> Mapping[str, Any]:
+    representative = min(component, key=_cell_sort_key)
+    spec = options_by_cell[representative].spec
+    route_ids = tuple(
+        sorted(
+            {route_id for cell in component for route_id in options_by_cell[cell].spec.route_ids},
+            key=str,
+        )
+    )
+    return _failure(
+        spec.process,
+        representative,
+        spec.required_directions,
+        "no_compatible_tile_component",
+        hard_failure=True,
+        route_ids=route_ids,
+        component_cells=tuple((cell.xidx, cell.yidx) for cell in sorted(component, key=_cell_sort_key)),
+        incompatible_edges=_incompatible_edge_diagnostics(edges, options_by_cell),
+    )
+
+
+def _incompatible_edge_diagnostics(
+    edges: tuple[_StateAdjacency, ...],
+    options_by_cell: Mapping[GridCell, _StateCellOptions],
+) -> tuple[Mapping[str, Any], ...]:
+    incompatible = []
+    for edge in edges:
+        if any(
+            compatible_neighbor(first, edge.direction, second)
+            for first in options_by_cell[edge.first].candidates
+            for second in options_by_cell[edge.second].candidates
+        ):
+            continue
+        incompatible.append(_edge_diagnostic(edge))
+        if len(incompatible) >= 5:
+            return tuple(incompatible)
+    if incompatible:
+        return tuple(incompatible)
+    return tuple(_edge_diagnostic(edge) for edge in edges[:5])
+
+
+def _edge_diagnostic(edge: _StateAdjacency) -> Mapping[str, Any]:
+    return {
+        "cell_a": (edge.first.xidx, edge.first.yidx),
+        "direction": edge.direction,
+        "cell_b": (edge.second.xidx, edge.second.yidx),
+    }
+
+
+def _cell_sort_key(cell: GridCell) -> tuple[int, int]:
+    return cell.yidx, cell.xidx
 
 
 def _variant_from_record(
@@ -626,7 +1011,9 @@ def _variant_from_record(
     )
     return TileVariant(
         variant_id=str(cm_type.tile_id),
+        process=process,
         directions=directions,
+        side_signatures=_side_signatures_from_record(record),
         cm_type=cm_type,
         cost=float(record.get("cost", 1.0)),
         catalog_direction=catalog_direction,
@@ -651,6 +1038,28 @@ def _connections_from_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
         for column in _CATALOG_DIRECTION_COLUMNS
         if column in record and not _is_missing(record[column])
     }
+
+
+def _side_signatures_from_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    return {
+        direction: _normalize_side_signature(signature)
+        for direction, signature in _connections_from_record(record).items()
+    }
+
+
+def _normalize_side_signature(value: Any) -> Any:
+    if isinstance(value, tuple | list):
+        return tuple(_normalize_side_signature(item) for item in value)
+    if isinstance(value, frozenset | set):
+        return tuple(sorted((_normalize_side_signature(item) for item in value), key=repr))
+    if isinstance(value, dict):
+        return tuple(
+            sorted(
+                ((_normalize_side_signature(key), _normalize_side_signature(item)) for key, item in value.items()),
+                key=repr,
+            )
+        )
+    return value
 
 
 def _normalize_direction_set(directions: Iterable[str]) -> frozenset[str]:
@@ -970,8 +1379,21 @@ def _next_cell(cell: GridCell, direction: str) -> GridCell:
     return GridCell(cell.xidx + dx, cell.yidx + dy)
 
 
+def compatible_neighbor(tile_a: TileVariant, dir_a_to_b: str, tile_b: TileVariant) -> bool:
+    opposite = _OPPOSITE_DIRECTIONS.get(dir_a_to_b)
+    if opposite is None:
+        return False
+    if dir_a_to_b not in tile_a.open_directions or opposite not in tile_b.open_directions:
+        return False
+
+    # Catalog tuple/list values are atomic connector identities, not sets of allowed
+    # tokens: a connector like (2, 3) can connect only to the same normalized
+    # signature (2, 3), not to (3, 2) or a wider tuple containing 2 or 3.
+    return tile_a.side_signatures.get(dir_a_to_b) == tile_b.side_signatures.get(opposite)
+
+
 def _variants_connect(first: TileVariant, second: TileVariant, direction: str) -> bool:
-    return first.connections.get(direction) == second.connections.get(_OPPOSITE_DIRECTIONS[direction])
+    return compatible_neighbor(first, direction, second)
 
 
 def _layer_for_process(process: ProcessKind) -> LayerKind:
@@ -989,6 +1411,7 @@ def _failure(
     hard_failure: bool = False,
     route_id: int | str | None = None,
     route_ids: Sequence[int | str] = (),
+    **extra: Any,
 ) -> Mapping[str, Any]:
     failure = {
         "process": process.value,
@@ -1002,6 +1425,7 @@ def _failure(
         failure["route_id"] = route_id
     if route_ids:
         failure["route_ids"] = tuple(route_ids)
+    failure.update(extra)
     return failure
 
 

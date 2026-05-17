@@ -48,6 +48,45 @@ def test_catalog_compiles_direction_sets_and_required_lookup() -> None:
     assert catalog.candidates_for(frozenset({"E", "W"}))[0].cm_type.cat2 == "Road Tile 1"
 
 
+def test_catalog_variants_expose_side_signatures_and_identity() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    catalog = CompiledTileCatalog.from_records(_catalog_rows(), process=ProcessKind.ROAD)
+    variant = catalog.candidates_for(frozenset({"N", "S"}))[0]
+
+    assert variant.process is ProcessKind.ROAD
+    assert variant.open_directions == frozenset({"N", "S"})
+    assert variant.side_signatures == {"N": (2, 3), "S": (2, 3)}
+    assert variant.cost == 1.0
+    assert variant.variant_id == variant.cm_type.tile_id
+    assert variant.catalog_direction == 0
+    assert (variant.row, variant.col, variant.variant) == (0, 0, 0)
+
+
+def test_compatible_neighbor_requires_exact_side_signature_match() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, compatible_neighbor
+
+    catalog = CompiledTileCatalog.from_records(
+        (
+            {"direction": 1, "row": 0, "col": 0, "r": (2, 3), "l": (9,), "cost": 1.0},
+            {"direction": 1, "row": 0, "col": 1, "r": (9,), "l": (2, 3), "cost": 1.0},
+            {"direction": 1, "row": 0, "col": 2, "r": (9,), "l": (3, 2), "cost": 1.0},
+            {"direction": 1, "row": 1, "col": 0, "r": (9,), "l": (2, 3, 4), "cost": 1.0},
+            {"direction": 0, "row": 1, "col": 1, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+        ),
+        process=ProcessKind.ROAD,
+    )
+    matching, target, reordered, wider, vertical = catalog.variants
+
+    assert compatible_neighbor(matching, "E", target)
+    assert not compatible_neighbor(matching, "E", reordered)
+    assert not compatible_neighbor(matching, "E", wider)
+    assert not compatible_neighbor(matching, "E", vertical)
+    assert not compatible_neighbor(matching, "N", target)
+
+
 def test_intersection_anchor_uses_one_tile_with_unioned_directions() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
     from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner

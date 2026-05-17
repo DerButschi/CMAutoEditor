@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 APP_DIR = Path(__file__).parents[3] / "cm_terrain_extractor_app"
 if str(APP_DIR) not in sys.path:
@@ -184,6 +185,65 @@ def test_tile_assignment_can_consume_state_derived_required_directions() -> None
     center = [placement for placement in result.placements if placement.cells == (GridCell(1, 1),)]
     assert len(center) == 1
     assert center[0].diagnostics["required_directions"] == ("E", "N", "S", "W")
+
+
+def test_road_state_finalization_solves_compatible_side_signatures() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    catalog = CompiledTileCatalog.from_records(
+        (
+            {"direction": 1, "row": 0, "col": 0, "r": ("wide",), "l": ("narrow",), "cost": 0.1},
+            {"direction": 1, "row": 1, "col": 0, "r": ("matched",), "l": ("matched",), "cost": 1.0},
+        ),
+        process=ProcessKind.ROAD,
+    )
+    state = LinearNetworkState(width=5, height=3, catalogs={ProcessKind.ROAD: catalog})
+    route = _route(1, ((0, 1), (1, 1), (2, 1)))
+    assert state.reserve_path(route).success
+
+    result = TileAssigner({ProcessKind.ROAD: catalog}, rng=np.random.default_rng(12)).assign(
+        (route,),
+        linear_state=state,
+    )
+
+    assert result.success
+    assert [placement.diagnostics["tile_row"] for placement in result.placements] == [1, 1, 1]
+
+
+@pytest.mark.parametrize(
+    "process",
+    [
+        pytest.param("stream", id="stream"),
+        pytest.param("fence", id="fence"),
+        pytest.param("rail", id="rail"),
+    ],
+)
+def test_linear_state_finalization_solves_exact_side_signatures_for_non_road_processes(process) -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    process_kind = ProcessKind(process)
+    catalog = CompiledTileCatalog.from_records(
+        (
+            {"direction": 1, "row": 0, "col": 0, "r": (2, 3), "l": (2, 3, 4), "cost": 0.1},
+            {"direction": 1, "row": 1, "col": 0, "r": (2, 3), "l": (2, 3), "cost": 1.0},
+        ),
+        process=process_kind,
+    )
+    state = LinearNetworkState(width=5, height=3, catalogs={process_kind: catalog})
+    route = _route(1, ((0, 1), (1, 1), (2, 1)), process=process_kind, config_name=process_kind.value)
+    assert state.reserve_path(route).success
+
+    result = TileAssigner({process_kind: catalog}, rng=np.random.default_rng(12)).assign(
+        (route,),
+        linear_state=state,
+    )
+
+    assert result.success, process
+    assert [placement.diagnostics["tile_row"] for placement in result.placements] == [0, 1, 1]
 
 
 def test_short_dead_end_road_finalizes_without_catalog_gap() -> None:

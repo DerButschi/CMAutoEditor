@@ -92,6 +92,7 @@ from terrain_extraction.osm_extraction.tile_assignment import (
     CompiledTileCatalog,
     TileAssigner,
     TileVariant,
+    compatible_neighbor,
 )
 
 __all__ = [
@@ -152,6 +153,7 @@ __all__ = [
     "TileAssignmentError",
     "TileAssignmentResult",
     "TileVariant",
+    "compatible_neighbor",
     "TopologyEdge",
     "TopologyGraph",
     "TopologyNode",
