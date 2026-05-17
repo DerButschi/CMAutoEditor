@@ -7,8 +7,17 @@ from typing import Any
 
 import numpy as np
 from terrain_extraction.osm_extraction.direction_resolution import (
+    DIRECTION_ORDER,
+    OPPOSITE_DIRECTIONS,
     normalize_direction_set,
+    ordered_directions,
     resolve_required_directions,
+)
+from terrain_extraction.osm_extraction.direction_resolution import (
+    direction_between_cells as shared_direction_between_cells,
+)
+from terrain_extraction.osm_extraction.direction_resolution import (
+    next_cell as shared_next_cell,
 )
 from terrain_extraction.osm_extraction.models import (
     CMType,
@@ -32,17 +41,8 @@ _CATALOG_DIRECTION_COLUMNS = {
     "dr": "SE",
     "dl": "SW",
 }
-_DIRECTION_ORDER = {"E": 0, "N": 1, "S": 2, "W": 3, "NE": 4, "NW": 5, "SE": 6, "SW": 7}
-_OPPOSITE_DIRECTIONS = {
-    "N": "S",
-    "S": "N",
-    "E": "W",
-    "W": "E",
-    "NE": "SW",
-    "NW": "SE",
-    "SE": "NW",
-    "SW": "NE",
-}
+_DIRECTION_ORDER = DIRECTION_ORDER
+_OPPOSITE_DIRECTIONS = OPPOSITE_DIRECTIONS
 _LABEL_PREFIX = {
     ProcessKind.ROAD: "Road",
     ProcessKind.RAIL: "Rail",
@@ -1360,23 +1360,11 @@ def _intersection_cell_for_node(node: GridNode, incident_cells: Iterable[GridCel
 
 
 def _direction_between_cells(first: GridCell, second: GridCell) -> str | None:
-    dx = second.xidx - first.xidx
-    dy = second.yidx - first.yidx
-    if max(abs(dx), abs(dy)) != 1 or (dx == 0 and dy == 0):
-        return None
-    if dx == 1:
-        return "NE" if dy == 1 else "SE" if dy == -1 else "E"
-    if dx == -1:
-        return "NW" if dy == 1 else "SW" if dy == -1 else "W"
-    if dy == 1:
-        return "N"
-    return "S"
+    return shared_direction_between_cells(first, second)
 
 
 def _next_cell(cell: GridCell, direction: str) -> GridCell:
-    dx = 1 if "E" in direction else -1 if "W" in direction else 0
-    dy = 1 if "N" in direction else -1 if "S" in direction else 0
-    return GridCell(cell.xidx + dx, cell.yidx + dy)
+    return shared_next_cell(cell, direction)
 
 
 def compatible_neighbor(tile_a: TileVariant, dir_a_to_b: str, tile_b: TileVariant) -> bool:
@@ -1430,7 +1418,7 @@ def _failure(
 
 
 def _ordered_directions(directions: Iterable[str]) -> tuple[str, ...]:
-    return tuple(sorted(directions, key=lambda direction: _DIRECTION_ORDER.get(direction, 99)))
+    return ordered_directions(directions)
 
 
 def _placement_role(required_directions: Iterable[str]) -> str:

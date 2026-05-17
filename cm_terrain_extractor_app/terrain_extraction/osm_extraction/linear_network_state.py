@@ -5,16 +5,23 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-from terrain_extraction.osm_extraction.direction_resolution import resolve_required_directions
+from terrain_extraction.osm_extraction.direction_resolution import (
+    DIRECTION_ORDER,
+    OPPOSITE_DIRECTIONS,
+    direction_between_cells,
+    directions_are_opposite,
+    ordered_directions,
+    resolve_required_directions,
+)
 from terrain_extraction.osm_extraction.linear_processing_plan import (
     LinearInteractionPolicy,
     default_linear_interaction_policy,
 )
 from terrain_extraction.osm_extraction.models import GridCell, ProcessKind, RouteRecord
 
-_DIRECTION_BITS = {"N": 1, "E": 2, "S": 4, "W": 8}
-_DIRECTION_ORDER = {"E": 0, "N": 1, "S": 2, "W": 3}
-_OPPOSITE_DIRECTIONS = {"N": "S", "S": "N", "E": "W", "W": "E"}
+_DIRECTION_BITS = {"N": 1, "E": 2, "S": 4, "W": 8, "NE": 16, "NW": 32, "SE": 64, "SW": 128}
+_DIRECTION_ORDER = DIRECTION_ORDER
+_OPPOSITE_DIRECTIONS = OPPOSITE_DIRECTIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,17 +279,7 @@ def _endpoint_cells(tile_cells: Iterable[GridCell]) -> frozenset[GridCell]:
 
 
 def _direction_between_cells(first: GridCell, second: GridCell) -> str | None:
-    dx = second.xidx - first.xidx
-    dy = second.yidx - first.yidx
-    if abs(dx) + abs(dy) != 1:
-        return None
-    if dx == 1:
-        return "E"
-    if dx == -1:
-        return "W"
-    if dy == 1:
-        return "N"
-    return "S"
+    return direction_between_cells(first, second)
 
 
 def _bits_from_dirs(directions: Iterable[str]) -> int:
@@ -300,7 +297,7 @@ def _intersection_kind(directions: frozenset[str]) -> str:
     if len(directions) <= 1:
         return "endpoint"
     if len(directions) == 2:
-        return "straight" if directions in (frozenset({"N", "S"}), frozenset({"E", "W"})) else "bend"
+        return "straight" if directions_are_opposite(directions) else "bend"
     if len(directions) == 3:
         return "t_junction"
     return "four_way"
@@ -328,4 +325,4 @@ def _failure(
 
 
 def _ordered_directions(directions: Iterable[str]) -> tuple[str, ...]:
-    return tuple(sorted((direction for direction in directions if direction), key=lambda direction: _DIRECTION_ORDER[direction]))
+    return ordered_directions(direction for direction in directions if direction)

@@ -6,6 +6,15 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from terrain_extraction.osm_extraction.direction_resolution import (
+    CARDINAL_DIRECTIONS,
+    DIAGONAL_DIRECTIONS,
+    DIRECTION_ORDER,
+    OPPOSITE_DIRECTIONS,
+    directions_are_opposite,
+    ordered_directions,
+    supports_diagonal_directions,
+)
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
     CMType,
@@ -21,8 +30,8 @@ from terrain_extraction.osm_extraction.models import (
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
 
-_DIRECTION_ORDER = {"E": 0, "N": 1, "S": 2, "W": 3}
-_OPPOSITE_DIRECTIONS = {"N": "S", "S": "N", "E": "W", "W": "E"}
+_DIRECTION_ORDER = DIRECTION_ORDER
+_OPPOSITE_DIRECTIONS = OPPOSITE_DIRECTIONS
 _MAJOR_ROAD_CLASSES = frozenset({"motorway", "trunk", "primary", "secondary"})
 _ROAD_CLASS_RANK = {"motorway": 0, "trunk": 1, "primary": 2, "secondary": 3}
 
@@ -486,7 +495,7 @@ class AnchorSelector:
         support_cells = tuple(dict.fromkeys(spine.cells))
         if edge.end_node_id == node.node_id:
             support_cells = tuple(reversed(support_cells))
-        fallback_direction = _edge_direction_from_node(node.node_id, edge)
+        fallback_direction = self._edge_direction_from_node(node.node_id, edge)
         support_cells = _representative_support_cells(
             self._clamp_cell(self.grid_index.projected_to_cell(node.point.x, node.point.y)),
             support_cells,
@@ -514,7 +523,15 @@ class AnchorSelector:
         impossible_arm_severity = 0.0
 
         for arm in incident_arms:
-            direction = _stub_direction_from_cell(cell, arm.support_cells)
+            allow_diagonal = self._process_allows_diagonal(arm.process)
+            direction = _stub_direction_from_cell(
+                cell,
+                arm.support_cells,
+                allow_diagonal=allow_diagonal,
+            )
+            if allow_diagonal and arm.fallback_direction in DIAGONAL_DIRECTIONS and direction in CARDINAL_DIRECTIONS:
+                direction = arm.fallback_direction
+                reasons.append(f"geometry_direction_fallback:{arm.edge_id}")
             if direction is None and arm.fallback_direction is not None:
                 direction = arm.fallback_direction
                 reasons.append(f"geometry_direction_fallback:{arm.edge_id}")
@@ -549,10 +566,28 @@ class AnchorSelector:
     def _required_dirs_estimate(self, node: TopologyNode, incident_edges: tuple[TopologyEdge, ...]) -> tuple[str, ...]:
         directions = []
         for edge in incident_edges:
-            direction = _edge_direction_from_node(node.node_id, edge)
+            direction = self._edge_direction_from_node(node.node_id, edge)
             if direction:
                 directions.append(direction)
         return tuple(directions)
+
+    def _edge_direction_from_node(self, node_id: int, edge: TopologyEdge) -> str | None:
+        return _edge_direction_from_node(
+            node_id,
+            edge,
+            allow_diagonal=self._process_allows_diagonal(edge.process),
+        )
+
+    def _process_allows_diagonal(self, process: ProcessKind) -> bool:
+        catalog = self.catalogs.get(process)
+        if catalog is None or not hasattr(catalog, "allowed_step_dirs"):
+            return False
+        supported = frozenset(catalog.allowed_step_dirs())
+        if not supported:
+            return False
+        if process is ProcessKind.ROAD:
+            return supports_diagonal_directions(supported)
+        return bool(supported.difference(CARDINAL_DIRECTIONS))
 
     def _cells_at_radius(self, base_cell: GridCell, radius: int) -> tuple[GridCell, ...]:
         cells = []
@@ -619,10 +654,7 @@ def _preserved_pair_sort_key(pair: _PreservedArmPair) -> tuple[int, int, int, tu
 
 
 def _directions_are_opposite(directions: frozenset[str]) -> bool:
-    if len(directions) != 2:
-        return False
-    first, second = tuple(directions)
-    return _OPPOSITE_DIRECTIONS.get(first) == second
+    return directions_are_opposite(directions)
 
 
 def _split_primary_cell(
@@ -693,6 +725,10 @@ def _cell_is_on_preserved_axis(primary_cell: GridCell, cell: GridCell, preserved
         return cell.yidx == primary_cell.yidx
     if preserved_dirs == frozenset({"N", "S"}):
         return cell.xidx == primary_cell.xidx
+    if preserved_dirs == frozenset({"NE", "SW"}):
+        return cell.xidx - primary_cell.xidx == cell.yidx - primary_cell.yidx
+    if preserved_dirs == frozenset({"NW", "SE"}):
+        return cell.xidx - primary_cell.xidx == primary_cell.yidx - cell.yidx
     return max(abs(cell.xidx - primary_cell.xidx), abs(cell.yidx - primary_cell.yidx)) <= 1
 
 
@@ -736,7 +772,12 @@ def _candidate_has_supported_arms(candidate: AnchorCandidate) -> bool:
     return candidate.tile_feasible and candidate.impossible_arm_count == 0
 
 
-def _stub_direction_from_cell(cell: GridCell, support_cells: tuple[GridCell, ...]) -> str | None:
+def _stub_direction_from_cell(
+    cell: GridCell,
+    support_cells: tuple[GridCell, ...],
+    *,
+    allow_diagonal: bool = False,
+) -> str | None:
     if not support_cells:
         return None
     if cell in support_cells:
@@ -745,7 +786,7 @@ def _stub_direction_from_cell(cell: GridCell, support_cells: tuple[GridCell, ...
     else:
         targets = support_cells[:1]
     for target in targets:
-        direction = _direction_between_cells(cell, target)
+        direction = _direction_between_cells(cell, target, allow_diagonal=allow_diagonal)
         if direction is not None:
             return direction
     return None
@@ -763,28 +804,40 @@ def _representative_support_cells(
 
 
 def _cell_is_on_forward_axis(cell: GridCell, node_cell: GridCell, direction: str) -> bool:
+    dx = cell.xidx - node_cell.xidx
+    dy = cell.yidx - node_cell.yidx
     if direction == "N":
-        return cell.xidx == node_cell.xidx and cell.yidx >= node_cell.yidx
+        return dx == 0 and dy >= 0
     if direction == "S":
-        return cell.xidx == node_cell.xidx and cell.yidx <= node_cell.yidx
+        return dx == 0 and dy <= 0
     if direction == "E":
-        return cell.yidx == node_cell.yidx and cell.xidx >= node_cell.xidx
+        return dy == 0 and dx >= 0
     if direction == "W":
-        return cell.yidx == node_cell.yidx and cell.xidx <= node_cell.xidx
+        return dy == 0 and dx <= 0
+    if direction == "NE":
+        return dx >= 0 and dy >= 0
+    if direction == "NW":
+        return dx <= 0 and dy >= 0
+    if direction == "SE":
+        return dx >= 0 and dy <= 0
+    if direction == "SW":
+        return dx <= 0 and dy <= 0
     return False
 
 
-def _direction_between_cells(start: GridCell, end: GridCell) -> str | None:
+def _direction_between_cells(start: GridCell, end: GridCell, *, allow_diagonal: bool = False) -> str | None:
     dx = end.xidx - start.xidx
     dy = end.yidx - start.yidx
     if dx == 0 and dy == 0:
         return None
+    if allow_diagonal and dx != 0 and dy != 0:
+        return ("N" if dy > 0 else "S") + ("E" if dx > 0 else "W")
     if abs(dx) >= abs(dy):
         return "E" if dx > 0 else "W"
     return "N" if dy > 0 else "S"
 
 
-def _edge_direction_from_node(node_id: int, edge: TopologyEdge) -> str | None:
+def _edge_direction_from_node(node_id: int, edge: TopologyEdge, *, allow_diagonal: bool = False) -> str | None:
     coords = tuple(edge.geometry.coords)
     if len(coords) < 2:
         return None
@@ -798,6 +851,8 @@ def _edge_direction_from_node(node_id: int, edge: TopologyEdge) -> str | None:
     dy = end[1] - start[1]
     if math.isclose(dx, 0.0) and math.isclose(dy, 0.0):
         return None
+    if allow_diagonal and not math.isclose(dx, 0.0) and not math.isclose(dy, 0.0):
+        return ("N" if dy > 0 else "S") + ("E" if dx > 0 else "W")
     if abs(dx) >= abs(dy):
         return "E" if dx > 0 else "W"
     return "N" if dy > 0 else "S"
@@ -826,7 +881,7 @@ def _selected_radius(plan: AnchorPlan) -> int:
 
 
 def _ordered_directions(directions: Iterable[str]) -> tuple[str, ...]:
-    return tuple(sorted(frozenset(directions), key=lambda direction: _DIRECTION_ORDER.get(direction, 99)))
+    return ordered_directions(frozenset(directions))
 
 
 def _major_continuity_pairs(incident_arms: tuple[_IncidentArm, ...]) -> tuple[tuple[int, int], ...]:

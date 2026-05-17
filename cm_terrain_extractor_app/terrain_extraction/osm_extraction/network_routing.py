@@ -8,6 +8,12 @@ from typing import Any
 
 from shapely.geometry import LineString
 from terrain_extraction.osm_extraction.anchor_selection import AnchorSelector, anchor_cell_for_plan
+from terrain_extraction.osm_extraction.direction_resolution import (
+    CARDINAL_DIRECTIONS,
+    DIRECTION_STEPS,
+    OPPOSITE_DIRECTIONS,
+    supports_diagonal_directions,
+)
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.linear_network_state import (
     LinearNetworkState,
@@ -36,13 +42,9 @@ from terrain_extraction.osm_extraction.models import (
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
 from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
 
-_DIRECTION_STEPS = {
-    "N": (0, 1),
-    "E": (1, 0),
-    "S": (0, -1),
-    "W": (-1, 0),
-}
-_OPPOSITE_DIRECTIONS = {"N": "S", "S": "N", "E": "W", "W": "E"}
+_MOVE_ORDER = ("N", "E", "S", "W", "NE", "NW", "SE", "SW")
+_DIRECTION_STEPS = DIRECTION_STEPS
+_OPPOSITE_DIRECTIONS = OPPOSITE_DIRECTIONS
 _NETWORK_CLASS_RANK = {
     "motorway": 0,
     "trunk": 0,
@@ -72,10 +74,19 @@ class CompiledMoveSet:
 
     @classmethod
     def cardinal(cls) -> CompiledMoveSet:
+        return cls.from_directions(CARDINAL_DIRECTIONS)
+
+    @classmethod
+    def from_directions(cls, directions: Iterable[str]) -> CompiledMoveSet:
+        normalized = frozenset(direction.upper() for direction in directions).intersection(_DIRECTION_STEPS)
+        if not normalized:
+            normalized = CARDINAL_DIRECTIONS
         return cls(
             tuple(
                 MoveStep(dx=dx, dy=dy, direction=direction)
-                for direction, (dx, dy) in (("N", (0, 1)), ("E", (1, 0)), ("S", (0, -1)), ("W", (-1, 0)))
+                for direction in _MOVE_ORDER
+                if direction in normalized
+                for dx, dy in (_DIRECTION_STEPS[direction],)
             )
         )
 
@@ -89,7 +100,16 @@ class CompiledMoveSet:
             directions.update(_normalize_direction_token(value))
         if not directions:
             return cls.cardinal()
-        return cls(tuple(MoveStep(*_DIRECTION_STEPS[direction], direction) for direction in "NESW" if direction in directions))
+        return cls.from_directions(directions)
+
+    @classmethod
+    def for_process_catalog(cls, process: ProcessKind, catalog: Any | None) -> CompiledMoveSet:
+        supported = _catalog_supported_step_dirs(catalog)
+        if not supported:
+            return cls.cardinal()
+        if process is ProcessKind.ROAD and not supports_diagonal_directions(supported):
+            return cls.from_directions(supported.intersection(CARDINAL_DIRECTIONS))
+        return cls.from_directions(supported)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,12 +146,16 @@ class NetworkRouter:
             raise ValueError("minor_relaxation_m must be greater than or equal to corridor_deviation_m")
         self.grid_index = grid_index
         self.occupancy = occupancy or OccupancyModel.from_grid_index(grid_index)
-        self.move_set = move_set or CompiledMoveSet.cardinal()
+        self.move_set = move_set
         self.corridor_deviation_m = corridor_deviation_m
         self.minor_relaxation_m = minor_relaxation_m
         self.allow_soft_crossing = allow_soft_crossing
         self.split_long_edge_m = split_long_edge_m
         self.catalogs = dict(catalogs or {})
+        self.process_move_sets = {
+            process: CompiledMoveSet.for_process_catalog(process, catalog)
+            for process, catalog in self.catalogs.items()
+        }
         self.linear_state = linear_state
         self.interaction_policy = interaction_policy or default_linear_interaction_policy()
 
@@ -291,8 +315,9 @@ class NetworkRouter:
             return _RouteAttempt(nodes=(start,), blocked_cells_considered=0)
 
         window = self._node_window(line, corridor_m)
+        move_set = self._move_set_for_process(process)
         start_state = (start.xidx, start.yidx, "")
-        open_heap = [(self._heuristic(start, goal), 0.0, start_state)]
+        open_heap = [(self._heuristic(start, goal, move_set), 0.0, start_state)]
         best_cost = {start_state: 0.0}
         came_from: dict[tuple[int, int, str], tuple[int, int, str] | None] = {start_state: None}
         distance_cache: dict[GridNode, float] = {}
@@ -315,7 +340,7 @@ class NetworkRouter:
             if cost_so_far > best_cost[state]:
                 continue
 
-            for step in self.move_set.steps:
+            for step in move_set.steps:
                 neighbor = GridNode(current.xidx + step.dx, current.yidx + step.dy)
                 if not self._node_in_bounds(neighbor):
                     continue
@@ -367,7 +392,7 @@ class NetworkRouter:
                     continue
                 best_cost[next_state] = next_cost
                 came_from[next_state] = state
-                heapq.heappush(open_heap, (next_cost + self._heuristic(neighbor, goal), next_cost, next_state))
+                heapq.heappush(open_heap, (next_cost + self._heuristic(neighbor, goal, move_set), next_cost, next_state))
 
         return _RouteAttempt(
             nodes=(),
@@ -838,8 +863,17 @@ class NetworkRouter:
     def _is_minor(self, edge: TopologyEdge) -> bool:
         return edge.config_name in _MINOR_CLASSES or edge.priority >= 7
 
-    def _heuristic(self, current: GridNode, goal: GridNode) -> float:
-        return abs(current.xidx - goal.xidx) + abs(current.yidx - goal.yidx)
+    def _heuristic(self, current: GridNode, goal: GridNode, move_set: CompiledMoveSet) -> float:
+        dx = abs(current.xidx - goal.xidx)
+        dy = abs(current.yidx - goal.yidx)
+        if any(abs(step.dx) == 1 and abs(step.dy) == 1 for step in move_set.steps):
+            return max(dx, dy)
+        return dx + dy
+
+    def _move_set_for_process(self, process: ProcessKind) -> CompiledMoveSet:
+        if self.move_set is not None:
+            return self.move_set
+        return self.process_move_sets.get(process, CompiledMoveSet.cardinal())
 
     def _reconstruct_path(
         self,
@@ -879,6 +913,18 @@ class _AllowedCellDecision:
 
 def _opposite(direction: str | None) -> str | None:
     return None if not direction else _OPPOSITE_DIRECTIONS[direction]
+
+
+def _catalog_supported_step_dirs(catalog: Any | None) -> frozenset[str]:
+    if catalog is None:
+        return frozenset()
+    if hasattr(catalog, "allowed_step_dirs"):
+        return frozenset(str(direction).upper() for direction in catalog.allowed_step_dirs()).intersection(_DIRECTION_STEPS)
+    try:
+        move_set = CompiledMoveSet.from_tile_catalog(catalog)
+    except TypeError:
+        return frozenset()
+    return frozenset(step.direction for step in move_set.steps)
 
 
 def _extend_failures(
@@ -1003,7 +1049,7 @@ def _edge_direction_from_node(edge: TopologyEdge, node_id: int) -> str | None:
 
 def _normalize_direction_token(value: Any) -> set[str]:
     if isinstance(value, int):
-        return set(_DIRECTION_STEPS)
+        return set(CARDINAL_DIRECTIONS)
     text = str(value).upper()
     aliases = {
         "NORTH": "N",

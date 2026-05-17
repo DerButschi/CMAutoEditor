@@ -53,6 +53,28 @@ def _catalog(*, include_four_way: bool = True):
     return CompiledTileCatalog.from_records(rows, process=ProcessKind.ROAD)
 
 
+def _fence_diagonal_catalog():
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    rows = [
+        {"direction": 0, "row": 0, "col": 0, "ur": (2, 3), "dl": (2, 3), "cost": 1.0},
+        {"direction": 1, "row": 0, "col": 1, "ul": (2, 3), "dr": (2, 3), "cost": 1.0},
+        {"direction": 2, "row": 1, "col": 0, "ur": (2, 3), "dl": (2, 3), "ul": (2, 3), "cost": 1.0},
+        {
+            "direction": 3,
+            "row": 1,
+            "col": 1,
+            "ur": (2, 3),
+            "dl": (2, 3),
+            "ul": (2, 3),
+            "dr": (2, 3),
+            "cost": 1.0,
+        },
+    ]
+    return CompiledTileCatalog.from_records(rows, process=ProcessKind.FENCE)
+
+
 def _route(edge_id, cells, *, priority=1, process=None, config_name="primary"):
     from terrain_extraction.osm_extraction.models import (
         GridCell,
@@ -97,6 +119,25 @@ def test_reserves_straight_bend_t_and_four_way_connection_unions() -> None:
     assert state.reserve_path(_route(4, ((1, 2), (1, 3)))).success
     assert state.required_dirs(GridCell(1, 2)) == frozenset({"E", "N", "S", "W"})
     assert state.intersection_kind_at(GridCell(1, 2)) == "four_way"
+
+
+def test_reserves_diagonal_connection_bits_and_intersections_for_fences() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+
+    state = LinearNetworkState(width=6, height=6, catalogs={ProcessKind.FENCE: _fence_diagonal_catalog()})
+
+    assert state.reserve_path(_route(1, ((0, 0), (1, 1), (2, 2)), process=ProcessKind.FENCE)).success
+    assert state.required_dirs(GridCell(1, 1)) == frozenset({"NE", "SW"})
+    assert state.intersection_kind_at(GridCell(1, 1)) == "straight"
+
+    assert state.reserve_path(_route(2, ((0, 2), (1, 1)), process=ProcessKind.FENCE)).success
+    assert state.required_dirs(GridCell(1, 1)) == frozenset({"NE", "NW", "SW"})
+    assert state.intersection_kind_at(GridCell(1, 1)) == "t_junction"
+
+    assert state.reserve_path(_route(3, ((1, 1), (2, 0)), process=ProcessKind.FENCE)).success
+    assert state.required_dirs(GridCell(1, 1)) == frozenset({"NE", "NW", "SE", "SW"})
+    assert state.intersection_kind_at(GridCell(1, 1)) == "four_way"
 
 
 def test_rejects_illegal_direction_union_without_mutating_state() -> None:
@@ -185,6 +226,32 @@ def test_tile_assignment_can_consume_state_derived_required_directions() -> None
     center = [placement for placement in result.placements if placement.cells == (GridCell(1, 1),)]
     assert len(center) == 1
     assert center[0].diagnostics["required_directions"] == ("E", "N", "S", "W")
+
+
+def test_tile_assignment_finalizes_representable_diagonal_fence_intersection() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import TileAssigner
+
+    catalog = _fence_diagonal_catalog()
+    state = LinearNetworkState(width=5, height=5, catalogs={ProcessKind.FENCE: catalog})
+    routes = (
+        _route(1, ((0, 0), (1, 1), (2, 2)), process=ProcessKind.FENCE, config_name="hedge"),
+        _route(2, ((0, 2), (1, 1), (2, 0)), process=ProcessKind.FENCE, config_name="hedge"),
+    )
+    for route in routes:
+        assert state.reserve_path(route).success
+
+    result = TileAssigner({ProcessKind.FENCE: catalog}, rng=np.random.default_rng(12)).assign(
+        routes,
+        linear_state=state,
+    )
+
+    center = next(placement for placement in result.placements if placement.cells == (GridCell(1, 1),))
+    assert result.success
+    assert center.diagnostics["required_directions"] == ("NE", "NW", "SE", "SW")
+    assert center.diagnostics["role"] == "intersection"
+    assert center.diagnostics["intersection"] is True
 
 
 def test_road_state_finalization_solves_compatible_side_signatures() -> None:

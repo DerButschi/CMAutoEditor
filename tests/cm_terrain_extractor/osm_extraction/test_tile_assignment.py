@@ -66,7 +66,10 @@ def test_catalog_variants_expose_side_signatures_and_identity() -> None:
 
 def test_compatible_neighbor_requires_exact_side_signature_match() -> None:
     from terrain_extraction.osm_extraction.models import ProcessKind
-    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, compatible_neighbor
+    from terrain_extraction.osm_extraction.tile_assignment import (
+        CompiledTileCatalog,
+        compatible_neighbor,
+    )
 
     catalog = CompiledTileCatalog.from_records(
         (
@@ -85,6 +88,31 @@ def test_compatible_neighbor_requires_exact_side_signature_match() -> None:
     assert not compatible_neighbor(matching, "E", wider)
     assert not compatible_neighbor(matching, "E", vertical)
     assert not compatible_neighbor(matching, "N", target)
+
+
+def test_diagonal_side_signatures_are_validated_for_state_components() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog, TileAssigner
+
+    catalog = CompiledTileCatalog.from_records(
+        (
+            {"direction": 0, "row": 0, "col": 0, "ur": ("wide",), "dl": ("narrow",), "cost": 0.1},
+            {"direction": 1, "row": 1, "col": 0, "ur": ("matched",), "dl": ("matched",), "cost": 1.0},
+        ),
+        process=ProcessKind.FENCE,
+    )
+    route = _route(1, ProcessKind.FENCE, ((0, 0), (1, 1), (2, 2)), config_name="hedge")
+    state = LinearNetworkState(width=4, height=4, catalogs={ProcessKind.FENCE: catalog})
+    assert state.reserve_path(route).success
+
+    result = TileAssigner({ProcessKind.FENCE: catalog}, rng=np.random.default_rng(12)).assign(
+        (route,),
+        linear_state=state,
+    )
+
+    assert result.success
+    assert [placement.diagnostics["tile_row"] for placement in result.placements] == [1, 1, 1]
 
 
 def test_intersection_anchor_uses_one_tile_with_unioned_directions() -> None:

@@ -43,9 +43,10 @@ def _graph(edges):
     )
 
 
-def _edge(edge_id, start, end, *, config_name="primary", priority=1):
+def _edge(edge_id, start, end, *, config_name="primary", priority=1, process=None):
     from terrain_extraction.osm_extraction.models import ProcessKind, TopologyEdge
 
+    process = ProcessKind.ROAD if process is None else process
     return TopologyEdge(
         edge_id=edge_id,
         start_node_id=start[0],
@@ -54,8 +55,39 @@ def _edge(edge_id, start, end, *, config_name="primary", priority=1):
         feature_ids=(f"road-{edge_id}",),
         source_indices=(edge_id,),
         config_name=config_name,
-        process=ProcessKind.ROAD,
+        process=process,
         priority=priority,
+    )
+
+
+def _compiled_catalog(process, rows):
+    from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
+
+    return CompiledTileCatalog.from_records(rows, process=process)
+
+
+def _cardinal_rows():
+    return (
+        {"direction": 0, "row": 0, "col": 0, "l": (2, 3), "r": (2, 3), "cost": 1.0},
+        {"direction": 1, "row": 0, "col": 1, "u": (2, 3), "d": (2, 3), "cost": 1.0},
+        {"direction": 2, "row": 1, "col": 0, "l": (2, 3), "u": (2, 3), "cost": 1.0},
+        {"direction": 3, "row": 1, "col": 1, "r": (2, 3), "u": (2, 3), "cost": 1.0},
+        {"direction": 4, "row": 1, "col": 2, "l": (2, 3), "d": (2, 3), "cost": 1.0},
+        {"direction": 5, "row": 1, "col": 3, "r": (2, 3), "d": (2, 3), "cost": 1.0},
+    )
+
+
+def _diagonal_rows():
+    return (
+        {"direction": 6, "row": 2, "col": 0, "ur": (2, 3), "dl": (2, 3), "cost": 0.2},
+        {"direction": 7, "row": 2, "col": 1, "ul": (2, 3), "dr": (2, 3), "cost": 0.2},
+    )
+
+
+def _has_diagonal_step(cells) -> bool:
+    return any(
+        abs(first.xidx - second.xidx) == 1 and abs(first.yidx - second.yidx) == 1
+        for first, second in zip(cells, cells[1:], strict=False)
     )
 
 
@@ -143,6 +175,88 @@ def test_diagonalish_route_prefers_source_line_spine_support() -> None:
     assert route.raster_spine.cells[-1] == GridCell(3, 2)
     assert set(route.raster_spine.cells).issubset(set(route.tile_cells))
     assert result.diagnostics["raster_spines"] == 1
+
+
+def test_diagonal_fence_routes_with_catalog_supported_diagonal_tiles() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+    from terrain_extraction.osm_extraction.tile_assignment import TileAssigner
+
+    catalog = _compiled_catalog(ProcessKind.FENCE, _diagonal_rows())
+    edge = _edge(0, (0, (4, 4)), (1, (28, 28)), process=ProcessKind.FENCE)
+
+    result = NetworkRouter(
+        grid_index=_grid(),
+        catalogs={ProcessKind.FENCE: catalog},
+        corridor_deviation_m=8.0,
+    ).route(_graph((edge,)))
+    route = result.routes[0]
+    assignment = TileAssigner({ProcessKind.FENCE: catalog}, rng=np.random.default_rng(12)).assign(
+        result.routes,
+        linear_state=result.linear_state,
+    )
+
+    assert route.success
+    assert route.tile_cells == (GridCell(0, 0), GridCell(1, 1), GridCell(2, 2), GridCell(3, 3))
+    assert assignment.success
+    assert {placement.diagnostics["required_directions"] for placement in assignment.placements} == {("NE", "SW")}
+
+
+def test_road_diagonal_source_remains_cardinal_without_diagonal_road_catalog() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    catalog = _compiled_catalog(ProcessKind.ROAD, _cardinal_rows())
+    edge = _edge(0, (0, (4, 4)), (1, (28, 28)))
+
+    route = NetworkRouter(
+        grid_index=_grid(),
+        catalogs={ProcessKind.ROAD: catalog},
+        corridor_deviation_m=16.0,
+    ).route(_graph((edge,))).routes[0]
+
+    assert route.success
+    assert not _has_diagonal_step(route.tile_cells)
+    assert len(route.tile_cells) > 4
+
+
+def test_road_diagonal_source_can_use_diagonal_when_road_catalog_supports_it() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    catalog = _compiled_catalog(ProcessKind.ROAD, _diagonal_rows())
+    edge = _edge(0, (0, (4, 4)), (1, (28, 28)))
+
+    route = NetworkRouter(
+        grid_index=_grid(),
+        catalogs={ProcessKind.ROAD: catalog},
+        corridor_deviation_m=8.0,
+    ).route(_graph((edge,))).routes[0]
+
+    assert route.success
+    assert route.tile_cells == (GridCell(0, 0), GridCell(1, 1), GridCell(2, 2), GridCell(3, 3))
+
+
+def test_fence_without_diagonal_catalog_falls_back_to_cardinal_routing() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    catalog = _compiled_catalog(ProcessKind.FENCE, _cardinal_rows())
+    edge = _edge(0, (0, (4, 4)), (1, (28, 28)), process=ProcessKind.FENCE)
+
+    result = NetworkRouter(
+        grid_index=_grid(),
+        catalogs={ProcessKind.FENCE: catalog},
+        corridor_deviation_m=16.0,
+    ).route(_graph((edge,)))
+    route = result.routes[0]
+
+    assert route.success
+    assert not _has_diagonal_step(route.tile_cells)
+    assert all(
+        not {"NE", "NW", "SE", "SW"}.intersection(result.linear_state.required_dirs(cell))
+        for cell in route.tile_cells
+    )
 
 
 def test_routes_around_blocked_occupancy_inside_corridor() -> None:
