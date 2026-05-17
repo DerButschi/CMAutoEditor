@@ -4,9 +4,13 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 from shapely.geometry import Polygon
 
 APP_DIR = Path(__file__).parents[3] / "cm_terrain_extractor_app"
+ROOT_DIR = Path(__file__).parents[3]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
 
@@ -41,8 +45,8 @@ def _feature(feature_id: str, geometry: Polygon, *, config_name: str = "houses")
 def _catalog_rows():
     return (
         {
-            "width": 1,
-            "height": 1,
+            "width": 2,
+            "height": 2,
             "row": 0,
             "col": 0,
             "direction": 0,
@@ -53,8 +57,8 @@ def _catalog_rows():
             "weight": 1.0,
         },
         {
-            "width": 2,
-            "height": 1,
+            "width": 4,
+            "height": 2,
             "row": 0,
             "col": 1,
             "direction": 0,
@@ -79,6 +83,57 @@ def _catalog_rows():
     )
 
 
+def test_catalog_width_height_match_profile_half_cell_units() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import (
+        BuildingCatalog,
+        _footprint_polygon_from_origin,
+    )
+
+    footprint = BuildingCatalog.from_records((_catalog_rows()[0],)).footprints[0]
+    polygon = _footprint_polygon_from_origin(_grid(), footprint, 8.0, 8.0, swapped=False)
+
+    assert polygon.bounds == pytest.approx((8.0, 8.0, 16.0, 16.0))
+    assert polygon.area == pytest.approx(64.0)
+
+
+def test_fitter_footprint_reconstruction_matches_profile_helper() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import (
+        BuildingCatalog,
+        _footprint_polygon_from_origin,
+    )
+
+    from profiles import get_building_outline_by_df_entry
+
+    profile_polygon, is_diagonal = get_building_outline_by_df_entry(
+        "residential_buildings",
+        "Independent Buildings",
+        "House",
+        "Building 1",
+        "Direction 1",
+        profile="cold_war",
+    )
+    record = {
+        "width": 2,
+        "height": 2,
+        "row": 0,
+        "col": 0,
+        "direction": 0,
+        "menu": "Independent Buildings",
+        "cat1": "House",
+        "cat2": "Building 1",
+        "is_diagonal": is_diagonal,
+    }
+    fitter_polygon = _footprint_polygon_from_origin(
+        _grid(),
+        BuildingCatalog.from_records((record,)).footprints[0],
+        0.0,
+        0.0,
+        swapped=False,
+    )
+
+    assert fitter_polygon.equals_exact(profile_polygon, tolerance=0.001)
+
+
 def test_simple_rectangle_fits_catalog_footprint_with_exact_iou() -> None:
     from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
     from terrain_extraction.osm_extraction.models import GridCell
@@ -95,7 +150,64 @@ def test_simple_rectangle_fits_catalog_footprint_with_exact_iou() -> None:
     assert result.dropped_count == 0
     assert result.placements[0].cells == (GridCell(1, 1), GridCell(2, 1))
     assert result.placements[0].diagnostics["iou"] == 1.0
+    assert result.placements[0].diagnostics["selected_footprint_polygon"].area == pytest.approx(128.0)
+    assert result.placements[0].diagnostics["output_xidx"] == 0.5
+    assert result.placements[0].diagnostics["output_yidx"] == 0.5
     assert result.placements[0].cm_type.cat2 == "Long House"
+
+
+def test_small_rectangle_does_not_expand_to_two_by_two_full_cells() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+    from terrain_extraction.osm_extraction.models import GridCell
+
+    grid = _grid()
+    outline = Polygon([(8, 8), (16, 8), (16, 16), (8, 16)])
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+        (_feature("small", outline),),
+        catalogs={"houses": _catalog_rows()},
+    )
+
+    assert result.placed_count == 1
+    assert result.placements[0].cells == (GridCell(1, 1),)
+    assert result.placements[0].diagnostics["selected_footprint_polygon"].equals_exact(outline, tolerance=0.001)
+    assert result.placements[0].diagnostics["module_count"] == 1
+    assert result.placements[0].cm_type.cat2 == "Small House"
+
+
+def test_diagonal_outline_can_select_diagonal_catalog_candidate() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+    from terrain_extraction.osm_extraction.models import GridKind
+
+    grid = _grid()
+    outline = Polygon([(8, 16), (16, 8), (24, 16), (16, 24)])
+    catalog = (
+        {
+            "width": 2,
+            "height": 2,
+            "row": 0,
+            "col": 2,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": "Diagonal House",
+            "is_diagonal": True,
+            "is_modular": False,
+            "weight": 1.0,
+        },
+        _catalog_rows()[0],
+    )
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+        (_feature("diagonal", outline),),
+        catalogs={"houses": catalog},
+    )
+
+    assert result.placed_count == 1
+    assert result.placements[0].grid_kind is GridKind.DIAGONAL
+    assert result.placements[0].cm_type.cat2 == "Diagonal House"
+    assert result.placements[0].diagnostics["footprint_orientation_class"] == "diagonal"
+    assert result.placements[0].diagnostics["iou"] == 1.0
 
 
 def test_complex_modular_footprint_is_not_collapsed_to_one_rectangle() -> None:
@@ -164,8 +276,8 @@ def test_equivalent_building_candidates_use_profile_weights_for_variation() -> N
     outline = Polygon([(8, 8), (16, 8), (16, 16), (8, 16)])
     catalog = (
         {
-            "width": 1,
-            "height": 1,
+            "width": 2,
+            "height": 2,
             "row": 0,
             "col": 0,
             "direction": 0,
@@ -176,8 +288,8 @@ def test_equivalent_building_candidates_use_profile_weights_for_variation() -> N
             "weight": 0.0,
         },
         {
-            "width": 1,
-            "height": 1,
+            "width": 2,
+            "height": 2,
             "row": 0,
             "col": 1,
             "direction": 0,
@@ -195,6 +307,85 @@ def test_equivalent_building_candidates_use_profile_weights_for_variation() -> N
     )
 
     assert result.placements[0].cm_type.cat2 == "Weighted House"
+
+
+def test_candidate_scoring_uses_actual_footprint_iou_not_reserved_cells() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+
+    grid = _grid()
+    outline = Polygon([(8, 8), (16, 8), (16, 16), (8, 16)])
+    catalog = (
+        {
+            "width": 2,
+            "height": 2,
+            "row": 0,
+            "col": 0,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": "Exact House",
+            "is_modular": False,
+            "weight": 1.0,
+        },
+        {
+            "width": 1,
+            "height": 1,
+            "row": 0,
+            "col": 1,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": "Tiny House",
+            "is_modular": False,
+            "weight": 1.0,
+        },
+    )
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+        (_feature("actual-iou", outline),),
+        catalogs={"houses": catalog},
+    )
+
+    assert result.placements[0].cm_type.cat2 == "Exact House"
+    assert result.placements[0].diagnostics["iou"] == 1.0
+
+
+def test_geometric_road_overlap_penalty_avoids_half_road_cover() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        GridCell,
+        GridKind,
+        LayerKind,
+        PlacementRecord,
+    )
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    grid = _grid()
+    occupancy = OccupancyModel.from_grid_index(grid)
+    occupancy.place(
+        PlacementRecord(
+            layer=LayerKind.LINEAR_SURFACE,
+            grid_kind=GridKind.NORMAL,
+            cells=(GridCell(0, 1),),
+            config_name="road",
+            feature_id="road-1",
+            priority=1,
+            cm_type=CMType(menu="Roads", cat1="Road"),
+            score=1.0,
+        ),
+        object_id="road-1",
+    )
+    outline = Polygon([(4, 8), (12, 8), (12, 16), (4, 16)])
+
+    result = BuildingFitter(grid, occupancy=occupancy, rng=np.random.default_rng(7)).fit(
+        (_feature("road-edge", outline),),
+        catalogs={"houses": (_catalog_rows()[0],)},
+    )
+
+    selected = result.placements[0].diagnostics["selected_footprint_polygon"]
+    assert selected.intersection(grid.cell_polygon(GridCell(0, 1))).area == pytest.approx(0.0)
+    assert result.placements[0].diagnostics["road_overlap_area_m2"] == 0.0
 
 
 def test_candidate_generation_is_bounded_and_records_fallback_diagnostics() -> None:

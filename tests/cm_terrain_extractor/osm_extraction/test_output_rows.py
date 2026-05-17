@@ -7,6 +7,9 @@ import pandas as pd
 import pytest
 
 APP_DIR = Path(__file__).parents[3] / "cm_terrain_extractor_app"
+ROOT_DIR = Path(__file__).parents[3]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
 
@@ -24,6 +27,7 @@ def _placement(
     feature_id=None,
     tile_id=None,
     grid_kind=None,
+    diagnostics=None,
 ):
     from terrain_extraction.osm_extraction.models import CMType, GridKind, PlacementRecord
 
@@ -36,6 +40,7 @@ def _placement(
         priority=priority,
         cm_type=CMType(menu=menu, cat1=cat1, cat2=cat2, direction=direction, tile_id=tile_id),
         score=1.0,
+        diagnostics=diagnostics or {},
     )
 
 
@@ -178,6 +183,73 @@ def test_validation_rejects_duplicate_layer_rows_and_building_road_collisions() 
         placements_to_output_rows(duplicate_ground)
     with pytest.raises(OutputRowValidationError, match="building-road collision"):
         placements_to_output_rows(building_on_road)
+
+
+def test_building_output_rows_use_selected_sub_square_coordinates() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    rows = placements_to_output_rows(
+        (
+            _placement(
+                layer=LayerKind.BUILDING,
+                cell=GridCell(1, 1),
+                config_name="houses",
+                priority=5,
+                menu="Independent Buildings",
+                cat1="House",
+                cat2="Building 1",
+                direction="Direction 1",
+                grid_kind=GridKind.SUB_SQUARE,
+                diagnostics={"output_xidx": 0.5, "output_yidx": 0.5},
+            ),
+        ),
+        include_internal=True,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["xidx"] == 0.5
+    assert rows[0]["yidx"] == 0.5
+    assert rows[0]["_cell_xidx"] == 1
+    assert rows[0]["_cell_yidx"] == 1
+    assert rows[0]["_grid_kind"] == GridKind.SUB_SQUARE.value
+
+
+def test_building_output_rows_use_selected_diagonal_coordinates() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    rows = placements_to_output_rows(
+        (
+            _placement(
+                layer=LayerKind.BUILDING,
+                cell=GridCell(1, 1),
+                config_name="houses",
+                priority=5,
+                menu="Independent Buildings",
+                cat1="House",
+                cat2="Building 7",
+                direction="Direction 1",
+                grid_kind=GridKind.DIAGONAL,
+                diagnostics={"output_xidx": 0.5, "output_yidx": 1.0},
+            ),
+        )
+    )
+
+    assert rows == (
+        {
+            "xidx": 0.5,
+            "yidx": 1,
+            "z": -1,
+            "menu": "Independent Buildings",
+            "cat1": "House",
+            "cat2": "Building 7",
+            "direction": "Direction 1",
+            "id": -1,
+            "name": "houses",
+            "priority": 5,
+        },
+    )
 
 
 def test_pipeline_assembles_output_rows_without_migration_flag() -> None:

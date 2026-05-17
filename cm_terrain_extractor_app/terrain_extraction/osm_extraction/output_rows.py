@@ -142,10 +142,9 @@ def _rows_from_placements(placements: tuple[PlacementRecord, ...]) -> tuple[dict
     }
     rows: list[dict[str, Any]] = []
     for source_order, placement in enumerate(placements):
-        for cell in placement.cells:
+        for cell, xidx, yidx in _row_entries_for_placement(placement):
             if _is_default_placement(placement) and (placement.layer, cell) in non_default_cells:
                 continue
-            xidx, yidx = _row_coordinates(cell, placement.grid_kind)
             rows.append(
                 {
                     "xidx": xidx,
@@ -167,6 +166,15 @@ def _rows_from_placements(placements: tuple[PlacementRecord, ...]) -> tuple[dict
                 }
             )
     return tuple(sorted(rows, key=_row_sort_key))
+
+
+def _row_entries_for_placement(placement: PlacementRecord) -> tuple[tuple[GridCell, int | float, int | float], ...]:
+    if placement.layer is LayerKind.BUILDING:
+        output_xidx = placement.diagnostics.get("output_xidx")
+        output_yidx = placement.diagnostics.get("output_yidx")
+        if output_xidx is not None and output_yidx is not None and placement.cells:
+            return ((placement.cells[0], _clean_number(float(output_xidx)), _clean_number(float(output_yidx))),)
+    return tuple((cell, *_row_coordinates(cell, placement.grid_kind)) for cell in placement.cells)
 
 
 def _validate_profile_labels(rows: tuple[Mapping[str, Any], ...]) -> None:
