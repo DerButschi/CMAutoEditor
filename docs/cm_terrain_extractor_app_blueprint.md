@@ -96,7 +96,7 @@ The processor should:
 7. Return a CSV-shaped dataframe with `x`, `y`, `z`, `menu`, `cat1`, `cat2`, `direction`, `id`, `name`, and `priority`.
 8. Reconstruct preview geometries for non-default processed entries.
 
-Network processors build graph representations of OSM linear features, snap paths to valid CM tile grids, and assign road/rail/stream/fence tile types. Building processors collect outlines, decompose or match them to known CM building footprints from `profiles`, and write tile rows.
+Network processors build graph representations of OSM linear features, snap paths to valid CM tile grids, and assign road/rail/stream/fence tile types. Linear tile assignment preserves mandatory side-connection compatibility between neighboring tiles. State components are solved by graph shape: path DP for paths, cycle DP for simple cycles, tree DP for tree components, and a bounded configurable cutset solver for small loopy components. Components above the configured `tile_assignment_solver` limits report structured diagnostics and are contained by the pipeline's `warn`/`strict` validation mode instead of running unbounded exponential search. Building processors collect outlines, decompose or match them to known CM building footprints from `profiles`, and write tile rows.
 
 ## UI Blueprint
 

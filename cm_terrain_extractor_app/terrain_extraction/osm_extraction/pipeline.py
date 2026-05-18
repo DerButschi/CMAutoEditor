@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import numpy as np
-from terrain_extraction.osm_extraction.config_schema import ExtractionConfig, RoadValidationMode
+from terrain_extraction.osm_extraction.config_schema import (
+    ExtractionConfig,
+    RoadValidationMode,
+    TileAssignmentSolverConfig,
+)
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
     CMType,
@@ -150,6 +154,7 @@ class ExtractionPipeline:
                 routes=routing.routes,
                 catalogs=linear_catalogs,
                 linear_state=routing.linear_state,
+                solver_config=getattr(config, "tile_assignment_solver", TileAssignmentSolverConfig()),
             )
             tile_assignment = tile_result.diagnostics["tile_assignment"]
             tile_failures = _normalize_tile_assignment_failures(tile_assignment)
@@ -297,10 +302,14 @@ class ExtractionPipeline:
         routes: tuple[Any, ...],
         catalogs: Mapping[Any, Any],
         linear_state: Any = None,
+        solver_config: TileAssignmentSolverConfig | None = None,
     ) -> ExtractionResult:
         from terrain_extraction.osm_extraction.tile_assignment import TileAssigner
 
-        assignment = TileAssigner(catalogs, rng=self.context.rng).assign(routes, linear_state=linear_state)
+        assignment = TileAssigner(catalogs, rng=self.context.rng, solver_config=solver_config).assign(
+            routes,
+            linear_state=linear_state,
+        )
         self.context.progress("tile_assignment", 1.0, "Tile assignment complete")
         return ExtractionResult(
             placements=assignment.placements,

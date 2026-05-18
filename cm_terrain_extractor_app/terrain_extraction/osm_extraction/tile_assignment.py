@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from itertools import combinations, product
 from typing import Any
 
 import numpy as np
+from terrain_extraction.osm_extraction.config_schema import TileAssignmentSolverConfig
 from terrain_extraction.osm_extraction.direction_resolution import (
     DIRECTION_ORDER,
     OPPOSITE_DIRECTIONS,
@@ -191,6 +194,14 @@ class _StateAdjacency:
 
 
 @dataclass(frozen=True, slots=True)
+class _StateComponentResult:
+    selection: dict[GridCell, TileVariant] | None
+    solver_used: str
+    failure_reason: str | None = None
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
 class _BranchedSearchFrame:
     action: str
     cost: float
@@ -366,9 +377,11 @@ class TileAssigner:
         catalogs: Mapping[ProcessKind, CompiledTileCatalog],
         *,
         rng: np.random.Generator | None = None,
+        solver_config: TileAssignmentSolverConfig | None = None,
     ) -> None:
         self.catalogs = dict(catalogs)
         self.rng = rng or np.random.default_rng(0)
+        self.solver_config = solver_config or TileAssignmentSolverConfig()
 
     def assign(self, routes: Sequence[RouteRecord], *, linear_state: Any = None) -> TileAssignmentResult:
         successful_routes = tuple(route for route in routes if route.success and route.nodes)
@@ -502,7 +515,7 @@ class TileAssigner:
             )
             options_by_cell[spec.cell] = _StateCellOptions(spec=resolved_spec, candidates=candidates)
 
-        selected_variants, compatibility_failures = self._solve_state_components(
+        selected_variants, compatibility_failures, component_diagnostics = self._solve_state_components(
             options_by_cell,
             state_required_dirs_by_cell,
         )
@@ -535,6 +548,7 @@ class TileAssigner:
                 ),
                 "state_finalized_cells": len(placements),
                 "state_finalizer": True,
+                "state_component_diagnostics": component_diagnostics,
             },
         )
 
@@ -761,9 +775,14 @@ class TileAssigner:
         final_keys = [key for key in costs if key[0] == final_column]
         if not final_keys:
             return None
-        min_cost = min(costs[key] for key in final_keys)
-        best_keys = sorted(key for key in final_keys if math.isclose(costs[key], min_cost))
-        key = best_keys[int(self.rng.integers(0, len(best_keys)))] if len(best_keys) > 1 else best_keys[0]
+        key = min(
+            final_keys,
+            key=lambda item: (
+                costs[item],
+                _variant_sort_key(candidate_columns[item[0]][item[1]]),
+                item,
+            ),
+        )
         selected: list[TileVariant] = []
         while key is not None:
             selected.append(candidate_columns[key[0]][key[1]])
@@ -775,43 +794,112 @@ class TileAssigner:
         self,
         options_by_cell: Mapping[GridCell, _StateCellOptions],
         state_required_dirs_by_cell: Mapping[GridCell, frozenset[str]],
-    ) -> tuple[dict[GridCell, TileVariant], tuple[Mapping[str, Any], ...]]:
+    ) -> tuple[dict[GridCell, TileVariant], tuple[Mapping[str, Any], ...], tuple[Mapping[str, Any], ...]]:
         if not options_by_cell:
-            return {}, ()
+            return {}, (), ()
 
         edges = _state_adjacencies(options_by_cell, state_required_dirs_by_cell)
         components = _state_components(options_by_cell, edges)
         edges_by_component = _edges_by_component(components, edges)
         selected: dict[GridCell, TileVariant] = {}
         failures: list[Mapping[str, Any]] = []
+        diagnostics: list[Mapping[str, Any]] = []
 
         for component in components:
             component_edges = edges_by_component[frozenset(component)]
-            component_selection = self._solve_state_component(component, component_edges, options_by_cell)
-            if component_selection is None:
-                failures.append(_state_component_failure(component, component_edges, options_by_cell))
+            started_at = time.perf_counter()
+            result = self._solve_state_component(component, component_edges, options_by_cell)
+            component_diagnostics = {
+                **_state_component_diagnostics(component, component_edges, options_by_cell),
+                **dict(result.details),
+                "solver_used": result.solver_used,
+                "elapsed_ms": round((time.perf_counter() - started_at) * 1000.0, 3),
+            }
+            diagnostics.append(component_diagnostics)
+            if result.selection is None:
+                failures.append(
+                    _state_component_failure(
+                        component,
+                        component_edges,
+                        options_by_cell,
+                        reason=result.failure_reason or "no_compatible_tile_component",
+                        diagnostics=component_diagnostics,
+                    )
+                )
                 continue
-            selected.update(component_selection)
-        return selected, tuple(failures)
+            selected.update(result.selection)
+        return selected, tuple(failures), tuple(diagnostics)
 
     def _solve_state_component(
         self,
         component: tuple[GridCell, ...],
         edges: tuple[_StateAdjacency, ...],
         options_by_cell: Mapping[GridCell, _StateCellOptions],
-    ) -> dict[GridCell, TileVariant] | None:
+    ) -> _StateComponentResult:
+        candidate_product_log10 = _candidate_product_log10(component, options_by_cell)
         if len(component) == 1:
-            return {component[0]: self._choose_candidate(options_by_cell[component[0]].candidates)}
+            return _StateComponentResult(
+                selection={component[0]: self._choose_candidate(options_by_cell[component[0]].candidates)},
+                solver_used="single_cell",
+            )
 
         ordered_path = _ordered_simple_component_path(component, edges)
         if ordered_path is not None:
-            return self._solve_state_path_component(ordered_path, options_by_cell)
+            selection = self._solve_state_path_component(ordered_path, options_by_cell)
+            return _StateComponentResult(
+                selection=selection,
+                solver_used="path_dp",
+                failure_reason=None if selection is not None else "no_compatible_tile_component",
+            )
 
         ordered_cycle = _ordered_simple_component_cycle(component, edges)
         if ordered_cycle is not None:
-            return self._solve_state_cycle_component(ordered_cycle, options_by_cell)
+            selection = self._solve_state_cycle_component(ordered_cycle, options_by_cell)
+            return _StateComponentResult(
+                selection=selection,
+                solver_used="cycle_dp",
+                failure_reason=None if selection is not None else "no_compatible_tile_component",
+            )
 
-        return self._solve_state_branched_component(component, edges, options_by_cell)
+        if _is_tree_component(component, edges):
+            selection = self._solve_state_tree_component(component, edges, options_by_cell)
+            return _StateComponentResult(
+                selection=selection,
+                solver_used="tree_dp",
+                failure_reason=None if selection is not None else "no_compatible_tile_component",
+            )
+
+        cycle_count = _cycle_count(component, edges)
+        if cycle_count <= self.solver_config.max_cutset_cycle_rank:
+            cutset = self._solve_state_cutset_component(component, edges, options_by_cell)
+            if cutset.selection is not None or cutset.failure_reason == "no_compatible_tile_component":
+                return cutset
+
+        if (
+            len(component) <= self.solver_config.tiny_exact_max_cells
+            and candidate_product_log10 <= self.solver_config.tiny_exact_candidate_product_log10
+        ):
+            selection = self._solve_state_branched_component(component, edges, options_by_cell)
+            return _StateComponentResult(
+                selection=selection,
+                solver_used="tiny_exact",
+                failure_reason=None if selection is not None else "no_compatible_tile_component",
+            )
+
+        return _StateComponentResult(
+            selection=None,
+            solver_used="unresolved",
+            failure_reason="component_solver_limit_exceeded",
+            details={
+                "solver_limit": {
+                    "max_cutset_cycle_rank": self.solver_config.max_cutset_cycle_rank,
+                    "max_cutset_vertices": self.solver_config.max_cutset_vertices,
+                    "max_cutset_candidate_product_log10": self.solver_config.max_cutset_candidate_product_log10,
+                    "tiny_exact_max_cells": self.solver_config.tiny_exact_max_cells,
+                    "tiny_exact_candidate_product_log10": self.solver_config.tiny_exact_candidate_product_log10,
+                }
+            },
+        )
 
     def _solve_state_path_component(
         self,
@@ -834,7 +922,6 @@ class TileAssigner:
         first_candidates = options_by_cell[first_cell].candidates
         best: dict[GridCell, TileVariant] | None = None
         best_cost = math.inf
-        tie_count = 0
 
         for first_variant in first_candidates:
             candidate_columns = [(first_variant,)]
@@ -855,12 +942,148 @@ class TileAssigner:
             if path_cost < best_cost and not math.isclose(path_cost, best_cost):
                 best = dict(zip(ordered_cells, selected, strict=True))
                 best_cost = path_cost
-                tie_count = 1
             elif math.isclose(path_cost, best_cost):
-                tie_count += 1
-                if int(self.rng.integers(0, tie_count)) == 0:
-                    best = dict(zip(ordered_cells, selected, strict=True))
+                candidate = dict(zip(ordered_cells, selected, strict=True))
+                if best is None or _selection_sort_key(candidate) < _selection_sort_key(best):
+                    best = candidate
         return best
+
+    def _solve_state_tree_component(
+        self,
+        component: tuple[GridCell, ...],
+        edges: tuple[_StateAdjacency, ...],
+        options_by_cell: Mapping[GridCell, _StateCellOptions],
+        *,
+        fixed_variants: Mapping[GridCell, TileVariant] | None = None,
+    ) -> dict[GridCell, TileVariant] | None:
+        fixed_variants = fixed_variants or {}
+        component_set = frozenset(component)
+        tree_edges = tuple(edge for edge in edges if edge.first in component_set and edge.second in component_set)
+        neighbors = _state_neighbor_edges(tree_edges)
+        root = sorted(
+            component,
+            key=lambda cell: (-len(neighbors.get(cell, ())), _cell_sort_key(cell)),
+        )[0]
+        traversal = _tree_traversal(component, neighbors, root)
+        if traversal is None:
+            return None
+        parent_edge, children, order = traversal
+
+        fixed_edges_by_cell = _fixed_edges_by_cell(component_set, edges, fixed_variants)
+        costs: dict[tuple[GridCell, int], float] = {}
+        argmins: dict[tuple[GridCell, int, GridCell], int] = {}
+        for cell in reversed(order):
+            for variant_index, variant in enumerate(options_by_cell[cell].candidates):
+                if not all(
+                    _state_edge_compatible(cell, variant, edge, fixed_variant)
+                    for edge, fixed_variant in fixed_edges_by_cell.get(cell, ())
+                ):
+                    continue
+                total = variant.cost
+                valid = True
+                for child in sorted(children[cell], key=_cell_sort_key):
+                    edge = parent_edge[child]
+                    best_child = _best_child_state(cell, variant, child, edge, options_by_cell, costs)
+                    if best_child is None:
+                        valid = False
+                        break
+                    total += best_child[0]
+                    argmins[(cell, variant_index, child)] = best_child[1]
+                if valid:
+                    costs[(cell, variant_index)] = total
+
+        root_options = [
+            (costs[(root, index)], index)
+            for index in range(len(options_by_cell[root].candidates))
+            if (root, index) in costs
+        ]
+        if not root_options:
+            return None
+        _root_cost, root_index = min(
+            root_options,
+            key=lambda item: (
+                item[0],
+                _variant_sort_key(options_by_cell[root].candidates[item[1]]),
+                item[1],
+            ),
+        )
+        selected: dict[GridCell, TileVariant] = {}
+        stack = [(root, root_index)]
+        while stack:
+            cell, variant_index = stack.pop()
+            selected[cell] = options_by_cell[cell].candidates[variant_index]
+            for child in sorted(children[cell], key=_cell_sort_key, reverse=True):
+                stack.append((child, argmins[(cell, variant_index, child)]))
+        return selected
+
+    def _solve_state_cutset_component(
+        self,
+        component: tuple[GridCell, ...],
+        edges: tuple[_StateAdjacency, ...],
+        options_by_cell: Mapping[GridCell, _StateCellOptions],
+    ) -> _StateComponentResult:
+        candidate_vertices = _cutset_candidate_vertices(component, edges)
+        max_vertices = min(self.solver_config.max_cutset_vertices, len(candidate_vertices))
+        best: dict[GridCell, TileVariant] | None = None
+        best_cost = math.inf
+        saw_bounded_cutset = False
+        rejected_cutsets = 0
+        for cutset_size in range(1, max_vertices + 1):
+            for cutset in combinations(candidate_vertices, cutset_size):
+                if not _removal_leaves_forest(component, edges, frozenset(cutset)):
+                    continue
+                cutset_product_log10 = _candidate_product_log10(cutset, options_by_cell)
+                if cutset_product_log10 > self.solver_config.max_cutset_candidate_product_log10:
+                    rejected_cutsets += 1
+                    continue
+                saw_bounded_cutset = True
+                cutset_columns = tuple(options_by_cell[cell].candidates for cell in cutset)
+                for variants in product(*cutset_columns):
+                    fixed_variants = dict(zip(cutset, variants, strict=True))
+                    if not _selection_edges_compatible(fixed_variants, edges):
+                        continue
+                    selected = dict(fixed_variants)
+                    valid = True
+                    for forest_component in _forest_components_after_cutset(component, edges, frozenset(cutset)):
+                        tree_selection = self._solve_state_tree_component(
+                            forest_component,
+                            edges,
+                            options_by_cell,
+                            fixed_variants=fixed_variants,
+                        )
+                        if tree_selection is None:
+                            valid = False
+                            break
+                        selected.update(tree_selection)
+                    if not valid or not _selection_edges_compatible(selected, edges):
+                        continue
+                    total_cost = sum(variant.cost for variant in selected.values())
+                    if best is None or (
+                        total_cost,
+                        _selection_sort_key(selected),
+                    ) < (
+                        best_cost,
+                        _selection_sort_key(best),
+                    ):
+                        best = selected
+                        best_cost = total_cost
+        if best is not None:
+            return _StateComponentResult(selection=best, solver_used="cutset_dp")
+        if saw_bounded_cutset:
+            return _StateComponentResult(
+                selection=None,
+                solver_used="cutset_dp",
+                failure_reason="no_compatible_tile_component",
+            )
+        return _StateComponentResult(
+            selection=None,
+            solver_used="unresolved",
+            failure_reason="component_solver_limit_exceeded",
+            details={
+                "cutset_candidate_vertices": tuple((cell.xidx, cell.yidx) for cell in candidate_vertices),
+                "rejected_cutsets_over_candidate_limit": rejected_cutsets,
+            },
+        )
 
     def _solve_state_branched_component(
         self,
@@ -879,9 +1102,7 @@ class TileAssigner:
     def _choose_candidate(self, candidates: tuple[TileVariant, ...]) -> TileVariant:
         min_cost = min(candidate.cost for candidate in candidates)
         best = tuple(candidate for candidate in candidates if math.isclose(candidate.cost, min_cost))
-        if len(best) == 1:
-            return best[0]
-        return best[int(self.rng.integers(0, len(best)))]
+        return min(best, key=_variant_sort_key)
 
 
 def _records_from_any(records: Iterable[Mapping[str, Any]] | Any) -> tuple[Mapping[str, Any], ...]:
@@ -959,6 +1180,198 @@ def _state_neighbor_edges(edges: tuple[_StateAdjacency, ...]) -> dict[GridCell, 
     }
 
 
+def _state_component_diagnostics(
+    component: tuple[GridCell, ...],
+    edges: tuple[_StateAdjacency, ...],
+    options_by_cell: Mapping[GridCell, _StateCellOptions],
+) -> Mapping[str, Any]:
+    neighbors = _state_neighbor_edges(edges)
+    degrees = {cell: len(neighbors.get(cell, ())) for cell in component}
+    return {
+        "component_size": len(component),
+        "edge_count": len(edges),
+        "max_degree": max(degrees.values(), default=0),
+        "is_path": _ordered_simple_component_path(component, edges) is not None,
+        "is_cycle": _ordered_simple_component_cycle(component, edges) is not None,
+        "is_tree": _is_tree_component(component, edges),
+        "cycle_count": _cycle_count(component, edges),
+        "candidate_product_log10": round(_candidate_product_log10(component, options_by_cell), 3),
+    }
+
+
+def _cycle_count(component: tuple[GridCell, ...], edges: tuple[_StateAdjacency, ...]) -> int:
+    return max(0, len(edges) - len(component) + 1)
+
+
+def _candidate_product_log10(
+    component: Iterable[GridCell],
+    options_by_cell: Mapping[GridCell, _StateCellOptions],
+) -> float:
+    return sum(math.log10(len(options_by_cell[cell].candidates)) for cell in component)
+
+
+def _is_tree_component(component: tuple[GridCell, ...], edges: tuple[_StateAdjacency, ...]) -> bool:
+    return len(component) > 1 and len(edges) == len(component) - 1
+
+
+def _fixed_edges_by_cell(
+    component: frozenset[GridCell],
+    edges: tuple[_StateAdjacency, ...],
+    fixed_variants: Mapping[GridCell, TileVariant],
+) -> dict[GridCell, tuple[tuple[_StateAdjacency, TileVariant], ...]]:
+    result: dict[GridCell, list[tuple[_StateAdjacency, TileVariant]]] = {}
+    for edge in edges:
+        if edge.first in component and edge.second in fixed_variants:
+            result.setdefault(edge.first, []).append((edge, fixed_variants[edge.second]))
+        elif edge.second in component and edge.first in fixed_variants:
+            result.setdefault(edge.second, []).append((edge, fixed_variants[edge.first]))
+    return {cell: tuple(items) for cell, items in result.items()}
+
+
+def _tree_traversal(
+    component: tuple[GridCell, ...],
+    neighbors: Mapping[GridCell, tuple[tuple[GridCell, _StateAdjacency], ...]],
+    root: GridCell,
+) -> tuple[dict[GridCell, _StateAdjacency], dict[GridCell, list[GridCell]], list[GridCell]] | None:
+    parent: dict[GridCell, GridCell | None] = {root: None}
+    parent_edge: dict[GridCell, _StateAdjacency] = {}
+    children: dict[GridCell, list[GridCell]] = {cell: [] for cell in component}
+    order: list[GridCell] = []
+    stack = [root]
+    while stack:
+        cell = stack.pop()
+        order.append(cell)
+        for neighbor, edge in reversed(neighbors.get(cell, ())):
+            if neighbor == parent.get(cell):
+                continue
+            parent[neighbor] = cell
+            parent_edge[neighbor] = edge
+            children[cell].append(neighbor)
+            stack.append(neighbor)
+    if len(parent) != len(component):
+        return None
+    return parent_edge, children, order
+
+
+def _best_child_state(
+    cell: GridCell,
+    variant: TileVariant,
+    child: GridCell,
+    edge: _StateAdjacency,
+    options_by_cell: Mapping[GridCell, _StateCellOptions],
+    costs: Mapping[tuple[GridCell, int], float],
+) -> tuple[float, int] | None:
+    best_child: tuple[float, int] | None = None
+    for child_index, child_variant in enumerate(options_by_cell[child].candidates):
+        child_key = (child, child_index)
+        if child_key not in costs or not _state_edge_compatible(cell, variant, edge, child_variant):
+            continue
+        child_cost = costs[child_key]
+        candidate_key = (child_cost, _variant_sort_key(child_variant), child_index)
+        if best_child is None:
+            best_child = (child_cost, child_index)
+            continue
+        best_variant = options_by_cell[child].candidates[best_child[1]]
+        if candidate_key < (best_child[0], _variant_sort_key(best_variant), best_child[1]):
+            best_child = (child_cost, child_index)
+    return best_child
+
+
+def _cutset_candidate_vertices(
+    component: tuple[GridCell, ...],
+    edges: tuple[_StateAdjacency, ...],
+) -> tuple[GridCell, ...]:
+    parents = {cell: cell for cell in component}
+    non_tree_edges = []
+    for edge in sorted(edges, key=_state_edge_sort_key):
+        first_root = _find_parent(parents, edge.first)
+        second_root = _find_parent(parents, edge.second)
+        if first_root == second_root:
+            non_tree_edges.append(edge)
+            continue
+        parents[second_root] = first_root
+    return tuple(sorted({cell for edge in non_tree_edges for cell in (edge.first, edge.second)}, key=_cell_sort_key))
+
+
+def _find_parent(parents: dict[GridCell, GridCell], cell: GridCell) -> GridCell:
+    while parents[cell] != cell:
+        parents[cell] = parents[parents[cell]]
+        cell = parents[cell]
+    return cell
+
+
+def _removal_leaves_forest(
+    component: tuple[GridCell, ...],
+    edges: tuple[_StateAdjacency, ...],
+    cutset: frozenset[GridCell],
+) -> bool:
+    remaining = tuple(cell for cell in component if cell not in cutset)
+    if not remaining:
+        return True
+    remaining_edges = tuple(edge for edge in edges if edge.first not in cutset and edge.second not in cutset)
+    return len(remaining_edges) == len(remaining) - len(_components_from_edges(remaining, remaining_edges))
+
+
+def _forest_components_after_cutset(
+    component: tuple[GridCell, ...],
+    edges: tuple[_StateAdjacency, ...],
+    cutset: frozenset[GridCell],
+) -> tuple[tuple[GridCell, ...], ...]:
+    remaining = tuple(cell for cell in component if cell not in cutset)
+    remaining_edges = tuple(edge for edge in edges if edge.first not in cutset and edge.second not in cutset)
+    return _components_from_edges(remaining, remaining_edges)
+
+
+def _components_from_edges(
+    cells: tuple[GridCell, ...],
+    edges: tuple[_StateAdjacency, ...],
+) -> tuple[tuple[GridCell, ...], ...]:
+    neighbors: dict[GridCell, set[GridCell]] = {cell: set() for cell in cells}
+    for edge in edges:
+        if edge.first in neighbors and edge.second in neighbors:
+            neighbors[edge.first].add(edge.second)
+            neighbors[edge.second].add(edge.first)
+    remaining = set(cells)
+    components = []
+    while remaining:
+        start = min(remaining, key=_cell_sort_key)
+        stack = [start]
+        component = set()
+        remaining.remove(start)
+        while stack:
+            cell = stack.pop()
+            component.add(cell)
+            for neighbor in sorted(neighbors[cell], key=_cell_sort_key, reverse=True):
+                if neighbor in remaining:
+                    remaining.remove(neighbor)
+                    stack.append(neighbor)
+        components.append(tuple(sorted(component, key=_cell_sort_key)))
+    return tuple(components)
+
+
+def _selection_edges_compatible(
+    selection: Mapping[GridCell, TileVariant],
+    edges: tuple[_StateAdjacency, ...],
+) -> bool:
+    return all(
+        edge.first not in selection
+        or edge.second not in selection
+        or compatible_neighbor(selection[edge.first], edge.direction, selection[edge.second])
+        for edge in edges
+    )
+
+
+def _selection_sort_key(selection: Mapping[GridCell, TileVariant]) -> tuple[tuple[tuple[int, int], tuple[float, int, int, int, int]], ...]:
+    return tuple(
+        ((_cell_sort_key(cell)), _variant_sort_key(selection[cell]))
+        for cell in sorted(selection, key=_cell_sort_key)
+    )
+
+
+def _state_edge_sort_key(edge: _StateAdjacency) -> tuple[tuple[int, int], tuple[int, int], str]:
+    return _cell_sort_key(edge.first), _cell_sort_key(edge.second), edge.direction
+
+
 def _ordered_simple_component_path(
     component: tuple[GridCell, ...],
     edges: tuple[_StateAdjacency, ...],
@@ -1015,6 +1428,9 @@ def _state_component_failure(
     component: tuple[GridCell, ...],
     edges: tuple[_StateAdjacency, ...],
     options_by_cell: Mapping[GridCell, _StateCellOptions],
+    *,
+    reason: str = "no_compatible_tile_component",
+    diagnostics: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
     representative = min(component, key=_cell_sort_key)
     spec = options_by_cell[representative].spec
@@ -1028,11 +1444,12 @@ def _state_component_failure(
         spec.process,
         representative,
         spec.required_directions,
-        "no_compatible_tile_component",
+        reason,
         hard_failure=True,
         route_ids=route_ids,
         component_cells=tuple((cell.xidx, cell.yidx) for cell in sorted(component, key=_cell_sort_key)),
         incompatible_edges=_incompatible_edge_diagnostics(edges, options_by_cell),
+        component_diagnostics=dict(diagnostics or {}),
     )
 
 

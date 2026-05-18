@@ -16,6 +16,21 @@ class ConfigValidationError(ValueError):
 
 RoadValidationMode = Literal["strict", "warn"]
 
+_DEFAULT_MAX_CUTSET_CYCLE_RANK = 2
+_DEFAULT_MAX_CUTSET_VERTICES = 4
+_DEFAULT_MAX_CUTSET_CANDIDATE_PRODUCT_LOG10 = 5.0
+_DEFAULT_TINY_EXACT_MAX_CELLS = 12
+_DEFAULT_TINY_EXACT_CANDIDATE_PRODUCT_LOG10 = 5.0
+
+
+@dataclass(frozen=True, slots=True)
+class TileAssignmentSolverConfig:
+    max_cutset_cycle_rank: int = _DEFAULT_MAX_CUTSET_CYCLE_RANK
+    max_cutset_vertices: int = _DEFAULT_MAX_CUTSET_VERTICES
+    max_cutset_candidate_product_log10: float = _DEFAULT_MAX_CUTSET_CANDIDATE_PRODUCT_LOG10
+    tiny_exact_max_cells: int = _DEFAULT_TINY_EXACT_MAX_CELLS
+    tiny_exact_candidate_product_log10: float = _DEFAULT_TINY_EXACT_CANDIDATE_PRODUCT_LOG10
+
 
 @dataclass(frozen=True, slots=True)
 class TagSelector:
@@ -78,6 +93,7 @@ class ExtractionConfig:
     entries: tuple[ConfigEntry, ...]
     seed: int | None = None
     road_validation_mode: RoadValidationMode = "warn"
+    tile_assignment_solver: TileAssignmentSolverConfig = field(default_factory=TileAssignmentSolverConfig)
     feature_flags: Mapping[str, bool] = field(default_factory=dict)
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
@@ -105,6 +121,7 @@ class ExtractionConfig:
             entries=tuple(entries),
             seed=seed,
             road_validation_mode=_road_validation_mode(raw_config.get("road_validation_mode", "warn")),
+            tile_assignment_solver=_tile_assignment_solver_config(raw_config.get("tile_assignment_solver", {})),
         )
 
     def entry_by_name(self, name: str) -> ConfigEntry:
@@ -259,6 +276,61 @@ def _road_validation_mode(raw: object) -> RoadValidationMode:
     if isinstance(raw, str) and raw in {"strict", "warn"}:
         return raw
     raise ConfigValidationError("road_validation_mode must be 'strict' or 'warn'")
+
+
+def _tile_assignment_solver_config(raw: object) -> TileAssignmentSolverConfig:
+    if raw in (None, {}):
+        return TileAssignmentSolverConfig()
+    if not isinstance(raw, Mapping):
+        raise ConfigValidationError("tile_assignment_solver must be an object")
+    return TileAssignmentSolverConfig(
+        max_cutset_cycle_rank=_nonnegative_int(
+            raw.get("max_cutset_cycle_rank", _DEFAULT_MAX_CUTSET_CYCLE_RANK),
+            "tile_assignment_solver.max_cutset_cycle_rank",
+        ),
+        max_cutset_vertices=_nonnegative_int(
+            raw.get("max_cutset_vertices", _DEFAULT_MAX_CUTSET_VERTICES),
+            "tile_assignment_solver.max_cutset_vertices",
+        ),
+        max_cutset_candidate_product_log10=_nonnegative_float(
+            raw.get(
+                "max_cutset_candidate_product_log10",
+                _DEFAULT_MAX_CUTSET_CANDIDATE_PRODUCT_LOG10,
+            ),
+            "tile_assignment_solver.max_cutset_candidate_product_log10",
+        ),
+        tiny_exact_max_cells=_nonnegative_int(
+            raw.get("tiny_exact_max_cells", _DEFAULT_TINY_EXACT_MAX_CELLS),
+            "tile_assignment_solver.tiny_exact_max_cells",
+        ),
+        tiny_exact_candidate_product_log10=_nonnegative_float(
+            raw.get(
+                "tiny_exact_candidate_product_log10",
+                _DEFAULT_TINY_EXACT_CANDIDATE_PRODUCT_LOG10,
+            ),
+            "tile_assignment_solver.tiny_exact_candidate_product_log10",
+        ),
+    )
+
+
+def _nonnegative_int(raw: object, field_name: str) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ConfigValidationError(f"{field_name} must be a non-negative integer") from exc
+    if value < 0:
+        raise ConfigValidationError(f"{field_name} must be a non-negative integer")
+    return value
+
+
+def _nonnegative_float(raw: object, field_name: str) -> float:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ConfigValidationError(f"{field_name} must be a non-negative number") from exc
+    if value < 0:
+        raise ConfigValidationError(f"{field_name} must be a non-negative number")
+    return value
 
 
 def _is_config_entry(raw_entry: object) -> bool:

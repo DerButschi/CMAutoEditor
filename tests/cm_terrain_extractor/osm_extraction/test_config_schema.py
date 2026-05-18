@@ -49,6 +49,43 @@ def test_config_schema_defaults_road_validation_mode_to_warn() -> None:
     config = ExtractionConfig.from_mapping({})
 
     assert config.road_validation_mode == "warn"
+    assert config.tile_assignment_solver.max_cutset_cycle_rank == 2
+    assert config.tile_assignment_solver.max_cutset_vertices == 4
+    assert config.tile_assignment_solver.max_cutset_candidate_product_log10 == 5.0
+    assert config.tile_assignment_solver.tiny_exact_max_cells == 12
+    assert config.tile_assignment_solver.tiny_exact_candidate_product_log10 == 5.0
+
+
+def test_config_schema_accepts_tile_assignment_solver_limits() -> None:
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+
+    config = ExtractionConfig.from_mapping(
+        {
+            "tile_assignment_solver": {
+                "max_cutset_cycle_rank": 3,
+                "max_cutset_vertices": 5,
+                "max_cutset_candidate_product_log10": 6.5,
+                "tiny_exact_max_cells": 8,
+                "tiny_exact_candidate_product_log10": 3.0,
+            }
+        }
+    )
+
+    assert config.tile_assignment_solver.max_cutset_cycle_rank == 3
+    assert config.tile_assignment_solver.max_cutset_vertices == 5
+    assert config.tile_assignment_solver.max_cutset_candidate_product_log10 == 6.5
+    assert config.tile_assignment_solver.tiny_exact_max_cells == 8
+    assert config.tile_assignment_solver.tiny_exact_candidate_product_log10 == 3.0
+
+
+def test_config_schema_rejects_invalid_tile_assignment_solver_limits() -> None:
+    from terrain_extraction.osm_extraction.config_schema import (
+        ConfigValidationError,
+        ExtractionConfig,
+    )
+
+    with pytest.raises(ConfigValidationError, match="tile_assignment_solver.max_cutset_vertices"):
+        ExtractionConfig.from_mapping({"tile_assignment_solver": {"max_cutset_vertices": -1}})
 
 
 @pytest.mark.parametrize("mode", ["strict", "warn"])
