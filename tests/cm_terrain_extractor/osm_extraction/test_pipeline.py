@@ -163,6 +163,19 @@ def test_pipeline_run_owns_typed_orchestration_and_catalog_gap_diagnostics() -> 
     assert result.diagnostics["catalog_gaps"] == (
         {"process": "road", "required_directions": ("E", "N", "S", "W"), "failure_reason": "catalog_gap"},
     )
+    for stage in (
+        "topology",
+        "routing",
+        "tile_assignment",
+        "building_fitting",
+        "area_rasterization",
+        "output_row_assembly",
+        "road_validation",
+    ):
+        assert result.diagnostics["timings"][stage]["elapsed_ms"] >= 0.0
+    assert result.diagnostics["routing_diagnostics"]["route_count"] == 1
+    assert result.diagnostics["tile_assignment_diagnostics"]["top_slowest_components"] == ()
+    assert result.diagnostics["building_fitting_diagnostics"]["building_feature_count"] == 0
 
 
 def test_pipeline_run_defaults_to_warn_for_invalid_road_output() -> None:
@@ -396,6 +409,9 @@ def test_pipeline_warn_mode_reports_side_signature_component_failures() -> None:
     assert failures[0]["incompatible_edges"] == (
         {"cell_a": (0, 1), "direction": "E", "cell_b": (1, 1)},
     )
+    tile_diagnostics = result.diagnostics["tile_assignment_diagnostics"]
+    assert tile_diagnostics["state_component_diagnostics"][0]["solver_used"] == "path_dp"
+    assert tile_diagnostics["top_slowest_components"][0]["elapsed_ms"] >= 0.0
 
 
 def test_pipeline_strict_mode_fails_on_side_signature_component_failures() -> None:
@@ -905,7 +921,12 @@ def _side_signature_failure_catalog():
 
 def _side_signature_failure_routes_and_state():
     from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
-    from terrain_extraction.osm_extraction.models import GridCell, GridNode, ProcessKind, RouteRecord
+    from terrain_extraction.osm_extraction.models import (
+        GridCell,
+        GridNode,
+        ProcessKind,
+        RouteRecord,
+    )
 
     tile_cells = (GridCell(0, 1), GridCell(1, 1))
     route = RouteRecord(

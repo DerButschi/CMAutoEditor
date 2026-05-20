@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +22,11 @@ if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
 FIXTURE_DIR = REPO_ROOT / "tests" / "cm_terrain_extractor" / "osm_extraction" / "fixtures"
+
+from terrain_extraction.osm_extraction.diagnostics import timing_table_rows  # noqa: E402
 
 LINEAR_PROCESSES = {"road_tiles", "rail_tiles", "stream_tiles", "fence_tiles"}
 
@@ -144,6 +148,11 @@ def run_fixture(
 
     timings["total"] = time.perf_counter() - total_start
     post_process_df = processor.df if processor.df is not None else pd.DataFrame()
+    extraction_diagnostics = (
+        processor.get_extraction_diagnostics()
+        if hasattr(processor, "get_extraction_diagnostics")
+        else {}
+    )
     stats = _build_stats(
         fixture_path=fixture_path,
         fixture_data=fixture_data,
@@ -152,6 +161,7 @@ def run_fixture(
         post_process_df=post_process_df,
         timings=timings,
         seed=seed,
+        extraction_diagnostics=extraction_diagnostics,
     )
 
     return FixtureRunResult(
@@ -195,6 +205,7 @@ def _build_stats(
     post_process_df: pd.DataFrame,
     timings: dict[str, float | None],
     seed: int | None,
+    extraction_diagnostics: dict[str, Any],
 ) -> dict[str, Any]:
     counts = {
         "fixture_features": len(fixture_data.get("features", [])),
@@ -216,17 +227,23 @@ def _build_stats(
         quality["source_building_linear_intersections"],
     )
 
+    structured_timings = (
+        extraction_diagnostics.get("diagnostics", {}).get("timings", {})
+        if isinstance(extraction_diagnostics, dict)
+        else {}
+    )
     return {
         "fixture": str(fixture_path),
         "profile": processor.profile,
         "config": str(getattr(processor, "path_to_congih", "")),
         "seed": seed,
-        "timings": timings,
+        "timings": {**timings, **dict(structured_timings)},
         "counts": counts,
         "quality": quality,
         "diagnostics": {
             "legacy_stage_timings_are_approximate": True,
             "seeded_legacy_default_rng_in_benchmark_only": seed is not None,
+            "extraction": extraction_diagnostics,
         },
     }
 
@@ -370,6 +387,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="default_osm_config.json", help="Path to the OSM config JSON.")
     parser.add_argument("--seed", type=int, default=None, help="Seed for deterministic benchmark replay.")
     parser.add_argument("--json-output", type=Path, default=None, help="Optional path for metrics JSON output.")
+    parser.add_argument("--timing-table", action="store_true", help="Print a compact timing table.")
     return parser
 
 
@@ -380,10 +398,44 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json_output is not None:
         args.json_output.write_text(metrics_json + "\n", encoding="utf-8")
-    else:
+    if args.timing_table:
+        print(_format_timing_table(result.stats))
+    elif args.json_output is None:
         print(metrics_json)
+    else:
+        print(f"Wrote metrics JSON to {args.json_output}")
 
     return 0
+
+
+def _format_timing_table(stats: Mapping[str, Any]) -> str:
+    timings = stats.get("timings", {})
+    diagnostics = stats.get("diagnostics", {}).get("extraction", {}).get("diagnostics", {})
+    routing = diagnostics.get("routing_diagnostics", {})
+    tile = diagnostics.get("tile_assignment_diagnostics", {})
+    building = diagnostics.get("building_fitting_diagnostics", {})
+    detail_by_stage = {
+        "routing": (
+            f"routes={routing.get('route_count', 0)} "
+            f"expansions={routing.get('total_a_star_expansions', 0)} "
+            f"tile_rejects={routing.get('total_tile_feasible_rejections', 0)}"
+        ),
+        "tile_assignment": f"components={len(tile.get('state_component_diagnostics', ()) or ())}",
+        "building_fitting": (
+            f"buildings={building.get('building_feature_count', 0)} "
+            f"candidates={building.get('total_candidates_scored', 0)}"
+        ),
+    }
+    lines = ["stage                       elapsed_ms  pct_total  details"]
+    for row in timing_table_rows(timings):
+        stage = str(row["stage"])
+        elapsed_ms = row["elapsed_ms"]
+        percent = row["percent_total"]
+        percent_text = "" if percent is None else f"{percent:>5.1f}%"
+        lines.append(
+            f"{stage:<27} {elapsed_ms:>10.3f}  {percent_text:>9}  {detail_by_stage.get(stage, '')}"
+        )
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

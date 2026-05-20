@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import uuid
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
@@ -262,6 +263,31 @@ def test_preprocess_throttles_progress_updates(monkeypatch) -> None:
 
     assert len(progress_values) < 20
     assert progress_values[-1] == 1.0
+
+
+def test_write_to_file_can_emit_optional_diagnostics_sidecar() -> None:
+    from shapely.geometry import Point
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    test_dir = Path(".tmp") / "diagnostics_tests" / uuid.uuid4().hex
+    test_dir.mkdir(parents=True, exist_ok=True)
+    output_path = test_dir / "osm.csv"
+    processor = OSMProcessor.__new__(OSMProcessor)
+    processor._uses_layered_output = lambda: True
+    processor._get_layered_output_dataframe = lambda: pd.DataFrame([{"name": "road"}])
+    processor.get_extraction_diagnostics = lambda: {"geometry": Point(1, 2)}
+
+    try:
+        processor.write_to_file(output_path, diagnostics_sidecar=True)
+
+        assert output_path.exists()
+        sidecar = test_dir / "osm_diagnostics.json"
+        assert sidecar.exists()
+        assert '"POINT (1 2)"' in sidecar.read_text(encoding="utf-8")
+    finally:
+        for path in test_dir.glob("*"):
+            path.unlink()
+        test_dir.rmdir()
 
 
 def test_typed_features_are_clipped_to_effective_bbox() -> None:

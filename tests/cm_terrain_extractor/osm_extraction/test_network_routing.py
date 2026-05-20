@@ -111,6 +111,15 @@ def test_routes_simple_topology_edge_on_integer_grid() -> None:
     assert [node.xidx for node in result.routes[0].nodes] == [0, 1, 2, 3, 4]
     assert {cell.yidx for cell in result.routes[0].tile_cells} == {0}
     assert result.routes[0].diagnostics["detour_ratio"] == pytest.approx(1.0)
+    assert result.routes[0].diagnostics["elapsed_ms"] >= 0.0
+    assert result.routes[0].diagnostics["attempt_count"] == 1
+    assert result.routes[0].diagnostics["retry_count"] == 0
+    assert result.routes[0].diagnostics["a_star_expansions"] > 0
+    assert result.diagnostics["route_count"] == 1
+    assert result.diagnostics["route_attempts"] == 1
+    assert result.diagnostics["route_retries"] == 0
+    assert result.diagnostics["total_a_star_expansions"] == result.routes[0].diagnostics["a_star_expansions"]
+    assert result.diagnostics["total_tile_feasible_rejections"] == 0
 
 
 def test_route_cells_are_output_cells_not_grid_corner_edges() -> None:

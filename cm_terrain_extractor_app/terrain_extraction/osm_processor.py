@@ -1,4 +1,5 @@
 import json
+import time
 
 import geopandas
 import numpy as np
@@ -12,6 +13,7 @@ from terrain_extraction.osm_extraction.config_schema import (
     ExtractionConfig,
     matched_or_first_cm_type,
 )
+from terrain_extraction.osm_extraction.diagnostics import json_safe, write_diagnostics_sidecar
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
     CMType,
@@ -19,6 +21,7 @@ from terrain_extraction.osm_extraction.models import (
     ProcessKind,
 )
 from terrain_extraction.osm_extraction.pipeline import ExtractionContext, ExtractionPipeline
+from terrain_extraction.osm_extraction.stats import ExtractionStats
 from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
 
 from profiles import get_building_outline_by_df_entry, get_building_tiles, process_to_building_type
@@ -42,6 +45,25 @@ class _NullStreamlit:
 
 if st is None:
     st = _NullStreamlit()
+
+
+def _stats_with_preprocessing_timings(stats, timings):
+    if not isinstance(stats, ExtractionStats):
+        return stats
+    return ExtractionStats(
+        timings={**_timing_seconds(timings), **dict(stats.timings)},
+        counts=stats.counts,
+        quality=stats.quality,
+        diagnostics=stats.diagnostics,
+    )
+
+
+def _timing_seconds(timings):
+    seconds = {}
+    for stage, values in timings.items():
+        if isinstance(values, dict) and "elapsed_s" in values:
+            seconds[stage] = float(values["elapsed_s"])
+    return seconds
 
 
 class OSMProcessor:
@@ -84,6 +106,7 @@ class OSMProcessor:
         self.topology = None
         self.routing = None
         self.stats = None
+        self.pipeline_diagnostics = {"timings": {}}
 
         self.processing_stages = {
             "type_from_tag": [(0, "assign_type_from_tag", "by_element")],
@@ -144,6 +167,16 @@ class OSMProcessor:
     @property
     def path_to_congih(self):
         return self.path_to_config
+
+    def _record_timing(self, stage, elapsed_s):
+        diagnostics = dict(getattr(self, "pipeline_diagnostics", {}) or {})
+        timings = dict(diagnostics.get("timings", {}) or {})
+        timings[stage] = {
+            "elapsed_s": elapsed_s,
+            "elapsed_ms": round(elapsed_s * 1000.0, 3),
+        }
+        diagnostics["timings"] = timings
+        self.pipeline_diagnostics = diagnostics
 
     def _build_tag_to_config_names(self):
         tag_to_config_names = {}
@@ -238,6 +271,7 @@ class OSMProcessor:
                 return None
 
     def preprocess_osm_data(self, osm_data: dict):
+        started_at = time.perf_counter()
         bbox_crs = self.bbox.crs_projected
 
         self.transformer = pyproj.Transformer.from_crs('epsg:4326', f'epsg:{bbox_crs.to_epsg()}', always_xy=True)
@@ -287,6 +321,7 @@ class OSMProcessor:
         if "default_foliage" in self.config and self.config['default_foliage'].get('active', True):
             self.matched_elements.append({'element': None, 'geometry': self.effective_bbox_polygon, 
                                           'name': 'default_foliage', 'idx': element_idx + 2})
+        self._record_timing("feature_matching_preprocessing", time.perf_counter() - started_at)
 
 
     def _collect_stages(self):
@@ -395,6 +430,8 @@ class OSMProcessor:
             self.grid_index = grid_index
 
         features = self._typed_features_from_matched_elements()
+        previous_diagnostics = dict(getattr(self, "pipeline_diagnostics", {}) or {})
+        previous_timings = dict(previous_diagnostics.get("timings", {}) or {})
         result = self.pipeline.run(
             features=features,
             config=self.extraction_config,
@@ -407,12 +444,17 @@ class OSMProcessor:
         self.features = result.features
         self.placements = result.placements
         self.output_rows = result.output_rows
-        self.stats = result.stats
+        merged_diagnostics = dict(result.diagnostics)
+        merged_diagnostics["timings"] = {
+            **previous_timings,
+            **dict(merged_diagnostics.get("timings", {}) or {}),
+        }
+        self.stats = _stats_with_preprocessing_timings(result.stats, previous_timings)
         self.occupancy = result.diagnostics.get("occupancy")
         self.topology = result.diagnostics.get("network_topology")
         self.routing = result.diagnostics.get("network_routes")
         self.tile_assignment = result.diagnostics.get("tile_assignment")
-        self.pipeline_diagnostics = result.diagnostics
+        self.pipeline_diagnostics = merged_diagnostics
         self._set_compatibility_df_from_placements()
 
     def _set_compatibility_df_from_placements(self):
@@ -674,9 +716,15 @@ class OSMProcessor:
 
         return np.nan
 
-    def write_to_file(self, output_file_name):
+    def write_to_file(self, output_file_name, *, diagnostics_sidecar=False, diagnostics_sidecar_path=None):
         if self._uses_layered_output():
             self._get_layered_output_dataframe().to_csv(output_file_name)
+            if diagnostics_sidecar:
+                write_diagnostics_sidecar(
+                    output_file_name,
+                    self.get_extraction_diagnostics(),
+                    sidecar_path=diagnostics_sidecar_path,
+                )
             return
 
         self._flush_df_parts()
@@ -694,6 +742,24 @@ class OSMProcessor:
         out_df.x = out_df.x - self.idx_bbox[0]
         out_df.y = out_df.y - self.idx_bbox[1]
         out_df.to_csv(output_file_name)
+        if diagnostics_sidecar:
+            write_diagnostics_sidecar(
+                output_file_name,
+                self.get_extraction_diagnostics(),
+                sidecar_path=diagnostics_sidecar_path,
+            )
+
+    def get_extraction_diagnostics(self):
+        stats = getattr(self, "stats", None)
+        return json_safe(
+            {
+                "profile": getattr(self, "profile", None),
+                "config": getattr(self, "path_to_config", None),
+                "idx_bbox": getattr(self, "idx_bbox", None),
+                "stats": stats.to_dict() if hasattr(stats, "to_dict") else stats,
+                "diagnostics": dict(getattr(self, "pipeline_diagnostics", {}) or {}),
+            }
+        )
 
     def get_output(self):
         if self._uses_layered_output():

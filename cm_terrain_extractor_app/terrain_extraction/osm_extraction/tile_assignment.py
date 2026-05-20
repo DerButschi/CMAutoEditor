@@ -1187,6 +1187,11 @@ def _state_component_diagnostics(
 ) -> Mapping[str, Any]:
     neighbors = _state_neighbor_edges(edges)
     degrees = {cell: len(neighbors.get(cell, ())) for cell in component}
+    processes = tuple(
+        sorted(
+            {options_by_cell[cell].spec.process.value for cell in component},
+        )
+    )
     return {
         "component_size": len(component),
         "edge_count": len(edges),
@@ -1196,6 +1201,11 @@ def _state_component_diagnostics(
         "is_tree": _is_tree_component(component, edges),
         "cycle_count": _cycle_count(component, edges),
         "candidate_product_log10": round(_candidate_product_log10(component, options_by_cell), 3),
+        "process": processes[0] if len(processes) == 1 else processes,
+        "representative_cells": tuple(
+            (cell.xidx, cell.yidx)
+            for cell in sorted(component, key=_cell_sort_key)[:10]
+        ),
     }
 
 

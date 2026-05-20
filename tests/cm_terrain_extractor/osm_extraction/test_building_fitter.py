@@ -402,6 +402,15 @@ def test_candidate_generation_is_bounded_and_records_fallback_diagnostics() -> N
     diagnostics = result.diagnostics_by_feature["large"]
     assert diagnostics["candidate_limit_reached"] is True
     assert diagnostics["candidates_scored"] <= 2
+    assert diagnostics["elapsed_ms"] >= 0.0
+    assert diagnostics["candidate_generation_ms"] >= 0.0
+    assert diagnostics["placement_ms"] >= 0.0
+    assert result.diagnostics["building_feature_count"] == 1
+    assert result.diagnostics["total_candidates_scored"] == diagnostics["candidates_scored"]
+    assert result.diagnostics["candidates_scored_per_building"]["large"] == diagnostics["candidates_scored"]
+    assert result.diagnostics["candidate_limit_reached_count"] == 1
+    assert result.diagnostics["shapely_score_evaluations"] == diagnostics["candidates_scored"]
+    assert result.diagnostics["shapely_overlap_evaluations"] >= 0
     assert result.placed_count + result.dropped_count == 1
 
 

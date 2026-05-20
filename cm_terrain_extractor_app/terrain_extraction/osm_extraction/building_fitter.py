@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -144,6 +145,8 @@ class BuildingFitter:
         self.max_candidates_per_building = max_candidates_per_building
         self.local_shift_cells = local_shift_cells
         self.modular_area_threshold = modular_area_threshold
+        self._shapely_score_evaluations = 0
+        self._shapely_overlap_evaluations = 0
 
     def fit(
         self,
@@ -155,26 +158,46 @@ class BuildingFitter:
         prepared: list[_PreparedBuilding] = []
         failures: list[Mapping[str, Any]] = []
         diagnostics_by_feature: dict[str | int, Mapping[str, Any]] = {}
+        self._shapely_score_evaluations = 0
+        self._shapely_overlap_evaluations = 0
 
         for feature in _building_features(features):
+            feature_started_at = time.perf_counter()
             feature_key = _feature_key(feature)
             polygon = _clean_building_polygon(feature.geometry)
             if polygon is None:
-                failure = _failure(feature, "invalid_or_empty_geometry", diagnostics={})
+                failure = _failure(
+                    feature,
+                    "invalid_or_empty_geometry",
+                    diagnostics=_timed_building_diagnostics(feature_started_at),
+                )
                 failures.append(failure)
                 diagnostics_by_feature[feature_key] = failure
                 continue
 
             catalog = compiled_catalogs.get(feature.config_name)
             if catalog is None or not catalog.footprints:
-                failure = _failure(feature, "missing_building_catalog", diagnostics={})
+                failure = _failure(
+                    feature,
+                    "missing_building_catalog",
+                    diagnostics=_timed_building_diagnostics(feature_started_at),
+                )
                 failures.append(failure)
                 diagnostics_by_feature[feature_key] = failure
                 continue
 
             descriptor = self._descriptor(polygon)
+            candidate_started_at = time.perf_counter()
             candidates, candidate_limit_reached = self._candidates_for(polygon, descriptor, catalog.normalized())
-            diagnostics = _building_diagnostics(descriptor, candidates, candidate_limit_reached)
+            candidate_generation_ms = round((time.perf_counter() - candidate_started_at) * 1000.0, 3)
+            diagnostics = {
+                **_building_diagnostics(descriptor, candidates, candidate_limit_reached),
+                **_timed_building_diagnostics(feature_started_at),
+                "candidate_generation_ms": candidate_generation_ms,
+                "placement_ms": 0.0,
+                "feature_id": feature.feature_id,
+                "config_name": feature.config_name,
+            }
             diagnostics_by_feature[feature_key] = diagnostics
             prepared.append(
                 _PreparedBuilding(
@@ -191,28 +214,50 @@ class BuildingFitter:
         cluster_order = []
         for building in sorted(prepared, key=_cluster_sort_key):
             cluster_order.append(building.feature_key)
+            placement_started_at = time.perf_counter()
             placement = self._place_building(building)
+            placement_ms = round((time.perf_counter() - placement_started_at) * 1000.0, 3)
+            elapsed_ms = round(float(building.diagnostics.get("elapsed_ms", 0.0)) + placement_ms, 3)
+            timed_diagnostics = {
+                **dict(building.diagnostics),
+                "placement_ms": placement_ms,
+                "elapsed_ms": elapsed_ms,
+            }
             if placement is None:
                 failure = _failure(
                     building.feature,
                     "no_non_colliding_candidate",
-                    diagnostics=building.diagnostics,
+                    diagnostics=timed_diagnostics,
                 )
                 failures.append(failure)
                 diagnostics_by_feature[building.feature_key] = failure
                 continue
             placements.append(placement)
             diagnostics_by_feature[building.feature_key] = {
-                **dict(building.diagnostics),
+                **timed_diagnostics,
                 **dict(placement.diagnostics),
             }
+        candidates_scored_per_building = {
+            str(feature_key): int(diagnostics.get("candidates_scored", 0))
+            for feature_key, diagnostics in diagnostics_by_feature.items()
+        }
 
         return BuildingFittingResult(
             placements=tuple(placements),
             failures=tuple(failures),
             diagnostics={
+                "building_feature_count": len(diagnostics_by_feature),
                 "buildings_placed": len(placements),
                 "buildings_dropped": len(failures),
+                "total_candidates_scored": sum(candidates_scored_per_building.values()),
+                "candidates_scored_per_building": candidates_scored_per_building,
+                "candidate_limit_reached_count": sum(
+                    1
+                    for diagnostics in diagnostics_by_feature.values()
+                    if diagnostics.get("candidate_limit_reached")
+                ),
+                "shapely_score_evaluations": self._shapely_score_evaluations,
+                "shapely_overlap_evaluations": self._shapely_overlap_evaluations,
                 "cluster_order": tuple(cluster_order),
             },
             diagnostics_by_feature=diagnostics_by_feature,
@@ -368,6 +413,7 @@ class BuildingFitter:
         geometry: _CandidateGeometry,
     ) -> BuildingCandidate:
         footprint_polygon = geometry.footprint_polygon
+        self._shapely_score_evaluations += 1
         union_area = footprint_polygon.union(polygon).area
         iou = footprint_polygon.intersection(polygon).area / union_area if union_area > 0 else 0.0
         centroid_shift = footprint_polygon.centroid.distance(polygon.centroid)
@@ -505,6 +551,7 @@ class BuildingFitter:
                     continue
                 if object_id is not None and _uses_diagnostic_polygon(self.occupancy.metadata.get(object_id, {})):
                     seen_geometry_objects.add(object_id)
+                self._shapely_overlap_evaluations += 1
                 intersection_area = polygon.intersection(linear_polygon).area
                 if intersection_area <= 0:
                     continue
@@ -759,6 +806,12 @@ def _building_diagnostics(
         "available_candidates": sum(1 for candidate in candidates if candidate.collision_cells == 0),
         "candidate_limit_reached": candidate_limit_reached,
         "best_iou": None if not candidates else max(candidate.iou for candidate in candidates),
+    }
+
+
+def _timed_building_diagnostics(started_at: float) -> Mapping[str, Any]:
+    return {
+        "elapsed_ms": round((time.perf_counter() - started_at) * 1000.0, 3),
     }
 
 

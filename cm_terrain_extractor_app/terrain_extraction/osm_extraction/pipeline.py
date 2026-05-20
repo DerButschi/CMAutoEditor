@@ -11,6 +11,11 @@ from terrain_extraction.osm_extraction.config_schema import (
     RoadValidationMode,
     TileAssignmentSolverConfig,
 )
+from terrain_extraction.osm_extraction.diagnostics import (
+    summarize_building_fitting,
+    summarize_routing,
+    summarize_tile_assignment,
+)
 from terrain_extraction.osm_extraction.grid_index import GridIndex
 from terrain_extraction.osm_extraction.models import (
     CMType,
@@ -95,7 +100,7 @@ class ExtractionContext:
 class ExtractionPipeline:
     context: ExtractionContext
 
-    def run(
+    def run(  # noqa: PLR0915
         self,
         *,
         features: tuple[Any, ...],
@@ -111,6 +116,7 @@ class ExtractionPipeline:
         occupancy_model = occupancy or OccupancyModel.from_grid_index(grid_index)
         placements: list[PlacementRecord] = []
         diagnostics: dict[str, Any] = {"occupancy": occupancy_model, "catalog_gaps": ()}
+        timings: dict[str, Mapping[str, float]] = {}
         resolved_road_validation_mode = road_validation_mode or getattr(config, "road_validation_mode", "warn")
 
         area_features = tuple(
@@ -132,33 +138,47 @@ class ExtractionPipeline:
                 else linear_catalog_provider(linear_features)
             )
             diagnostics["catalog_gaps"] = _catalog_gap_diagnostics(linear_catalogs)
-            topology_result = self.run_network_topology(
-                features=linear_features,
-                clip_geometry=clip_geometry,
+            topology_result = _timed_stage(
+                timings,
+                "topology",
+                lambda: self.run_network_topology(
+                    features=linear_features,
+                    clip_geometry=clip_geometry,
+                ),
             )
             topology = topology_result.diagnostics["network_topology"]
             diagnostics["network_topology"] = topology
-            routing_result = self.run_network_router(
-                topology=topology,
-                grid_index=grid_index,
-                occupancy=occupancy_model,
-                catalogs=linear_catalogs,
+            routing_result = _timed_stage(
+                timings,
+                "routing",
+                lambda: self.run_network_router(
+                    topology=topology,
+                    grid_index=grid_index,
+                    occupancy=occupancy_model,
+                    catalogs=linear_catalogs,
+                ),
             )
             routing = routing_result.diagnostics["network_routes"]
             diagnostics["network_routes"] = routing
+            diagnostics["routing_diagnostics"] = summarize_routing(routing)
             intersection_fallback_failures = _routing_intersection_fallback_failures(routing)
             diagnostics["intersection_fallback_failures"] = intersection_fallback_failures
             if intersection_fallback_failures and resolved_road_validation_mode == "strict":
                 raise IntersectionFallbackError(intersection_fallback_failures)
-            tile_result = self.run_tile_assignment(
-                routes=routing.routes,
-                catalogs=linear_catalogs,
-                linear_state=routing.linear_state,
-                solver_config=getattr(config, "tile_assignment_solver", TileAssignmentSolverConfig()),
+            tile_result = _timed_stage(
+                timings,
+                "tile_assignment",
+                lambda: self.run_tile_assignment(
+                    routes=routing.routes,
+                    catalogs=linear_catalogs,
+                    linear_state=routing.linear_state,
+                    solver_config=getattr(config, "tile_assignment_solver", TileAssignmentSolverConfig()),
+                ),
             )
             tile_assignment = tile_result.diagnostics["tile_assignment"]
             tile_failures = _normalize_tile_assignment_failures(tile_assignment)
             diagnostics["tile_assignment"] = tile_assignment
+            diagnostics["tile_assignment_diagnostics"] = summarize_tile_assignment(tile_assignment)
             diagnostics["tile_assignment_failures"] = tile_failures
             if tile_failures and resolved_road_validation_mode == "strict":
                 raise TileAssignmentError(tile_failures)
@@ -184,20 +204,30 @@ class ExtractionPipeline:
                 if building_catalog_provider is None
                 else building_catalog_provider(building_features)
             )
-            building_result = self.run_building_fitter(
-                features=building_features,
-                catalogs=building_catalogs,
-                grid_index=grid_index,
-                occupancy=occupancy_model,
+            building_result = _timed_stage(
+                timings,
+                "building_fitting",
+                lambda: self.run_building_fitter(
+                    features=building_features,
+                    catalogs=building_catalogs,
+                    grid_index=grid_index,
+                    occupancy=occupancy_model,
+                ),
             )
             placements.extend(building_result.placements)
-            diagnostics["building_fitting"] = building_result.diagnostics.get("building_fitting")
+            building_fitting = building_result.diagnostics.get("building_fitting")
+            diagnostics["building_fitting"] = building_fitting
+            diagnostics["building_fitting_diagnostics"] = summarize_building_fitting(building_fitting)
 
-        area_result = self.run_area_rasterizer(
-            features=area_features,
-            config=config,
-            grid_index=grid_index,
-            occupancy=occupancy_model,
+        area_result = _timed_stage(
+            timings,
+            "area_rasterization",
+            lambda: self.run_area_rasterizer(
+                features=area_features,
+                config=config,
+                grid_index=grid_index,
+                occupancy=occupancy_model,
+            ),
         )
         placements.extend(area_result.placements)
 
@@ -207,6 +237,7 @@ class ExtractionPipeline:
             bounds=bounds,
             road_validation_mode=resolved_road_validation_mode,
         )
+        timings.update(dict(output_result.diagnostics.get("timings", {}) or {}))
         diagnostics.update(output_result.diagnostics)
         if "network_topology" in diagnostics and "road_validation" in diagnostics:
             diagnostics["source_aware_road_validation"] = _source_aware_road_validation_diagnostics(
@@ -214,11 +245,13 @@ class ExtractionPipeline:
                 topology=diagnostics["network_topology"],
                 grid_index=grid_index,
             )
+        _ensure_timing_keys(timings)
+        diagnostics["timings"] = timings
         return ExtractionResult(
             features=features,
             placements=resolved_placements,
             output_rows=output_result.output_rows,
-            stats=output_result.stats,
+            stats=_stats_with_timings(output_result.stats, timings),
             diagnostics=diagnostics,
         )
 
@@ -355,21 +388,34 @@ class ExtractionPipeline:
             validate_road_output_rows,
         )
 
-        internal_rows = placements_to_output_rows(placements, include_internal=True)
-        rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
-        clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
-        validate_output_rows(clipped_rows, bounds=bounds)
-        road_validation = validate_road_output_rows(clipped_rows, profile=self.context.profile)
-        road_validation_status = _road_validation_status(road_validation, mode=road_validation_mode)
+        timings: dict[str, Mapping[str, float]] = {}
+
+        clipped_rows: tuple[Mapping[str, Any], ...] = ()
+
+        def assemble_rows() -> tuple[Mapping[str, Any], ...]:
+            nonlocal clipped_rows
+            internal_rows = placements_to_output_rows(placements, include_internal=True)
+            rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
+            clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
+            validate_output_rows(clipped_rows, bounds=bounds)
+            return normalize_output_coordinates(clipped_rows, bounds=bounds)
+
+        output_rows = _timed_stage(timings, "output_row_assembly", assemble_rows)
+
+        def validate_roads() -> tuple[Any, Mapping[str, Any]]:
+            road_validation = validate_road_output_rows(clipped_rows, profile=self.context.profile)
+            road_validation_status = _road_validation_status(road_validation, mode=road_validation_mode)
+            return road_validation, road_validation_status
+
+        road_validation, road_validation_status = _timed_stage(timings, "road_validation", validate_roads)
         if road_validation_mode == "strict" and not road_validation.is_valid:
             raise OutputRowValidationError(road_validation.issue_summary())
-        output_rows = normalize_output_coordinates(clipped_rows, bounds=bounds)
         self.context.progress("output_assembly", 1.0, "Layered output rows assembled")
         return ExtractionResult(
             placements=placements,
             output_rows=output_rows,
             stats=ExtractionStats(
-                timings={"output_assembly": None},
+                timings=_timing_seconds(timings),
                 counts={"output_rows": len(output_rows)},
                 diagnostics={
                     "mode": "layered_output",
@@ -377,7 +423,11 @@ class ExtractionPipeline:
                     "road_validation_status": road_validation_status,
                 },
             ),
-            diagnostics={"road_validation": road_validation, "road_validation_status": road_validation_status},
+            diagnostics={
+                "road_validation": road_validation,
+                "road_validation_status": road_validation_status,
+                "timings": timings,
+            },
         )
 
     def run_debug_export(
@@ -520,6 +570,53 @@ def _road_validation_status(report: Any, *, mode: RoadValidationMode) -> dict[st
         "summary": report.issue_summary(),
         "hard_issues": len(report.hard_issues),
     }
+
+
+def _timed_stage(
+    timings: dict[str, Mapping[str, float]],
+    stage: str,
+    action: Callable[[], Any],
+) -> Any:
+    started_at = time.perf_counter()
+    result = action()
+    elapsed_s = time.perf_counter() - started_at
+    timings[stage] = {
+        "elapsed_s": elapsed_s,
+        "elapsed_ms": round(elapsed_s * 1000.0, 3),
+    }
+    return result
+
+
+def _stats_with_timings(stats: Any, timings: Mapping[str, Mapping[str, float]]) -> Any:
+    if not isinstance(stats, ExtractionStats):
+        return stats
+    return ExtractionStats(
+        timings={**dict(stats.timings), **_timing_seconds(timings)},
+        counts=stats.counts,
+        quality=stats.quality,
+        diagnostics=stats.diagnostics,
+    )
+
+
+def _timing_seconds(timings: Mapping[str, Mapping[str, float]]) -> dict[str, float]:
+    return {
+        stage: float(values["elapsed_s"])
+        for stage, values in timings.items()
+        if "elapsed_s" in values
+    }
+
+
+def _ensure_timing_keys(timings: dict[str, Mapping[str, float]]) -> None:
+    for stage in (
+        "topology",
+        "routing",
+        "tile_assignment",
+        "building_fitting",
+        "area_rasterization",
+        "output_row_assembly",
+        "road_validation",
+    ):
+        timings.setdefault(stage, {"elapsed_s": 0.0, "elapsed_ms": 0.0})
 
 
 def _normalize_tile_assignment_failures(tile_assignment: Any) -> tuple[Mapping[str, Any], ...]:

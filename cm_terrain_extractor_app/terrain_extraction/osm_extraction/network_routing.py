@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import heapq
 import math
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -119,6 +120,7 @@ class _RouteAttempt:
     soft_crossings: int = 0
     tile_feasible_rejections: int = 0
     tile_feasible_failures: tuple[Mapping[str, Any], ...] = ()
+    a_star_expansions: int = 0
 
     @property
     def success(self) -> bool:
@@ -220,6 +222,7 @@ class NetworkRouter:
         degrees: Mapping[int, int],
         anchor_plans: Mapping[int, Any],
     ) -> RouteRecord:
+        route_started_at = time.perf_counter()
         start = self._anchor_for_edge_node(edge, edge.start_node_id, anchors, anchor_plans)
         goal = self._anchor_for_edge_node(edge, edge.end_node_id, anchors, anchor_plans)
         raster_spine = build_raster_spine(
@@ -235,9 +238,12 @@ class NetworkRouter:
 
         total_blocked = 0
         total_tile_rejections = 0
+        total_expansions = 0
+        attempt_count = 0
         tile_failures: list[Mapping[str, Any]] = []
         retry_modes: list[str] = []
         for relaxation, corridor_m, soft_crossing in attempts:
+            attempt_count += 1
             retry_mode = _retry_mode(relaxation)
             if retry_mode is not None:
                 retry_modes.append(retry_mode)
@@ -254,9 +260,10 @@ class NetworkRouter:
             )
             total_blocked += attempt.blocked_cells_considered
             total_tile_rejections += attempt.tile_feasible_rejections
+            total_expansions += attempt.a_star_expansions
             tile_failures.extend(dict(failure) for failure in attempt.tile_feasible_failures)
             if attempt.success:
-                return self._record_success(
+                route = self._record_success(
                     edge,
                     attempt.nodes,
                     relaxation,
@@ -265,17 +272,30 @@ class NetworkRouter:
                     degrees,
                     raster_spine,
                     retry_modes=tuple(retry_modes),
+                    attempt_count=attempt_count,
+                    retry_count=len(retry_modes),
+                    a_star_expansions=total_expansions,
                     tile_feasible_rejections=total_tile_rejections,
                     tile_feasible_failures=tuple(tile_failures),
                 )
+                return _route_with_elapsed(route, route_started_at)
 
         if edge.geometry.length > self.split_long_edge_m:
             split_record = self._try_split_route(edge, start, goal, degrees, raster_spine)
             if split_record is not None:
-                return split_record
+                diagnostics = {
+                    **dict(split_record.diagnostics),
+                    "attempt_count": attempt_count + int(split_record.diagnostics.get("attempt_count", 0)),
+                    "retry_count": len(retry_modes) + int(split_record.diagnostics.get("retry_count", 0)),
+                    "a_star_expansions": total_expansions
+                    + int(split_record.diagnostics.get("a_star_expansions", 0)),
+                    "tile_feasible_rejections": total_tile_rejections
+                    + int(split_record.diagnostics.get("tile_feasible_rejections", 0)),
+                }
+                return _route_with_elapsed(_route_with_diagnostics(split_record, diagnostics), route_started_at)
 
         failure_reason = "no_tile_feasible_path" if total_tile_rejections else "no_path"
-        return RouteRecord(
+        route = RouteRecord(
             edge_id=edge.edge_id,
             start_node_id=edge.start_node_id,
             end_node_id=edge.end_node_id,
@@ -293,13 +313,17 @@ class NetworkRouter:
                 "corridor_deviation_m": self.corridor_deviation_m,
                 "tile_feasible_rejections": total_tile_rejections,
                 "tile_feasible_failures": tuple(tile_failures),
+                "attempt_count": attempt_count,
+                "retry_count": len(retry_modes),
+                "a_star_expansions": total_expansions,
                 "retry_modes": tuple(retry_modes),
                 "source_feature_ids": edge.feature_ids,
                 "source_indices": edge.source_indices,
             },
         )
+        return _route_with_elapsed(route, route_started_at)
 
-    def _a_star(
+    def _a_star(  # noqa: PLR0915
         self,
         line: LineString,
         start: GridNode,
@@ -326,6 +350,7 @@ class NetworkRouter:
         soft_crossings = 0
         tile_feasible_rejections = 0
         tile_feasible_failures: list[Mapping[str, Any]] = []
+        a_star_expansions = 0
 
         while open_heap:
             _estimated, cost_so_far, state = heapq.heappop(open_heap)
@@ -336,9 +361,13 @@ class NetworkRouter:
                     nodes=self._reconstruct_path(came_from, state),
                     blocked_cells_considered=blocked_cells_considered,
                     soft_crossings=soft_crossings,
+                    tile_feasible_rejections=tile_feasible_rejections,
+                    tile_feasible_failures=tuple(tile_feasible_failures),
+                    a_star_expansions=a_star_expansions,
                 )
             if cost_so_far > best_cost[state]:
                 continue
+            a_star_expansions += 1
 
             for step in move_set.steps:
                 neighbor = GridNode(current.xidx + step.dx, current.yidx + step.dy)
@@ -400,6 +429,7 @@ class NetworkRouter:
             soft_crossings=soft_crossings,
             tile_feasible_rejections=tile_feasible_rejections,
             tile_feasible_failures=tuple(tile_feasible_failures),
+            a_star_expansions=a_star_expansions,
         )
 
     def _try_split_route(
@@ -448,6 +478,9 @@ class NetworkRouter:
             degrees,
             raster_spine,
             retry_modes=("midpoint_split",),
+            attempt_count=2,
+            retry_count=1,
+            a_star_expansions=first.a_star_expansions + second.a_star_expansions,
             tile_feasible_rejections=first.tile_feasible_rejections + second.tile_feasible_rejections,
             tile_feasible_failures=first.tile_feasible_failures + second.tile_feasible_failures,
         )
@@ -478,6 +511,9 @@ class NetworkRouter:
         raster_spine: RasterSpine,
         *,
         retry_modes: tuple[str, ...] = (),
+        attempt_count: int = 1,
+        retry_count: int = 0,
+        a_star_expansions: int = 0,
         tile_feasible_rejections: int = 0,
         tile_feasible_failures: tuple[Mapping[str, Any], ...] = (),
     ) -> RouteRecord:
@@ -496,6 +532,9 @@ class NetworkRouter:
             "soft_crossings": soft_crossings,
             "intersection_importance": max(degrees.get(edge.start_node_id, 0), degrees.get(edge.end_node_id, 0)),
             "retry_modes": retry_modes,
+            "attempt_count": attempt_count,
+            "retry_count": retry_count,
+            "a_star_expansions": a_star_expansions,
             "tile_feasible_rejections": tile_feasible_rejections,
             "tile_feasible_failures": tile_feasible_failures,
             "source_feature_ids": edge.feature_ids,
@@ -528,6 +567,8 @@ class NetworkRouter:
             "failure_reason": failure.get("failure_reason", "linear_state_rejected"),
             "linear_state_failures": tuple(dict(item) for item in reservation.failures),
             "tile_feasible_failures": tuple(dict(item) for item in reservation.failures),
+            "tile_feasible_rejections": int(route.diagnostics.get("tile_feasible_rejections", 0))
+            + len(reservation.failures),
         }
         return RouteRecord(
             edge_id=route.edge_id,
@@ -651,6 +692,11 @@ class NetworkRouter:
             diagnostics={
                 "failure_reason": "anchor_fallback_drop",
                 "intersection_fallback_decision": decision,
+                "elapsed_ms": 0.0,
+                "attempt_count": 0,
+                "retry_count": 0,
+                "a_star_expansions": 0,
+                "tile_feasible_rejections": 0,
                 "source_feature_ids": edge.feature_ids,
                 "source_indices": edge.source_indices,
             },
@@ -895,6 +941,14 @@ class NetworkRouter:
         return {
             "successful_routes": len(successful),
             "failed_routes": len(failed),
+            "route_count": len(routes),
+            "route_attempts": sum(int(route.diagnostics.get("attempt_count", 0)) for route in routes),
+            "route_retries": sum(int(route.diagnostics.get("retry_count", 0)) for route in routes),
+            "total_a_star_expansions": sum(int(route.diagnostics.get("a_star_expansions", 0)) for route in routes),
+            "total_tile_feasible_rejections": sum(
+                int(route.diagnostics.get("tile_feasible_rejections", 0))
+                for route in routes
+            ),
             "mean_detour_ratio": sum(detours) / len(detours) if detours else None,
             "max_source_line_distance_m": max(distances) if distances else None,
             "max_spine_distance_m": max(spine_distances) if spine_distances else None,
@@ -909,6 +963,31 @@ class NetworkRouter:
 class _AllowedCellDecision:
     allowed: bool = True
     failures: tuple[Mapping[str, Any], ...] = ()
+
+
+def _route_with_elapsed(route: RouteRecord, started_at: float) -> RouteRecord:
+    diagnostics = {
+        **dict(route.diagnostics),
+        "elapsed_ms": round((time.perf_counter() - started_at) * 1000.0, 3),
+    }
+    return _route_with_diagnostics(route, diagnostics)
+
+
+def _route_with_diagnostics(route: RouteRecord, diagnostics: Mapping[str, Any]) -> RouteRecord:
+    return RouteRecord(
+        edge_id=route.edge_id,
+        start_node_id=route.start_node_id,
+        end_node_id=route.end_node_id,
+        process=route.process,
+        config_name=route.config_name,
+        priority=route.priority,
+        nodes=route.nodes,
+        tile_cells=route.tile_cells,
+        raster_spine=route.raster_spine,
+        success=route.success,
+        diagnostics=dict(diagnostics),
+        cm_type=route.cm_type,
+    )
 
 
 def _opposite(direction: str | None) -> str | None:
