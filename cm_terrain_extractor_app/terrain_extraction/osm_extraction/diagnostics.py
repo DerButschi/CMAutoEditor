@@ -163,6 +163,13 @@ def _building_summary(feature_key: str | int, diagnostics: Mapping[str, Any]) ->
         "candidate_generation_ms": data.get("candidate_generation_ms", 0.0),
         "placement_ms": data.get("placement_ms", 0.0),
         "candidates_scored": data.get("candidates_scored", 0),
+        "footprint_types_considered": data.get("footprint_types_considered", 0),
+        "shifted_candidates_generated": data.get("shifted_candidates_generated", 0),
+        "expensive_candidates_scored": data.get("expensive_candidates_scored", data.get("candidates_scored", 0)),
+        "selected_footprint_id": data.get("selected_footprint_id"),
+        "selected_iou": data.get("selected_iou", data.get("iou")),
+        "selected_centroid_shift_m": data.get("selected_centroid_shift_m", data.get("centroid_shift_m")),
+        "selected_area_error_ratio": data.get("selected_area_error_ratio", data.get("area_error_ratio")),
         "candidate_limit_reached": data.get("candidate_limit_reached", False),
         "failure_reason": data.get("failure_reason"),
     }

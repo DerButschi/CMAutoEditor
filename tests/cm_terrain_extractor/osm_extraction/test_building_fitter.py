@@ -141,7 +141,7 @@ def test_simple_rectangle_fits_catalog_footprint_with_exact_iou() -> None:
     grid = _grid()
     outline = Polygon([(8, 8), (24, 8), (24, 16), (8, 16)])
 
-    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+    result = BuildingFitter(grid, rng=np.random.default_rng(7), debug_geometry=True).fit(
         (_feature("simple", outline),),
         catalogs={"houses": _catalog_rows()},
     )
@@ -163,7 +163,7 @@ def test_small_rectangle_does_not_expand_to_two_by_two_full_cells() -> None:
     grid = _grid()
     outline = Polygon([(8, 8), (16, 8), (16, 16), (8, 16)])
 
-    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+    result = BuildingFitter(grid, rng=np.random.default_rng(7), debug_geometry=True).fit(
         (_feature("small", outline),),
         catalogs={"houses": _catalog_rows()},
     )
@@ -258,7 +258,7 @@ def test_road_occupancy_is_avoided_when_shifted_candidate_is_available() -> None
     )
 
     outline = Polygon([(16, 16), (24, 16), (24, 24), (16, 24)])
-    result = BuildingFitter(grid, occupancy=occupancy, rng=np.random.default_rng(7)).fit(
+    result = BuildingFitter(grid, occupancy=occupancy, rng=np.random.default_rng(7), debug_geometry=True).fit(
         (_feature("near-road", outline),),
         catalogs={"houses": (_catalog_rows()[0],)},
     )
@@ -350,6 +350,104 @@ def test_candidate_scoring_uses_actual_footprint_iou_not_reserved_cells() -> Non
     assert result.placements[0].diagnostics["iou"] == 1.0
 
 
+def test_area_shortlist_selects_medium_footprint_instead_of_first_tiny_catalog_entry() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+
+    grid = _grid(width=8, height=8)
+    outline = Polygon([(16, 16), (40, 16), (40, 32), (16, 32)])
+    tiny_rows = tuple(
+        {
+            "id": f"tiny-{index}",
+            "width": 1,
+            "height": 1,
+            "row": index,
+            "col": 0,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": f"Tiny {index}",
+            "is_modular": False,
+            "weight": 1.0,
+        }
+        for index in range(20)
+    )
+    catalog = (
+        *tiny_rows,
+        {
+            "id": "medium-fit",
+            "width": 6,
+            "height": 4,
+            "row": 99,
+            "col": 0,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": "Medium Fit",
+            "is_modular": False,
+            "weight": 1.0,
+        },
+    )
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+        (_feature("medium", outline),),
+        catalogs={"houses": catalog},
+    )
+
+    diagnostics = result.placements[0].diagnostics
+    assert result.placed_count == 1
+    assert result.placements[0].cm_type.cat2 == "Medium Fit"
+    assert diagnostics["selected_area_error_ratio"] == pytest.approx(0.0)
+    assert "selected_footprint_polygon" not in diagnostics
+
+
+def test_scored_candidate_cap_still_considers_late_area_compatible_footprints() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+
+    grid = _grid(width=8, height=8)
+    outline = Polygon([(16, 16), (40, 16), (40, 32), (16, 32)])
+    catalog = tuple(
+        {
+            "id": f"tiny-{index}",
+            "width": 1,
+            "height": 1,
+            "row": index,
+            "col": 0,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": f"Tiny {index}",
+            "is_modular": False,
+            "weight": 1.0,
+        }
+        for index in range(20)
+    ) + (
+        {
+            "id": "late-fit",
+            "width": 6,
+            "height": 4,
+            "row": 99,
+            "col": 0,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": "Late Fit",
+            "is_modular": False,
+            "weight": 1.0,
+        },
+    )
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7), max_candidates_per_building=2).fit(
+        (_feature("capped", outline),),
+        catalogs={"houses": catalog},
+    )
+
+    diagnostics = result.diagnostics_by_feature["capped"]
+    assert result.placements[0].cm_type.cat2 == "Late Fit"
+    assert diagnostics["candidate_limit_reached"] is True
+    assert diagnostics["expensive_candidates_scored"] <= 2
+    assert diagnostics["footprint_types_considered"] <= 24
+
+
 def test_geometric_road_overlap_penalty_avoids_half_road_cover() -> None:
     from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
     from terrain_extraction.osm_extraction.models import (
@@ -378,7 +476,7 @@ def test_geometric_road_overlap_penalty_avoids_half_road_cover() -> None:
     )
     outline = Polygon([(4, 8), (12, 8), (12, 16), (4, 16)])
 
-    result = BuildingFitter(grid, occupancy=occupancy, rng=np.random.default_rng(7)).fit(
+    result = BuildingFitter(grid, occupancy=occupancy, rng=np.random.default_rng(7), debug_geometry=True).fit(
         (_feature("road-edge", outline),),
         catalogs={"houses": (_catalog_rows()[0],)},
     )
@@ -386,6 +484,59 @@ def test_geometric_road_overlap_penalty_avoids_half_road_cover() -> None:
     selected = result.placements[0].diagnostics["selected_footprint_polygon"]
     assert selected.intersection(grid.cell_polygon(GridCell(0, 1))).area == pytest.approx(0.0)
     assert result.placements[0].diagnostics["road_overlap_area_m2"] == 0.0
+
+
+def test_road_overlap_metrics_only_scan_local_candidate_window() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        GridCell,
+        GridKind,
+        LayerKind,
+        PlacementRecord,
+    )
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    grid = _grid(width=30, height=30)
+    occupancy = OccupancyModel.from_grid_index(grid)
+    for index in range(100):
+        cell = GridCell(20 + index % 10, 20 + index // 10)
+        occupancy.place(
+            PlacementRecord(
+                layer=LayerKind.LINEAR_SURFACE,
+                grid_kind=GridKind.NORMAL,
+                cells=(cell,),
+                config_name="road",
+                feature_id=f"far-road-{index}",
+                priority=1,
+                cm_type=CMType(menu="Roads", cat1="Road"),
+                score=1.0,
+            ),
+            object_id=f"far-road-{index}",
+        )
+    occupancy.place(
+        PlacementRecord(
+            layer=LayerKind.LINEAR_SURFACE,
+            grid_kind=GridKind.NORMAL,
+            cells=(GridCell(2, 2),),
+            config_name="road",
+            feature_id="near-road",
+            priority=1,
+            cm_type=CMType(menu="Roads", cat1="Road"),
+            score=1.0,
+        ),
+        object_id="near-road",
+    )
+    outline = Polygon([(16, 16), (24, 16), (24, 24), (16, 24)])
+
+    result = BuildingFitter(grid, occupancy=occupancy, rng=np.random.default_rng(7)).fit(
+        (_feature("local-road", outline),),
+        catalogs={"houses": (_catalog_rows()[0],)},
+    )
+
+    assert result.placed_count == 1
+    assert result.placements[0].cells != (GridCell(2, 2),)
+    assert result.diagnostics["shapely_overlap_evaluations"] < 25
 
 
 def test_candidate_generation_is_bounded_and_records_fallback_diagnostics() -> None:
@@ -412,6 +563,53 @@ def test_candidate_generation_is_bounded_and_records_fallback_diagnostics() -> N
     assert result.diagnostics["shapely_score_evaluations"] == diagnostics["candidates_scored"]
     assert result.diagnostics["shapely_overlap_evaluations"] >= 0
     assert result.placed_count + result.dropped_count == 1
+
+
+def test_many_buildings_keep_scored_candidates_and_diagnostics_bounded() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+
+    grid = _grid(width=30, height=30)
+    features = tuple(
+        _feature(
+            f"building-{index}",
+            Polygon(
+                    [
+                        (24 * (index % 5) + 16, 16 * (index // 5) + 16),
+                        (24 * (index % 5) + 32, 16 * (index // 5) + 16),
+                        (24 * (index % 5) + 32, 16 * (index // 5) + 24),
+                        (24 * (index % 5) + 16, 16 * (index // 5) + 24),
+                ]
+            ),
+        )
+        for index in range(20)
+    )
+    catalog = tuple(
+        {
+            "id": f"footprint-{width}-{height}",
+            "width": width,
+            "height": height,
+            "row": width,
+            "col": height,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": f"{width}x{height}",
+            "is_modular": False,
+            "weight": 1.0,
+        }
+        for width in range(1, 10)
+        for height in range(1, 6)
+    )
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(features, catalogs={"houses": catalog})
+
+    scored = [diagnostics["expensive_candidates_scored"] for diagnostics in result.diagnostics_by_feature.values()]
+    shifted = [diagnostics["shifted_candidates_generated"] for diagnostics in result.diagnostics_by_feature.values()]
+    assert result.placed_count == len(features)
+    assert max(scored) <= 64
+    assert max(shifted) <= 24 * 9
+    assert result.diagnostics["shapely_score_evaluations"] == sum(scored)
+    assert all("selected_footprint_polygon" not in placement.diagnostics for placement in result.placements)
 
 
 def test_constrained_building_clusters_are_placed_before_open_clusters() -> None:
