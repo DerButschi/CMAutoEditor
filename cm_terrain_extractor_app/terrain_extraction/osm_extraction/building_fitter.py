@@ -18,6 +18,7 @@ from terrain_extraction.osm_extraction.building_geometry import (
     output_index_from_local,
     reconstruct_building_footprint_polygon,
 )
+from terrain_extraction.osm_extraction.final_geometry import reconstruct_building_row_geometry
 from terrain_extraction.osm_extraction.models import (
     BuildingFittingResult,
     CMType,
@@ -70,6 +71,7 @@ class BuildingFootprint:
     direction: int | None
     row: int
     col: int
+    building_type: str | None = None
     is_diagonal: bool = False
     is_modular: bool = False
     weight: float = 1.0
@@ -238,6 +240,7 @@ class BuildingFitter:
         max_modular_states: int = _DEFAULT_MAX_MODULAR_STATES,
         max_modular_time_ms: float = _DEFAULT_MAX_MODULAR_TIME_MS,
         debug_geometry: bool = False,
+        profile: str = "cold_war",
     ) -> None:
         self.grid_index = grid_index
         self.occupancy = occupancy or OccupancyModel.from_grid_index(grid_index)
@@ -259,6 +262,7 @@ class BuildingFitter:
         self.max_modular_states = max(1, max_modular_states)
         self.max_modular_time_ms = max(0.0, max_modular_time_ms)
         self.debug_geometry = debug_geometry
+        self.profile = profile
         self._shapely_score_evaluations = 0
         self._shapely_overlap_evaluations = 0
 
@@ -451,6 +455,7 @@ class BuildingFitter:
                 polygon,
                 descriptor,
                 footprints,
+                feature.config_name,
             )
             modular_elapsed_ms = round((time.perf_counter() - modular_started_at) * 1000.0, 3)
             modular_piece_count = int(modular_diagnostics.get("modular_piece_count", 0))
@@ -461,6 +466,7 @@ class BuildingFitter:
                 polygon,
                 descriptor,
                 selected_single_profiles,
+                feature.config_name,
                 placement_limit=fallback_limit,
             )
             candidates.extend(single_candidates)
@@ -471,6 +477,7 @@ class BuildingFitter:
                 polygon,
                 descriptor,
                 selected_single_profiles,
+                feature.config_name,
             )
             candidates.extend(single_candidates)
 
@@ -542,6 +549,7 @@ class BuildingFitter:
         polygon: Polygon,
         descriptor: BuildingDescriptor,
         footprint_profiles: tuple[_FootprintProfile, ...],
+        config_name: str,
         placement_limit: int | None = None,
     ) -> tuple[tuple[BuildingCandidate, ...], int]:
         candidates: list[BuildingCandidate] = []
@@ -557,7 +565,7 @@ class BuildingFitter:
                     candidates.sort(key=_candidate_sort_key)
                     return tuple(candidates), generated
                 generated += 1
-                candidates.append(self._score_candidate(polygon, descriptor, profile.footprint, geometry))
+                candidates.append(self._score_candidate(polygon, descriptor, profile.footprint, geometry, config_name))
         candidates.sort(key=_candidate_sort_key)
         return tuple(candidates), generated
 
@@ -622,6 +630,7 @@ class BuildingFitter:
         polygon: Polygon,
         descriptor: BuildingDescriptor,
         footprints: tuple[BuildingFootprint, ...],
+        config_name: str,
     ) -> tuple[tuple[BuildingCandidate, ...], bool, Mapping[str, Any]]:
         modular_profiles = tuple(
             sorted(
@@ -662,7 +671,7 @@ class BuildingFitter:
             orientation_class="axis",
         )
         candidates = tuple(
-            self._score_candidate(polygon, descriptor, profile.footprint, geometry)
+            self._score_candidate(polygon, descriptor, profile.footprint, geometry, config_name)
             for profile in modular_profiles
         )
         return candidates, piece_limit_reached, {
@@ -1022,9 +1031,13 @@ class BuildingFitter:
         descriptor: BuildingDescriptor,
         footprint: BuildingFootprint,
         geometry: _CandidateGeometry,
+        config_name: str,
     ) -> BuildingCandidate:
-        footprint_polygon = geometry.footprint_polygon
+        footprint_polygon = self._final_candidate_footprint(footprint, geometry, config_name)
         self._shapely_score_evaluations += 1
+        final_cells = _cells_overlapped_by_polygon(self.grid_index, footprint_polygon)
+        if not final_cells:
+            final_cells = geometry.cells
         union_area = footprint_polygon.union(polygon).area
         iou = footprint_polygon.intersection(polygon).area / union_area if union_area > 0 else 0.0
         centroid_shift = footprint_polygon.centroid.distance(polygon.centroid)
@@ -1035,7 +1048,7 @@ class BuildingFitter:
         road_overlap_area, road_overlap_ratio, road_overlap_cells = self._linear_overlap_metrics(footprint_polygon)
         placement = _placement_from_candidate(
             footprint,
-            geometry.cells,
+            final_cells,
             polygon,
             iou,
             centroid_shift,
@@ -1071,11 +1084,11 @@ class BuildingFitter:
             - road_overlap_ratio * 250.0
             - road_overlap * 250.0
             - non_road_collision_count * 100.0
-            - max(0, len(geometry.cells) - 1) * (0.05 if footprint.is_modular else 0.0)
+            - max(0, len(final_cells) - 1) * (0.05 if footprint.is_modular else 0.0)
         )
         return BuildingCandidate(
             footprint=footprint,
-            cells=geometry.cells,
+            cells=final_cells,
             footprint_polygon=footprint_polygon,
             output_xidx=geometry.output_xidx,
             output_yidx=geometry.output_yidx,
@@ -1097,6 +1110,29 @@ class BuildingFitter:
             score=score,
             limit_reached=False,
         )
+
+    def _final_candidate_footprint(
+        self,
+        footprint: BuildingFootprint,
+        geometry: _CandidateGeometry,
+        config_name: str,
+    ) -> BaseGeometry:
+        if geometry.output_xidx is None or geometry.output_yidx is None:
+            return geometry.footprint_polygon
+        row = {
+            "xidx": geometry.output_xidx,
+            "yidx": geometry.output_yidx,
+            "menu": footprint.cm_type.menu,
+            "cat1": footprint.cm_type.cat1,
+            "cat2": footprint.cm_type.cat2,
+            "direction": footprint.cm_type.direction,
+            "name": config_name,
+            "_building_type": footprint.building_type,
+        }
+        try:
+            return reconstruct_building_row_geometry(self.grid_index, row, profile=self.profile).geometry
+        except ValueError:
+            return geometry.footprint_polygon
 
     def _place_building(self, building: _PreparedBuilding) -> PlacementRecord | None:
         ordered_candidates = self._ordered_candidates(building.candidates)
@@ -1295,6 +1331,7 @@ def _footprint_from_record(record: Mapping[str, Any]) -> BuildingFootprint:
         direction=direction,
         row=row,
         col=col,
+        building_type=record.get("building_type"),
         is_diagonal=bool(record.get("is_diagonal", False)),
         is_modular=bool(record.get("is_modular", False)),
         weight=float(record.get("weight", 1.0)),
@@ -1487,6 +1524,7 @@ def _placement_from_candidate(
         "selected_direction": selected_direction,
         "selected_is_diagonal": selected_is_diagonal,
         "selected_is_modular": footprint.is_modular,
+        "building_type": footprint.building_type,
         "selected_iou": round(iou, 6),
         "selected_centroid_shift_m": round(centroid_shift, 6),
         "selected_area_error_ratio": round(area_error, 6),

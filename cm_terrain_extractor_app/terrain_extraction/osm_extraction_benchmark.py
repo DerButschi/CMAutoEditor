@@ -219,7 +219,8 @@ def _build_stats(
         "rows_outside_map": _count_rows_outside_map(processor, output_df),
         "duplicate_cells_after_post_process": _count_duplicate_cells(post_process_df),
         "linear_connected_components": _count_linear_components(processor.config, post_process_df),
-        "building_linear_collisions": _count_building_linear_collisions(processor.config, post_process_df),
+        "building_linear_collisions": _count_final_geometry_collisions(extraction_diagnostics),
+        "cell_building_linear_collisions": _count_building_linear_collisions(processor.config, post_process_df),
         "source_building_linear_intersections": _count_source_building_linear_intersections(fixture_data),
     }
     quality["reported_collision_cells"] = max(
@@ -318,6 +319,18 @@ def _count_building_linear_collisions(config: dict[str, Any], df: pd.DataFrame) 
     linear_cells = _cells_for_processes(config, df, LINEAR_PROCESSES)
     building_cells = _cells_for_buildings(config, df)
     return len(linear_cells & building_cells)
+
+
+def _count_final_geometry_collisions(extraction_diagnostics: Mapping[str, Any]) -> int:
+    validation = extraction_diagnostics.get("diagnostics", {}).get("final_geometry_validation")
+    if validation is None:
+        return 0
+    issues = getattr(validation, "issues", None)
+    if issues is not None:
+        return len(issues)
+    if isinstance(validation, Mapping):
+        return len(validation.get("issues", ()) or ())
+    return 0
 
 
 def _count_source_building_linear_intersections(fixture_data: dict[str, Any]) -> int:

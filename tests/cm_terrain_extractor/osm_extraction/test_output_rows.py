@@ -425,7 +425,7 @@ def test_geometric_building_road_validation_rejects_partial_overlap() -> None:
         priority=5,
         menu="Independent Buildings",
         cat1="House",
-        cat2="Small House",
+        cat2="Building 1",
         direction="Direction 1",
         grid_kind=GridKind.SUB_SQUARE,
         diagnostics={
@@ -435,20 +435,18 @@ def test_geometric_building_road_validation_rejects_partial_overlap() -> None:
             "selected_width_units": 2,
             "selected_height_units": 2,
             "selected_is_diagonal": False,
+            "building_type": "residential_buildings",
         },
     )
 
-    with pytest.raises(OutputRowValidationError, match="building-road footprint collision"):
+    with pytest.raises(OutputRowValidationError, match="final building-linear geometry collision"):
         placements_to_output_rows((road, building), include_internal=True, grid_index=_grid())
 
 
-def test_geometric_building_validation_rejects_inconsistent_output_coordinates() -> None:
+def test_geometric_building_validation_uses_final_row_not_diagnostics_polygon() -> None:
     from shapely.geometry import Polygon
     from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
-    from terrain_extraction.osm_extraction.output_rows import (
-        OutputRowValidationError,
-        placements_to_output_rows,
-    )
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
 
     building = _placement(
         layer=LayerKind.BUILDING,
@@ -457,7 +455,7 @@ def test_geometric_building_validation_rejects_inconsistent_output_coordinates()
         priority=5,
         menu="Independent Buildings",
         cat1="House",
-        cat2="Small House",
+        cat2="Building 1",
         direction="Direction 1",
         grid_kind=GridKind.SUB_SQUARE,
         diagnostics={
@@ -467,11 +465,148 @@ def test_geometric_building_validation_rejects_inconsistent_output_coordinates()
             "selected_width_units": 2,
             "selected_height_units": 2,
             "selected_is_diagonal": False,
+            "building_type": "residential_buildings",
         },
     )
 
-    with pytest.raises(OutputRowValidationError, match="inconsistent with output coordinates"):
-        placements_to_output_rows((building,), include_internal=True, grid_index=_grid())
+    rows = placements_to_output_rows((building,), include_internal=True, grid_index=_grid())
+
+    assert rows[0]["xidx"] == 0.5
+
+
+def test_final_geometry_reconstructs_normal_half_shift_and_legacy_offset_contract() -> None:
+    from terrain_extraction.osm_extraction.final_geometry import reconstruct_building_row_geometry
+
+    grid = _grid()
+    normal = reconstruct_building_row_geometry(
+        grid,
+        {
+            "xidx": 0.5,
+            "yidx": 0.5,
+            "menu": "Independent Buildings",
+            "cat1": "House",
+            "cat2": "Building 1",
+            "direction": "Direction 1",
+            "name": "houses",
+            "_building_type": "residential_buildings",
+        },
+    ).geometry
+    half_shifted = reconstruct_building_row_geometry(
+        grid,
+        {
+            "xidx": 0.25,
+            "yidx": 0.5,
+            "menu": "Independent Buildings",
+            "cat1": "House",
+            "cat2": "Building 1",
+            "direction": "Direction 1",
+            "name": "houses",
+            "_building_type": "residential_buildings",
+        },
+    ).geometry
+
+    assert normal.bounds == pytest.approx((8.0, 8.0, 16.0, 16.0))
+    assert normal.area == pytest.approx(64.0)
+    assert half_shifted.bounds == pytest.approx((6.0, 8.0, 14.0, 16.0))
+
+
+def test_final_geometry_reconstructs_diagonal_and_direction_rotation() -> None:
+    from terrain_extraction.osm_extraction.final_geometry import reconstruct_building_row_geometry
+
+    grid = _grid()
+    diagonal = reconstruct_building_row_geometry(
+        grid,
+        {
+            "xidx": 1.5,
+            "yidx": 1.0,
+            "menu": "Independent Buildings",
+            "cat1": "House",
+            "cat2": "Building 7",
+            "direction": "Direction 1",
+            "name": "houses",
+            "_building_type": "residential_buildings",
+        },
+    )
+    direction_1 = reconstruct_building_row_geometry(
+        grid,
+        {
+            "xidx": 0.5,
+            "yidx": 0.5,
+            "menu": "Independent Buildings",
+            "cat1": "House",
+            "cat2": "Building 2",
+            "direction": "Direction 1",
+            "name": "houses",
+            "_building_type": "residential_buildings",
+        },
+    ).geometry
+    direction_2 = reconstruct_building_row_geometry(
+        grid,
+        {
+            "xidx": 0.5,
+            "yidx": 0.5,
+            "menu": "Independent Buildings",
+            "cat1": "House",
+            "cat2": "Building 2",
+            "direction": "Direction 2",
+            "name": "houses",
+            "_building_type": "residential_buildings",
+        },
+    ).geometry
+
+    assert diagonal.is_diagonal is True
+    assert diagonal.geometry.bounds == pytest.approx((16.0, 4.0, 32.0, 20.0))
+    assert diagonal.geometry.area == pytest.approx(128.0)
+    assert direction_1.bounds == pytest.approx((8.0, 8.0, 20.0, 16.0))
+    assert direction_2.bounds == pytest.approx((8.0, 8.0, 16.0, 20.0))
+
+
+def test_final_row_geometry_catches_collision_that_cell_only_validation_misses() -> None:
+    from terrain_extraction.osm_extraction.final_geometry import validate_final_output_geometry
+
+    rows = (
+        {
+            "xidx": 0,
+            "yidx": 1,
+            "z": -1,
+            "menu": "Roads",
+            "cat1": "Dirt",
+            "cat2": "Road Tile 1",
+            "direction": "Direction 1",
+            "id": -1,
+            "name": "road",
+            "priority": 4,
+            "_layer": "linear_surface",
+            "_cell_xidx": 0,
+            "_cell_yidx": 1,
+        },
+        {
+            "xidx": 0.25,
+            "yidx": 0.5,
+            "z": -1,
+            "menu": "Independent Buildings",
+            "cat1": "House",
+            "cat2": "Building 1",
+            "direction": "Direction 1",
+            "id": -1,
+            "name": "houses",
+            "priority": 5,
+            "_layer": "building",
+            "_cell_xidx": 1,
+            "_cell_yidx": 1,
+            "_building_type": "residential_buildings",
+        },
+    )
+
+    cell_only_overlap = (rows[0]["_cell_xidx"], rows[0]["_cell_yidx"]) == (
+        rows[1]["_cell_xidx"],
+        rows[1]["_cell_yidx"],
+    )
+    validation = validate_final_output_geometry(rows, _grid())
+
+    assert cell_only_overlap is False
+    assert validation.is_valid is False
+    assert validation.issues[0].overlap_area_m2 == pytest.approx(16.0)
 
 
 def test_pipeline_assembles_output_rows_without_migration_flag() -> None:

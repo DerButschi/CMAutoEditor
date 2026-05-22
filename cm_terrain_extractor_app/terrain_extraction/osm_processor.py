@@ -468,7 +468,11 @@ class OSMProcessor:
             placements_to_output_rows,
         )
 
-        rows = placements_to_output_rows(self.placements, grid_index=getattr(self, "grid_index", None))
+        rows = placements_to_output_rows(
+            self.placements,
+            grid_index=getattr(self, "grid_index", None),
+            profile=getattr(self, "profile", "cold_war"),
+        )
         self.df = pandas.DataFrame.from_records(rows, columns=OUTPUT_ROW_COLUMNS)
 
     def _typed_features_from_matched_elements(self):
@@ -566,6 +570,7 @@ class OSMProcessor:
                     get_building_cat2(building_type, row, col, self.profile)
                     for row, col in building_tiles.loc[:, ["row", "col"]].itertuples(index=False, name=None)
                 ]
+                building_tiles["building_type"] = building_type
                 catalogs[feature.config_name] = building_tiles
         return catalogs
 
@@ -796,6 +801,7 @@ class OSMProcessor:
         return hasattr(self, "idx_bbox") and self.idx_bbox is not None and hasattr(self, "placements")
 
     def _get_layered_output_rows(self):
+        from terrain_extraction.osm_extraction.final_geometry import validate_final_output_geometry
         from terrain_extraction.osm_extraction.output_rows import (
             OutputRowValidationError,
             append_extent_marker,
@@ -814,10 +820,16 @@ class OSMProcessor:
             tuple(getattr(self, "placements", ())),
             include_internal=True,
             grid_index=getattr(self, "grid_index", None),
+            profile=getattr(self, "profile", "cold_war"),
         )
         rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
         clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
         validate_output_rows(clipped_rows, bounds=bounds)
+        final_geometry_validation = validate_final_output_geometry(
+            clipped_rows,
+            getattr(self, "grid_index", None),
+            profile=getattr(self, "profile", "cold_war"),
+        )
         road_validation = validate_road_output_rows(clipped_rows, profile=getattr(self, "profile", None))
         road_validation_mode = getattr(getattr(self, "extraction_config", None), "road_validation_mode", "warn")
         road_validation_status = _road_validation_status(road_validation, mode=road_validation_mode)
@@ -825,6 +837,7 @@ class OSMProcessor:
             **dict(getattr(self, "pipeline_diagnostics", {}) or {}),
             "road_validation": road_validation,
             "road_validation_status": road_validation_status,
+            "final_geometry_validation": final_geometry_validation,
         }
         if road_validation_mode == "strict" and not road_validation.is_valid:
             raise OutputRowValidationError(road_validation.issue_summary())
@@ -866,6 +879,7 @@ class OSMProcessor:
                 tuple(getattr(self, "placements", ())),
                 include_internal=True,
                 grid_index=grid_index,
+                profile=getattr(self, "profile", "cold_war"),
             )
 
         debug_export = build_debug_layers(

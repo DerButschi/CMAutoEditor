@@ -699,6 +699,62 @@ def test_geometric_road_overlap_rejects_less_than_half_road_cover() -> None:
     assert result.placements[0].diagnostics["road_overlap_area_m2"] == 0.0
 
 
+def test_fitter_accepts_only_final_row_geometry_that_avoids_roads() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+    from terrain_extraction.osm_extraction.final_geometry import validate_final_output_geometry
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        GridCell,
+        GridKind,
+        LayerKind,
+        PlacementRecord,
+    )
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    grid = _grid()
+    occupancy = OccupancyModel.from_grid_index(grid)
+    road = PlacementRecord(
+        layer=LayerKind.LINEAR_SURFACE,
+        grid_kind=GridKind.NORMAL,
+        cells=(GridCell(0, 1),),
+        config_name="road",
+        feature_id="road-1",
+        priority=1,
+        cm_type=CMType(menu="Roads", cat1="Road"),
+        score=1.0,
+    )
+    occupancy.place(road, object_id="road-1")
+    outline = Polygon([(6, 8), (14, 8), (14, 16), (6, 16)])
+    catalog = (
+        {
+            "width": 2,
+            "height": 2,
+            "row": 0,
+            "col": 0,
+            "direction": 0,
+            "menu": "Independent Buildings",
+            "cat1": "House",
+            "cat2": "Building 1",
+            "building_type": "residential_buildings",
+            "is_modular": False,
+            "weight": 1.0,
+        },
+    )
+
+    result = BuildingFitter(grid, occupancy=occupancy, rng=np.random.default_rng(7)).fit(
+        (_feature("final-row-road-edge", outline),),
+        catalogs={"houses": catalog},
+    )
+    rows = placements_to_output_rows((road, *result.placements), include_internal=True, grid_index=grid)
+    validation = validate_final_output_geometry(rows, grid)
+
+    assert result.placed_count == 1
+    assert validation.is_valid is True
+    selected = result.placements[0].diagnostics["selected_footprint_polygon"]
+    assert selected.intersection(grid.cell_polygon(GridCell(0, 1))).area == pytest.approx(0.0)
+
+
 def test_selected_output_coordinates_reconstruct_collision_footprint() -> None:
     from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
     from terrain_extraction.osm_extraction.building_geometry import (

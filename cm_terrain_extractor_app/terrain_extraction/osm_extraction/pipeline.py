@@ -361,7 +361,7 @@ class ExtractionPipeline:
     ) -> ExtractionResult:
         from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
 
-        fitter = BuildingFitter(grid_index, occupancy=occupancy, rng=self.context.rng)
+        fitter = BuildingFitter(grid_index, occupancy=occupancy, rng=self.context.rng, profile=self.context.profile)
         fitting = fitter.fit(features, catalogs=catalogs)
         self.context.progress("building_fitting", 1.0, "Building fitting complete")
         return ExtractionResult(
@@ -378,6 +378,7 @@ class ExtractionPipeline:
         grid_index: GridIndex | None = None,
         road_validation_mode: RoadValidationMode = "strict",
     ) -> ExtractionResult:
+        from terrain_extraction.osm_extraction.final_geometry import validate_final_output_geometry
         from terrain_extraction.osm_extraction.output_rows import (
             OutputRowValidationError,
             append_extent_marker,
@@ -396,7 +397,12 @@ class ExtractionPipeline:
 
         def assemble_rows() -> tuple[Mapping[str, Any], ...]:
             nonlocal clipped_rows
-            internal_rows = placements_to_output_rows(placements, include_internal=True, grid_index=grid_index)
+            internal_rows = placements_to_output_rows(
+                placements,
+                include_internal=True,
+                grid_index=grid_index,
+                profile=self.context.profile,
+            )
             rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
             clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
             validate_output_rows(clipped_rows, bounds=bounds)
@@ -410,6 +416,11 @@ class ExtractionPipeline:
             return road_validation, road_validation_status
 
         road_validation, road_validation_status = _timed_stage(timings, "road_validation", validate_roads)
+        final_geometry_validation = validate_final_output_geometry(
+            clipped_rows,
+            grid_index,
+            profile=self.context.profile,
+        ) if grid_index is not None else None
         if road_validation_mode == "strict" and not road_validation.is_valid:
             raise OutputRowValidationError(road_validation.issue_summary())
         self.context.progress("output_assembly", 1.0, "Layered output rows assembled")
@@ -423,11 +434,15 @@ class ExtractionPipeline:
                     "mode": "layered_output",
                     "road_validation": road_validation.issue_summary(),
                     "road_validation_status": road_validation_status,
+                    "final_geometry_validation": None
+                    if final_geometry_validation is None
+                    else final_geometry_validation.issue_summary(),
                 },
             ),
             diagnostics={
                 "road_validation": road_validation,
                 "road_validation_status": road_validation_status,
+                "final_geometry_validation": final_geometry_validation,
                 "timings": timings,
             },
         )

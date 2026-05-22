@@ -9,6 +9,7 @@ from terrain_extraction.osm_extraction.building_geometry import (
     footprint_spec_from_diagnostics,
     reconstruct_building_footprint_polygon,
 )
+from terrain_extraction.osm_extraction.final_geometry import validate_final_output_geometry
 from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind, PlacementRecord
 
 OUTPUT_ROW_COLUMNS = ("xidx", "yidx", "z", "menu", "cat1", "cat2", "direction", "id", "name", "priority")
@@ -26,7 +27,9 @@ _LAYER_ORDER = {
     LayerKind.RESERVED: 6,
 }
 _LINEAR_LAYERS = frozenset({LayerKind.LINEAR_SURFACE, LayerKind.LINEAR_OBJECT})
-_INTERNAL_KEYS = frozenset({"_layer", "_grid_kind", "_feature_id", "_source_order", "_cell_xidx", "_cell_yidx"})
+_INTERNAL_KEYS = frozenset(
+    {"_layer", "_grid_kind", "_feature_id", "_source_order", "_cell_xidx", "_cell_yidx", "_building_type"}
+)
 
 
 class OutputRowValidationError(ValueError):
@@ -38,10 +41,15 @@ def placements_to_output_rows(
     *,
     include_internal: bool = False,
     grid_index: Any | None = None,
+    profile: str = "cold_war",
 ) -> tuple[Mapping[str, Any], ...]:
     placement_tuple = tuple(placements)
     _validate_building_placements(placement_tuple, grid_index=grid_index)
     rows = _rows_from_placements(placement_tuple)
+    if grid_index is not None:
+        final_geometry = validate_final_output_geometry(rows, grid_index, profile=profile)
+        if not final_geometry.is_valid:
+            raise OutputRowValidationError(final_geometry.issue_summary())
     validate_output_rows(rows)
     if include_internal:
         return tuple(rows)
@@ -154,26 +162,28 @@ def _rows_from_placements(placements: tuple[PlacementRecord, ...]) -> tuple[dict
         for cell, xidx, yidx in _row_entries_for_placement(placement):
             if _is_default_placement(placement) and (placement.layer, cell) in non_default_cells:
                 continue
-            rows.append(
-                {
-                    "xidx": xidx,
-                    "yidx": yidx,
-                    "z": _EMPTY_VALUE,
-                    "menu": placement.cm_type.menu,
-                    "cat1": placement.cm_type.cat1,
-                    "cat2": _output_value(placement.cm_type.cat2),
-                    "direction": _output_value(placement.cm_type.direction),
-                    "id": _output_value(placement.cm_type.tile_id),
-                    "name": placement.config_name,
-                    "priority": placement.priority,
-                    "_layer": placement.layer.value,
-                    "_grid_kind": placement.grid_kind.value,
-                    "_feature_id": placement.feature_id,
-                    "_source_order": source_order,
-                    "_cell_xidx": cell.xidx,
-                    "_cell_yidx": cell.yidx,
-                }
-            )
+            row = {
+                "xidx": xidx,
+                "yidx": yidx,
+                "z": _EMPTY_VALUE,
+                "menu": placement.cm_type.menu,
+                "cat1": placement.cm_type.cat1,
+                "cat2": _output_value(placement.cm_type.cat2),
+                "direction": _output_value(placement.cm_type.direction),
+                "id": _output_value(placement.cm_type.tile_id),
+                "name": placement.config_name,
+                "priority": placement.priority,
+                "_layer": placement.layer.value,
+                "_grid_kind": placement.grid_kind.value,
+                "_feature_id": placement.feature_id,
+                "_source_order": source_order,
+                "_cell_xidx": cell.xidx,
+                "_cell_yidx": cell.yidx,
+            }
+            building_type = placement.diagnostics.get("building_type")
+            if building_type is not None:
+                row["_building_type"] = building_type
+            rows.append(row)
     return tuple(sorted(rows, key=_row_sort_key))
 
 
@@ -204,8 +214,6 @@ def _validate_building_placements(placements: tuple[PlacementRecord, ...], *, gr
         for cell in placement.cells:
             if cell in linear_cells:
                 raise OutputRowValidationError(f"building-road collision at cell ({cell.xidx}, {cell.yidx})")
-        if grid_index is not None:
-            _validate_building_footprint(placement, placements, grid_index)
 
 
 def _validate_building_footprint(
