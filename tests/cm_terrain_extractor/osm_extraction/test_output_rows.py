@@ -44,6 +44,19 @@ def _placement(
     )
 
 
+def _grid(width: int = 4, height: int = 4):
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+
+    return GridIndex(
+        origin_x=0,
+        origin_y=0,
+        x_axis_unit=(1.0, 0.0),
+        y_axis_unit=(0.0, 1.0),
+        width=width,
+        height=height,
+    )
+
+
 def test_placements_to_output_rows_are_layered_stable_and_skip_shadowed_defaults() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, LayerKind
     from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
@@ -322,6 +335,143 @@ def test_building_road_validation_uses_all_blocked_building_cells() -> None:
 
     with pytest.raises(OutputRowValidationError, match="building-road collision"):
         placements_to_output_rows((road, building), include_internal=True)
+
+
+def test_final_rows_still_emit_one_row_per_building_piece() -> None:
+    from shapely.geometry import Polygon
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    building = _placement(
+        layer=LayerKind.BUILDING,
+        cell=GridCell(1, 1),
+        config_name="houses",
+        priority=5,
+        menu="Independent Buildings",
+        cat1="House",
+        cat2="Long House",
+        direction="Direction 1",
+        grid_kind=GridKind.SUB_SQUARE,
+        diagnostics={
+            "output_xidx": 0.5,
+            "output_yidx": 0.5,
+            "selected_footprint_polygon": Polygon([(8, 8), (24, 8), (24, 16), (8, 16)]),
+            "selected_width_units": 4,
+            "selected_height_units": 2,
+            "selected_is_diagonal": False,
+        },
+    )
+    object.__setattr__(building, "cells", (GridCell(1, 1), GridCell(2, 1)))
+
+    rows = placements_to_output_rows((building,), include_internal=True, grid_index=_grid())
+
+    assert len(rows) == 1
+    assert rows[0]["xidx"] == 0.5
+    assert rows[0]["yidx"] == 0.5
+
+
+def test_geometric_building_validation_accepts_effective_swapped_dimensions() -> None:
+    from shapely.geometry import Polygon
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    building = _placement(
+        layer=LayerKind.BUILDING,
+        cell=GridCell(1, 1),
+        config_name="houses",
+        priority=5,
+        menu="Independent Buildings",
+        cat1="House",
+        cat2="Tall House",
+        direction="Direction 1",
+        grid_kind=GridKind.SUB_SQUARE,
+        diagnostics={
+            "output_xidx": 0.5,
+            "output_yidx": 0.5,
+            "selected_footprint_polygon": Polygon([(8, 8), (24, 8), (24, 16), (8, 16)]),
+            "selected_width_units": 4,
+            "selected_height_units": 2,
+            "selected_is_diagonal": False,
+        },
+    )
+    object.__setattr__(building, "cells", (GridCell(1, 1), GridCell(2, 1)))
+
+    rows = placements_to_output_rows((building,), include_internal=True, grid_index=_grid())
+
+    assert len(rows) == 1
+
+
+def test_geometric_building_road_validation_rejects_partial_overlap() -> None:
+    from shapely.geometry import Polygon
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import (
+        OutputRowValidationError,
+        placements_to_output_rows,
+    )
+
+    road = _placement(
+        layer=LayerKind.LINEAR_SURFACE,
+        cell=GridCell(0, 1),
+        config_name="road",
+        priority=4,
+        menu="Roads",
+        cat1="Dirt",
+        feature_id="road-1",
+    )
+    building = _placement(
+        layer=LayerKind.BUILDING,
+        cell=GridCell(1, 1),
+        config_name="houses",
+        priority=5,
+        menu="Independent Buildings",
+        cat1="House",
+        cat2="Small House",
+        direction="Direction 1",
+        grid_kind=GridKind.SUB_SQUARE,
+        diagnostics={
+            "output_xidx": 0.25,
+            "output_yidx": 0.5,
+            "selected_footprint_polygon": Polygon([(6, 8), (14, 8), (14, 16), (6, 16)]),
+            "selected_width_units": 2,
+            "selected_height_units": 2,
+            "selected_is_diagonal": False,
+        },
+    )
+
+    with pytest.raises(OutputRowValidationError, match="building-road footprint collision"):
+        placements_to_output_rows((road, building), include_internal=True, grid_index=_grid())
+
+
+def test_geometric_building_validation_rejects_inconsistent_output_coordinates() -> None:
+    from shapely.geometry import Polygon
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import (
+        OutputRowValidationError,
+        placements_to_output_rows,
+    )
+
+    building = _placement(
+        layer=LayerKind.BUILDING,
+        cell=GridCell(1, 1),
+        config_name="houses",
+        priority=5,
+        menu="Independent Buildings",
+        cat1="House",
+        cat2="Small House",
+        direction="Direction 1",
+        grid_kind=GridKind.SUB_SQUARE,
+        diagnostics={
+            "output_xidx": 0.5,
+            "output_yidx": 0.5,
+            "selected_footprint_polygon": Polygon([(12, 8), (20, 8), (20, 16), (12, 16)]),
+            "selected_width_units": 2,
+            "selected_height_units": 2,
+            "selected_is_diagonal": False,
+        },
+    )
+
+    with pytest.raises(OutputRowValidationError, match="inconsistent with output coordinates"):
+        placements_to_output_rows((building,), include_internal=True, grid_index=_grid())
 
 
 def test_pipeline_assembles_output_rows_without_migration_flag() -> None:

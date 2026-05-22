@@ -660,7 +660,12 @@ def _json_value(value: Any) -> str:
 
 def _json_safe(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return {str(key): _json_safe(item) for key, item in value.items()}
+        debug_geometry_enabled = bool(value.get("debug_geometry_enabled"))
+        return {
+            str(key): _json_safe(item)
+            for key, item in value.items()
+            if key != "selected_footprint_polygon" or debug_geometry_enabled
+        }
     if isinstance(value, (tuple, list, set, frozenset)):
         return [_json_safe(item) for item in value]
     if isinstance(value, BaseGeometry):

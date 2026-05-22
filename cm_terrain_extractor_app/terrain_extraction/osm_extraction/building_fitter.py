@@ -10,6 +10,14 @@ import numpy as np
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
+from terrain_extraction.osm_extraction.building_geometry import (
+    EPSILON_M2,
+    cell_window_for_geometry,
+    local_bounds,
+    normal_cells_overlapped_by_polygon,
+    output_index_from_local,
+    reconstruct_building_footprint_polygon,
+)
 from terrain_extraction.osm_extraction.models import (
     BuildingFittingResult,
     CMType,
@@ -92,6 +100,12 @@ class BuildingCandidate:
     footprint_polygon: BaseGeometry
     output_xidx: float | None
     output_yidx: float | None
+    footprint_width_units: int
+    footprint_height_units: int
+    footprint_is_diagonal: bool
+    footprint_row: int
+    footprint_col: int
+    footprint_direction: int | None
     orientation_class: str
     iou: float
     centroid_shift_m: float
@@ -572,6 +586,8 @@ class BuildingFitter:
         for x_shift, y_shift in _placement_shift_offsets(shift_steps):
             origin_x = snapped_origin_x + x_shift * half_cell_size
             origin_y = snapped_origin_y + y_shift * half_cell_size
+            width_units = footprint.height_cells if swapped else footprint.width_cells
+            height_units = footprint.width_cells if swapped else footprint.height_cells
             footprint_polygon = _footprint_polygon_from_origin(
                 self.grid_index,
                 footprint,
@@ -591,8 +607,8 @@ class BuildingFitter:
                 anchor_cell=cells[0],
                 blocked_normal_cells=cells,
                 footprint_polygon=footprint_polygon,
-                footprint_width_units=footprint.width_cells,
-                footprint_height_units=footprint.height_cells,
+                footprint_width_units=width_units,
+                footprint_height_units=height_units,
                 footprint_is_diagonal=footprint.is_diagonal,
                 footprint_row=footprint.row,
                 footprint_col=footprint.col,
@@ -855,6 +871,8 @@ class BuildingFitter:
                 for x_shift, y_shift in _shift_offsets(self.local_shift_cells):
                     origin_x = (origin_x_base + x_shift) * half_cell_size
                     origin_y = (origin_y_base + y_shift) * half_cell_size
+                    width_units = footprint.height_cells if swapped else footprint.width_cells
+                    height_units = footprint.width_cells if swapped else footprint.height_cells
                     footprint_polygon = _footprint_polygon_from_origin(
                         self.grid_index,
                         footprint,
@@ -874,8 +892,8 @@ class BuildingFitter:
                         anchor_cell=cells[0],
                         blocked_normal_cells=cells,
                         footprint_polygon=footprint_polygon,
-                        footprint_width_units=footprint.width_cells,
-                        footprint_height_units=footprint.height_cells,
+                        footprint_width_units=width_units,
+                        footprint_height_units=height_units,
                         footprint_is_diagonal=footprint.is_diagonal,
                         footprint_row=footprint.row,
                         footprint_col=footprint.col,
@@ -1023,13 +1041,20 @@ class BuildingFitter:
             centroid_shift,
             angle_error,
             area_error,
-            selected_footprint_polygon=footprint_polygon if self.debug_geometry else None,
+            selected_footprint_polygon=footprint_polygon,
             output_xidx=geometry.output_xidx,
             output_yidx=geometry.output_yidx,
+            footprint_width_units=geometry.footprint_width_units,
+            footprint_height_units=geometry.footprint_height_units,
+            footprint_is_diagonal=geometry.footprint_is_diagonal,
+            footprint_row=geometry.footprint_row,
+            footprint_col=geometry.footprint_col,
+            footprint_direction=geometry.footprint_direction,
             orientation_class=geometry.orientation_class,
             road_overlap_area_m2=road_overlap_area,
             road_overlap_ratio=road_overlap_ratio,
             road_overlap_cells=road_overlap_cells,
+            debug_geometry=self.debug_geometry,
         )
         decision = self.occupancy.can_place(placement)
         road_overlap_conflicts = sum(1 for conflict in decision.conflicts if conflict.blocking_layer in _LINEAR_LAYERS)
@@ -1054,6 +1079,12 @@ class BuildingFitter:
             footprint_polygon=footprint_polygon,
             output_xidx=geometry.output_xidx,
             output_yidx=geometry.output_yidx,
+            footprint_width_units=geometry.footprint_width_units,
+            footprint_height_units=geometry.footprint_height_units,
+            footprint_is_diagonal=geometry.footprint_is_diagonal,
+            footprint_row=geometry.footprint_row,
+            footprint_col=geometry.footprint_col,
+            footprint_direction=geometry.footprint_direction,
             orientation_class=geometry.orientation_class,
             iou=round(iou, 6),
             centroid_shift_m=centroid_shift,
@@ -1070,6 +1101,8 @@ class BuildingFitter:
     def _place_building(self, building: _PreparedBuilding) -> PlacementRecord | None:
         ordered_candidates = self._ordered_candidates(building.candidates)
         for candidate in ordered_candidates:
+            if candidate.road_overlap_area_m2 > EPSILON_M2 or candidate.road_overlap_cells > 0:
+                continue
             placement = self._placement_for_candidate(building, candidate)
             decision = self.occupancy.place(
                 placement,
@@ -1098,9 +1131,16 @@ class BuildingFitter:
             selected_footprint_polygon=candidate.footprint_polygon,
             output_xidx=candidate.output_xidx,
             output_yidx=candidate.output_yidx,
+            footprint_width_units=candidate.footprint_width_units,
+            footprint_height_units=candidate.footprint_height_units,
+            footprint_is_diagonal=candidate.footprint_is_diagonal,
+            footprint_row=candidate.footprint_row,
+            footprint_col=candidate.footprint_col,
+            footprint_direction=candidate.footprint_direction,
             orientation_class=candidate.orientation_class,
             road_overlap_area_m2=candidate.road_overlap_area_m2,
             road_overlap_ratio=candidate.road_overlap_ratio,
+            debug_geometry=self.debug_geometry,
         )
 
     def _repair_with_neighbor(
@@ -1184,7 +1224,7 @@ class BuildingFitter:
         overlap_area = 0.0
         overlap_cells = 0
         seen_geometry_objects: set[str | int] = set()
-        window = _cell_window_for_geometry(self.grid_index, polygon, margin_cells=1)
+        window = cell_window_for_geometry(self.grid_index, polygon, margin_cells=1)
         if window is None:
             return 0.0, 0.0, 0
         min_xidx, min_yidx, max_xidx, max_yidx = window
@@ -1315,19 +1355,13 @@ def _footprint_polygon_from_origin(
     *,
     swapped: bool,
 ) -> Polygon:
-    width = footprint.height_cells if swapped else footprint.width_cells
-    height = footprint.width_cells if swapped else footprint.height_cells
-    half_cell_size = grid_index.cell_size_m / 2.0
-    p0 = (origin_local_x, origin_local_y)
-    if footprint.is_diagonal:
-        p1 = (p0[0] + half_cell_size * width, p0[1] - half_cell_size * width)
-        p2 = (p1[0] + half_cell_size * height, p1[1] + half_cell_size * height)
-        p3 = (p2[0] - half_cell_size * width, p2[1] + half_cell_size * width)
-    else:
-        p1 = (p0[0] + half_cell_size * width, p0[1])
-        p2 = (p1[0], p1[1] + half_cell_size * height)
-        p3 = (p2[0] - half_cell_size * width, p2[1])
-    return grid_index._polygon_from_local_offsets([p0, p1, p2, p3])
+    return reconstruct_building_footprint_polygon(
+        grid_index,
+        output_index_from_local(grid_index, origin_local_x),
+        output_index_from_local(grid_index, origin_local_y),
+        footprint,
+        swapped=swapped,
+    )
 
 
 def _centered_origin_local(
@@ -1349,24 +1383,7 @@ def _centered_origin_local(
 
 
 def _cells_overlapped_by_polygon(grid_index: Any, polygon: BaseGeometry) -> tuple[GridCell, ...]:
-    min_local_x, min_local_y, max_local_x, max_local_y = _local_bounds(grid_index, polygon)
-    epsilon = 1e-9
-    window = grid_index.clipped_cell_window(
-        math.floor(min_local_x / grid_index.cell_size_m),
-        math.floor(min_local_y / grid_index.cell_size_m),
-        math.floor((max_local_x - epsilon) / grid_index.cell_size_m),
-        math.floor((max_local_y - epsilon) / grid_index.cell_size_m),
-    )
-    if window is None:
-        return ()
-    cells = []
-    min_xidx, min_yidx, max_xidx, max_yidx = window
-    for xidx in range(min_xidx, max_xidx + 1):
-        for yidx in range(min_yidx, max_yidx + 1):
-            cell = GridCell(xidx, yidx)
-            if polygon.intersection(grid_index.cell_polygon(cell)).area > 1e-9:
-                cells.append(cell)
-    return tuple(sorted(cells))
+    return normal_cells_overlapped_by_polygon(grid_index, polygon)
 
 
 def _cell_window_for_geometry(
@@ -1375,27 +1392,11 @@ def _cell_window_for_geometry(
     *,
     margin_cells: int = 0,
 ) -> tuple[int, int, int, int] | None:
-    min_local_x, min_local_y, max_local_x, max_local_y = _local_bounds(grid_index, geometry)
-    epsilon = 1e-9
-    return grid_index.clipped_cell_window(
-        math.floor(min_local_x / grid_index.cell_size_m) - margin_cells,
-        math.floor(min_local_y / grid_index.cell_size_m) - margin_cells,
-        math.floor((max_local_x - epsilon) / grid_index.cell_size_m) + margin_cells,
-        math.floor((max_local_y - epsilon) / grid_index.cell_size_m) + margin_cells,
-    )
+    return cell_window_for_geometry(grid_index, geometry, margin_cells=margin_cells)
 
 
 def _local_bounds(grid_index: Any, geometry: BaseGeometry) -> tuple[float, float, float, float]:
-    coordinates = []
-    if isinstance(geometry, Polygon):
-        coordinates.extend(geometry.exterior.coords)
-    else:
-        min_x, min_y, max_x, max_y = geometry.bounds
-        coordinates.extend(((min_x, min_y), (min_x, max_y), (max_x, min_y), (max_x, max_y)))
-    local_points = [grid_index.local_from_projected(x, y) for x, y in coordinates]
-    x_values = [point[0] for point in local_points]
-    y_values = [point[1] for point in local_points]
-    return min(x_values), min(y_values), max(x_values), max(y_values)
+    return local_bounds(grid_index, geometry)
 
 
 def _polygon_within_grid(grid_index: Any, polygon: BaseGeometry) -> bool:
@@ -1410,7 +1411,7 @@ def _polygon_within_grid(grid_index: Any, polygon: BaseGeometry) -> bool:
 
 
 def _output_index_from_local(grid_index: Any, local_value: float) -> float:
-    return _clean_float(local_value / grid_index.cell_size_m - 0.5)
+    return output_index_from_local(grid_index, local_value)
 
 
 def _output_indices_from_polygon_origin(grid_index: Any, polygon: BaseGeometry) -> tuple[float, float]:
@@ -1445,13 +1446,26 @@ def _placement_from_candidate(
     selected_footprint_polygon: BaseGeometry | None = None,
     output_xidx: float | None = None,
     output_yidx: float | None = None,
+    footprint_width_units: int | None = None,
+    footprint_height_units: int | None = None,
+    footprint_is_diagonal: bool | None = None,
+    footprint_row: int | None = None,
+    footprint_col: int | None = None,
+    footprint_direction: int | None = None,
     orientation_class: str | None = None,
     road_overlap_area_m2: float = 0.0,
     road_overlap_ratio: float = 0.0,
+    debug_geometry: bool = False,
 ) -> PlacementRecord:
     grid_kind = GridKind.SUB_SQUARE
     if footprint.is_diagonal:
         grid_kind = GridKind.DIAGONAL
+    selected_width_units = footprint.width_cells if footprint_width_units is None else footprint_width_units
+    selected_height_units = footprint.height_cells if footprint_height_units is None else footprint_height_units
+    selected_is_diagonal = footprint.is_diagonal if footprint_is_diagonal is None else footprint_is_diagonal
+    selected_row = footprint.row if footprint_row is None else footprint_row
+    selected_col = footprint.col if footprint_col is None else footprint_col
+    selected_direction = footprint.direction if footprint_direction is None else footprint_direction
     diagnostics = {
         "iou": round(iou, 6),
         "centroid_shift_m": round(centroid_shift, 6),
@@ -1466,12 +1480,12 @@ def _placement_from_candidate(
         "selected_footprint_id": footprint.footprint_id,
         "selected_width_cells": footprint.width_cells,
         "selected_height_cells": footprint.height_cells,
-        "selected_width_units": footprint.width_cells,
-        "selected_height_units": footprint.height_cells,
-        "selected_row": footprint.row,
-        "selected_col": footprint.col,
-        "selected_direction": footprint.direction,
-        "selected_is_diagonal": footprint.is_diagonal,
+        "selected_width_units": selected_width_units,
+        "selected_height_units": selected_height_units,
+        "selected_row": selected_row,
+        "selected_col": selected_col,
+        "selected_direction": selected_direction,
+        "selected_is_diagonal": selected_is_diagonal,
         "selected_is_modular": footprint.is_modular,
         "selected_iou": round(iou, 6),
         "selected_centroid_shift_m": round(centroid_shift, 6),
@@ -1480,6 +1494,9 @@ def _placement_from_candidate(
         "selected_road_overlap": road_overlap_cells,
         "output_grid_kind": grid_kind.value,
         "blocked_normal_cells": tuple((cell.xidx, cell.yidx) for cell in sorted(cells)),
+        "selected_blocked_normal_cells": tuple((cell.xidx, cell.yidx) for cell in sorted(cells)),
+        "selected_all_overlap_cells": tuple((cell.xidx, cell.yidx) for cell in sorted(cells)),
+        "debug_geometry_enabled": debug_geometry,
     }
     if selected_footprint_polygon is not None:
         diagnostics["selected_footprint_polygon"] = selected_footprint_polygon

@@ -4,6 +4,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import pytest
 from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
@@ -211,6 +212,7 @@ def test_rail_and_barn_debug_export_are_revalidated_as_first_class_layers() -> N
         cat1="Track",
         process=ProcessKind.RAIL,
     )
+    barn_footprint = Polygon([(8, 0), (24, 0), (24, 8), (8, 8)])
     barn = _placement(
         config_name="barns",
         feature_id="barn-1",
@@ -220,7 +222,7 @@ def test_rail_and_barn_debug_export_are_revalidated_as_first_class_layers() -> N
         cat1="Barn",
         process=ProcessKind.BUILDING_OUTLINE,
         diagnostics={
-            "selected_footprint_polygon": grid.cell_polygon(GridCell(1, 0)),
+            "selected_footprint_polygon": barn_footprint,
             "output_xidx": 0.5,
             "output_yidx": -0.5,
         },
@@ -239,6 +241,8 @@ def test_rail_and_barn_debug_export_are_revalidated_as_first_class_layers() -> N
     assert result.layers["source_features"].process.tolist() == ["rail", "building_outline"]
     assert set(result.layers["final_rows"].name.tolist()) == {"rail", "barns"}
     assert result.layers["building_footprints"].feature_id.tolist() == ["barn-1"]
+    assert result.layers["building_footprints"].geometry.iloc[0].equals_exact(barn_footprint, tolerance=0.001)
+    assert result.layers["building_footprints"].geometry.iloc[0].area == pytest.approx(128.0)
 
 
 def test_building_footprints_layer_reports_missing_selected_polygon() -> None:

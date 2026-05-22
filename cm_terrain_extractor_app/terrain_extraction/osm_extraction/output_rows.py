@@ -3,6 +3,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
+from shapely.geometry.base import BaseGeometry
+from terrain_extraction.osm_extraction.building_geometry import (
+    EPSILON_M2,
+    footprint_spec_from_diagnostics,
+    reconstruct_building_footprint_polygon,
+)
 from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind, PlacementRecord
 
 OUTPUT_ROW_COLUMNS = ("xidx", "yidx", "z", "menu", "cat1", "cat2", "direction", "id", "name", "priority")
@@ -31,9 +37,10 @@ def placements_to_output_rows(
     placements: Sequence[PlacementRecord],
     *,
     include_internal: bool = False,
+    grid_index: Any | None = None,
 ) -> tuple[Mapping[str, Any], ...]:
     placement_tuple = tuple(placements)
-    _validate_building_placements(placement_tuple)
+    _validate_building_placements(placement_tuple, grid_index=grid_index)
     rows = _rows_from_placements(placement_tuple)
     validate_output_rows(rows)
     if include_internal:
@@ -182,7 +189,7 @@ def _row_entries_for_placement(placement: PlacementRecord) -> tuple[tuple[GridCe
     return tuple((cell, *_row_coordinates(cell, placement.grid_kind)) for cell in placement.cells)
 
 
-def _validate_building_placements(placements: tuple[PlacementRecord, ...]) -> None:
+def _validate_building_placements(placements: tuple[PlacementRecord, ...], *, grid_index: Any | None = None) -> None:
     linear_cells = {
         cell
         for placement in placements
@@ -197,6 +204,36 @@ def _validate_building_placements(placements: tuple[PlacementRecord, ...]) -> No
         for cell in placement.cells:
             if cell in linear_cells:
                 raise OutputRowValidationError(f"building-road collision at cell ({cell.xidx}, {cell.yidx})")
+        if grid_index is not None:
+            _validate_building_footprint(placement, placements, grid_index)
+
+
+def _validate_building_footprint(
+    placement: PlacementRecord,
+    placements: tuple[PlacementRecord, ...],
+    grid_index: Any,
+) -> None:
+    geometry = placement.diagnostics.get("selected_footprint_polygon")
+    if not isinstance(geometry, BaseGeometry):
+        raise OutputRowValidationError(f"building placement is missing selected_footprint_polygon: {placement}")
+    if not placement.diagnostics.get("selected_is_modular", False):
+        reconstructed = reconstruct_building_footprint_polygon(
+            grid_index,
+            placement.diagnostics["output_xidx"],
+            placement.diagnostics["output_yidx"],
+            footprint_spec_from_diagnostics(placement.diagnostics),
+        )
+        if geometry.symmetric_difference(reconstructed).area > EPSILON_M2:
+            raise OutputRowValidationError("building selected footprint is inconsistent with output coordinates")
+    for linear in placements:
+        if linear.layer not in _LINEAR_LAYERS:
+            continue
+        for cell in linear.cells:
+            linear_geometry = linear.diagnostics.get("selected_footprint_polygon", grid_index.cell_polygon(cell))
+            if not isinstance(linear_geometry, BaseGeometry):
+                linear_geometry = grid_index.cell_polygon(cell)
+            if geometry.intersection(linear_geometry).area > EPSILON_M2:
+                raise OutputRowValidationError(f"building-road footprint collision at cell ({cell.xidx}, {cell.yidx})")
 
 
 def _validate_profile_labels(rows: tuple[Mapping[str, Any], ...]) -> None:

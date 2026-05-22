@@ -468,7 +468,7 @@ class OSMProcessor:
             placements_to_output_rows,
         )
 
-        rows = placements_to_output_rows(self.placements)
+        rows = placements_to_output_rows(self.placements, grid_index=getattr(self, "grid_index", None))
         self.df = pandas.DataFrame.from_records(rows, columns=OUTPUT_ROW_COLUMNS)
 
     def _typed_features_from_matched_elements(self):
@@ -810,7 +810,11 @@ class OSMProcessor:
         )
 
         bounds = tuple(self.idx_bbox)
-        internal_rows = placements_to_output_rows(tuple(getattr(self, "placements", ())), include_internal=True)
+        internal_rows = placements_to_output_rows(
+            tuple(getattr(self, "placements", ())),
+            include_internal=True,
+            grid_index=getattr(self, "grid_index", None),
+        )
         rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
         clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
         validate_output_rows(clipped_rows, bounds=bounds)
@@ -858,7 +862,11 @@ class OSMProcessor:
 
         output_rows = tuple(getattr(self, "output_rows", ()) or ())
         if not output_rows:
-            output_rows = placements_to_output_rows(tuple(getattr(self, "placements", ())), include_internal=True)
+            output_rows = placements_to_output_rows(
+                tuple(getattr(self, "placements", ())),
+                include_internal=True,
+                grid_index=grid_index,
+            )
 
         debug_export = build_debug_layers(
             features=tuple(getattr(self, "features", ())),

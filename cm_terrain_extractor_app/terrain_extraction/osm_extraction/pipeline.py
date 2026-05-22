@@ -235,6 +235,7 @@ class ExtractionPipeline:
         output_result = self.run_output_rows(
             placements=resolved_placements,
             bounds=bounds,
+            grid_index=grid_index,
             road_validation_mode=resolved_road_validation_mode,
         )
         timings.update(dict(output_result.diagnostics.get("timings", {}) or {}))
@@ -374,6 +375,7 @@ class ExtractionPipeline:
         *,
         placements: tuple[Any, ...],
         bounds: tuple[int | float, int | float, int | float, int | float],
+        grid_index: GridIndex | None = None,
         road_validation_mode: RoadValidationMode = "strict",
     ) -> ExtractionResult:
         from terrain_extraction.osm_extraction.output_rows import (
@@ -394,7 +396,7 @@ class ExtractionPipeline:
 
         def assemble_rows() -> tuple[Mapping[str, Any], ...]:
             nonlocal clipped_rows
-            internal_rows = placements_to_output_rows(placements, include_internal=True)
+            internal_rows = placements_to_output_rows(placements, include_internal=True, grid_index=grid_index)
             rows_with_extent = append_extent_marker(internal_rows, bounds=bounds, include_internal=True)
             clipped_rows = clip_output_rows_to_bounds(rows_with_extent, bounds=bounds)
             validate_output_rows(clipped_rows, bounds=bounds)

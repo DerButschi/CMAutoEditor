@@ -90,22 +90,22 @@ def _catalog_rows():
 
 
 def test_catalog_width_height_match_profile_half_cell_units() -> None:
-    from terrain_extraction.osm_extraction.building_fitter import (
-        BuildingCatalog,
-        _footprint_polygon_from_origin,
+    from terrain_extraction.osm_extraction.building_fitter import BuildingCatalog
+    from terrain_extraction.osm_extraction.building_geometry import (
+        reconstruct_building_footprint_polygon,
     )
 
     footprint = BuildingCatalog.from_records((_catalog_rows()[0],)).footprints[0]
-    polygon = _footprint_polygon_from_origin(_grid(), footprint, 8.0, 8.0, swapped=False)
+    polygon = reconstruct_building_footprint_polygon(_grid(), 0.5, 0.5, footprint)
 
     assert polygon.bounds == pytest.approx((8.0, 8.0, 16.0, 16.0))
     assert polygon.area == pytest.approx(64.0)
 
 
 def test_fitter_footprint_reconstruction_matches_profile_helper() -> None:
-    from terrain_extraction.osm_extraction.building_fitter import (
-        BuildingCatalog,
-        _footprint_polygon_from_origin,
+    from terrain_extraction.osm_extraction.building_fitter import BuildingCatalog
+    from terrain_extraction.osm_extraction.building_geometry import (
+        reconstruct_building_footprint_polygon,
     )
 
     from profiles import get_building_outline_by_df_entry
@@ -129,14 +129,52 @@ def test_fitter_footprint_reconstruction_matches_profile_helper() -> None:
         "cat2": "Building 1",
         "is_diagonal": is_diagonal,
     }
-    fitter_polygon = _footprint_polygon_from_origin(
+    fitter_polygon = reconstruct_building_footprint_polygon(
         _grid(),
+        -0.5,
+        -0.5,
         BuildingCatalog.from_records((record,)).footprints[0],
-        0.0,
-        0.0,
-        swapped=False,
     )
 
+    assert fitter_polygon.equals_exact(profile_polygon, tolerance=0.001)
+
+
+def test_diagonal_fitter_footprint_reconstruction_matches_profile_helper() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingCatalog
+    from terrain_extraction.osm_extraction.building_geometry import (
+        reconstruct_building_footprint_polygon,
+    )
+
+    from profiles import get_building_outline_by_df_entry
+
+    profile_polygon, is_diagonal = get_building_outline_by_df_entry(
+        "residential_buildings",
+        "Independent Buildings",
+        "House",
+        "Building 7",
+        "Direction 1",
+        profile="cold_war",
+    )
+    record = {
+        "width": 2,
+        "height": 2,
+        "row": 1,
+        "col": 2,
+        "direction": 0,
+        "menu": "Independent Buildings",
+        "cat1": "House",
+        "cat2": "Building 7",
+        "is_diagonal": is_diagonal,
+    }
+
+    fitter_polygon = reconstruct_building_footprint_polygon(
+        _grid(),
+        -0.5,
+        -0.5,
+        BuildingCatalog.from_records((record,)).footprints[0],
+    )
+
+    assert bool(is_diagonal) is True
     assert fitter_polygon.equals_exact(profile_polygon, tolerance=0.001)
 
 
@@ -162,7 +200,85 @@ def test_simple_rectangle_fits_catalog_footprint_with_exact_iou() -> None:
     assert result.placements[0].diagnostics["selected_footprint_polygon"].area == pytest.approx(128.0)
     assert result.placements[0].diagnostics["output_xidx"] == 0.5
     assert result.placements[0].diagnostics["output_yidx"] == 0.5
+    assert result.placements[0].diagnostics["selected_blocked_normal_cells"] == ((1, 1), (2, 1))
+    assert result.placements[0].diagnostics["selected_all_overlap_cells"] == ((1, 1), (2, 1))
+    assert result.placements[0].diagnostics["selected_width_units"] == 4
+    assert result.placements[0].diagnostics["selected_height_units"] == 2
+    assert result.placements[0].diagnostics["selected_is_diagonal"] is False
+    assert result.placements[0].diagnostics["selected_row"] == 0
+    assert result.placements[0].diagnostics["selected_col"] == 1
+    assert result.placements[0].diagnostics["selected_direction"] == 0
     assert result.placements[0].cm_type.cat2 == "Long House"
+
+
+def test_swapped_normal_candidate_diagnostics_use_effective_output_dimensions() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import (
+        BuildingCatalog,
+        _placement_from_candidate,
+    )
+    from terrain_extraction.osm_extraction.building_geometry import (
+        reconstruct_building_footprint_polygon,
+    )
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    grid = _grid()
+    footprint = BuildingCatalog.from_records(
+        (
+            {
+                "width": 2,
+                "height": 4,
+                "row": 0,
+                "col": 0,
+                "direction": 0,
+                "menu": "Buildings",
+                "cat1": "House",
+                "cat2": "Tall House",
+                "is_modular": False,
+                "weight": 1.0,
+            },
+        )
+    ).footprints[0]
+    selected_polygon = reconstruct_building_footprint_polygon(
+        grid,
+        0.5,
+        0.5,
+        {"width": 4, "height": 2, "is_diagonal": False},
+    )
+    placement = _placement_from_candidate(
+        footprint,
+        cells=(GridCell(1, 1), GridCell(2, 1)),
+        polygon=selected_polygon,
+        iou=1.0,
+        centroid_shift=0.0,
+        angle_error=0.0,
+        area_error=0.0,
+        selected_footprint_polygon=selected_polygon,
+        output_xidx=0.5,
+        output_yidx=0.5,
+        footprint_width_units=4,
+        footprint_height_units=2,
+    )
+
+    diagnostics = placement.diagnostics
+    reconstructed = reconstruct_building_footprint_polygon(
+        grid,
+        diagnostics["output_xidx"],
+        diagnostics["output_yidx"],
+        {
+            "width": diagnostics["selected_width_units"],
+            "height": diagnostics["selected_height_units"],
+            "is_diagonal": diagnostics["selected_is_diagonal"],
+        },
+    )
+    rows = placements_to_output_rows((placement,), include_internal=True, grid_index=grid)
+
+    assert diagnostics["selected_width_cells"] == 2
+    assert diagnostics["selected_height_cells"] == 4
+    assert diagnostics["selected_width_units"] == 4
+    assert diagnostics["selected_height_units"] == 2
+    assert reconstructed.equals_exact(diagnostics["selected_footprint_polygon"], tolerance=0.001)
+    assert len(rows) == 1
 
 
 def test_small_rectangle_does_not_expand_to_two_by_two_full_cells() -> None:
@@ -212,12 +328,15 @@ def test_diagonal_outline_can_select_diagonal_catalog_candidate() -> None:
         catalogs={"houses": catalog},
     )
 
+    selected = result.placements[0].diagnostics["selected_footprint_polygon"]
     assert result.placed_count == 1
     assert result.placements[0].grid_kind is GridKind.DIAGONAL
     assert result.placements[0].cm_type.cat2 == "Diagonal House"
     assert result.diagnostics_by_feature["diagonal"]["preferred_orientation"] == "diagonal"
     assert result.placements[0].diagnostics["footprint_orientation_class"] == "diagonal"
     assert result.placements[0].diagnostics["iou"] == 1.0
+    assert selected.equals_exact(outline, tolerance=0.001)
+    assert result.placements[0].diagnostics["selected_is_diagonal"] is True
 
 
 def test_complex_modular_footprint_is_not_collapsed_to_one_rectangle() -> None:
@@ -538,6 +657,86 @@ def test_geometric_road_overlap_penalty_avoids_half_road_cover() -> None:
     selected = result.placements[0].diagnostics["selected_footprint_polygon"]
     assert selected.intersection(grid.cell_polygon(GridCell(0, 1))).area == pytest.approx(0.0)
     assert result.placements[0].diagnostics["road_overlap_area_m2"] == 0.0
+
+
+def test_geometric_road_overlap_rejects_less_than_half_road_cover() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        GridCell,
+        GridKind,
+        LayerKind,
+        PlacementRecord,
+    )
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    grid = _grid()
+    occupancy = OccupancyModel.from_grid_index(grid)
+    road_cell = GridCell(0, 1)
+    occupancy.place(
+        PlacementRecord(
+            layer=LayerKind.LINEAR_SURFACE,
+            grid_kind=GridKind.NORMAL,
+            cells=(road_cell,),
+            config_name="road",
+            feature_id="road-1",
+            priority=1,
+            cm_type=CMType(menu="Roads", cat1="Road"),
+            score=1.0,
+        ),
+        object_id="road-1",
+    )
+    outline = Polygon([(6, 8), (14, 8), (14, 16), (6, 16)])
+
+    result = BuildingFitter(grid, occupancy=occupancy, rng=np.random.default_rng(7)).fit(
+        (_feature("sliver-road-edge", outline),),
+        catalogs={"houses": (_catalog_rows()[0],)},
+    )
+
+    selected = result.placements[0].diagnostics["selected_footprint_polygon"]
+    assert result.placed_count == 1
+    assert selected.intersection(grid.cell_polygon(road_cell)).area == pytest.approx(0.0)
+    assert result.placements[0].diagnostics["road_overlap_area_m2"] == 0.0
+
+
+def test_selected_output_coordinates_reconstruct_collision_footprint() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+    from terrain_extraction.osm_extraction.building_geometry import (
+        footprint_spec_from_diagnostics,
+        reconstruct_building_footprint_polygon,
+    )
+
+    grid = _grid()
+    outline = Polygon([(8, 16), (16, 8), (24, 16), (16, 24)])
+    catalog = (
+        {
+            "width": 2,
+            "height": 2,
+            "row": 0,
+            "col": 2,
+            "direction": 0,
+            "menu": "Buildings",
+            "cat1": "House",
+            "cat2": "Diagonal House",
+            "is_diagonal": True,
+            "is_modular": False,
+            "weight": 1.0,
+        },
+    )
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+        (_feature("diagonal-reconstruct", outline),),
+        catalogs={"houses": catalog},
+    )
+
+    diagnostics = result.placements[0].diagnostics
+    reconstructed = reconstruct_building_footprint_polygon(
+        grid,
+        diagnostics["output_xidx"],
+        diagnostics["output_yidx"],
+        footprint_spec_from_diagnostics(diagnostics),
+    )
+    assert reconstructed.equals_exact(diagnostics["selected_footprint_polygon"], tolerance=0.001)
 
 
 def test_road_overlap_metrics_only_scan_local_candidate_window() -> None:
