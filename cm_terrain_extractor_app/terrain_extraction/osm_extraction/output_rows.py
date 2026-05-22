@@ -32,7 +32,9 @@ def placements_to_output_rows(
     *,
     include_internal: bool = False,
 ) -> tuple[Mapping[str, Any], ...]:
-    rows = _rows_from_placements(tuple(placements))
+    placement_tuple = tuple(placements)
+    _validate_building_placements(placement_tuple)
+    rows = _rows_from_placements(placement_tuple)
     validate_output_rows(rows)
     if include_internal:
         return tuple(rows)
@@ -172,9 +174,29 @@ def _row_entries_for_placement(placement: PlacementRecord) -> tuple[tuple[GridCe
     if placement.layer is LayerKind.BUILDING:
         output_xidx = placement.diagnostics.get("output_xidx")
         output_yidx = placement.diagnostics.get("output_yidx")
-        if output_xidx is not None and output_yidx is not None and placement.cells:
-            return ((placement.cells[0], _clean_number(float(output_xidx)), _clean_number(float(output_yidx))),)
+        if output_xidx is None or output_yidx is None:
+            raise OutputRowValidationError(f"building placement is missing explicit output coordinates: {placement}")
+        if not placement.cells:
+            raise OutputRowValidationError(f"building placement has no blocked normal cells: {placement}")
+        return ((placement.cells[0], _clean_number(float(output_xidx)), _clean_number(float(output_yidx))),)
     return tuple((cell, *_row_coordinates(cell, placement.grid_kind)) for cell in placement.cells)
+
+
+def _validate_building_placements(placements: tuple[PlacementRecord, ...]) -> None:
+    linear_cells = {
+        cell
+        for placement in placements
+        if placement.layer in _LINEAR_LAYERS
+        for cell in placement.cells
+    }
+    for placement in placements:
+        if placement.layer is not LayerKind.BUILDING:
+            continue
+        if placement.diagnostics.get("output_xidx") is None or placement.diagnostics.get("output_yidx") is None:
+            raise OutputRowValidationError(f"building placement is missing explicit output coordinates: {placement}")
+        for cell in placement.cells:
+            if cell in linear_cells:
+                raise OutputRowValidationError(f"building-road collision at cell ({cell.xidx}, {cell.yidx})")
 
 
 def _validate_profile_labels(rows: tuple[Mapping[str, Any], ...]) -> None:

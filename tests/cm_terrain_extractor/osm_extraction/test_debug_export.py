@@ -8,6 +8,9 @@ from pyproj import CRS
 from shapely.geometry import LineString, Point, Polygon
 
 APP_DIR = Path(__file__).parents[3] / "cm_terrain_extractor_app"
+ROOT_DIR = Path(__file__).parents[3]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 if str(APP_DIR) not in sys.path:
     sys.path.append(str(APP_DIR))
 
@@ -94,7 +97,7 @@ def test_debug_layers_include_sources_topology_routes_anchors_occupancy_building
     )
     occupancy.place(road_placement, object_id="road-1")
 
-    building_shape = Polygon([(8, 8), (16, 8), (16, 16), (8, 16)])
+    building_shape = Polygon([(16, 8), (24, 8), (24, 16), (16, 16)])
     building_placement = _placement(
         config_name="barns",
         feature_id="barn-1",
@@ -103,7 +106,12 @@ def test_debug_layers_include_sources_topology_routes_anchors_occupancy_building
         menu="Buildings",
         cat1="Barn",
         process=ProcessKind.BUILDING_OUTLINE,
-        diagnostics={"selected_footprint_polygon": building_shape, "iou": 0.91},
+        diagnostics={
+            "selected_footprint_polygon": building_shape,
+            "output_xidx": 1.5,
+            "output_yidx": 0.5,
+            "iou": 0.91,
+        },
     )
     topology = TopologyGraph(
         nodes=(
@@ -211,7 +219,11 @@ def test_rail_and_barn_debug_export_are_revalidated_as_first_class_layers() -> N
         menu="Buildings",
         cat1="Barn",
         process=ProcessKind.BUILDING_OUTLINE,
-        diagnostics={"selected_footprint_polygon": grid.cell_polygon(GridCell(1, 0))},
+        diagnostics={
+            "selected_footprint_polygon": grid.cell_polygon(GridCell(1, 0)),
+            "output_xidx": 0.5,
+            "output_yidx": -0.5,
+        },
     )
 
     result = build_debug_layers(
@@ -227,6 +239,94 @@ def test_rail_and_barn_debug_export_are_revalidated_as_first_class_layers() -> N
     assert result.layers["source_features"].process.tolist() == ["rail", "building_outline"]
     assert set(result.layers["final_rows"].name.tolist()) == {"rail", "barns"}
     assert result.layers["building_footprints"].feature_id.tolist() == ["barn-1"]
+
+
+def test_building_footprints_layer_reports_missing_selected_polygon() -> None:
+    from terrain_extraction.osm_extraction.debug_export import build_debug_layers
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        GridCell,
+        GridKind,
+        LayerKind,
+        PlacementRecord,
+        ProcessKind,
+    )
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    grid = _grid()
+    barn = PlacementRecord(
+        layer=LayerKind.BUILDING,
+        grid_kind=GridKind.SUB_SQUARE,
+        cells=(GridCell(1, 0),),
+        config_name="barns",
+        feature_id="barn-1",
+        priority=2,
+        cm_type=CMType(menu="Buildings", cat1="Barn"),
+        score=1.0,
+        diagnostics={
+            "process": ProcessKind.BUILDING_OUTLINE.value,
+            "output_xidx": 0.5,
+            "output_yidx": -0.5,
+        },
+    )
+
+    result = build_debug_layers(
+        placements=(barn,),
+        output_rows=placements_to_output_rows((barn,), include_internal=True),
+        grid_index=grid,
+    )
+
+    assert "building_footprints" not in result.layers
+    assert result.diagnostics["layer_errors"] == (
+        {
+            "layer": "building_footprints",
+            "index": 0,
+            "error": "ValueError: building placement is missing selected_footprint_polygon",
+        },
+    )
+
+
+def test_debug_validation_reports_actual_building_footprint_road_overlap() -> None:
+    from terrain_extraction.osm_extraction.debug_export import build_debug_layers
+    from terrain_extraction.osm_extraction.models import GridCell, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    grid = _grid()
+    road = _placement(
+        config_name="road",
+        feature_id="road-1",
+        layer=LayerKind.LINEAR_SURFACE,
+        cell=GridCell(0, 0),
+        menu="Roads",
+        cat1="Dirt",
+    )
+    building = _placement(
+        config_name="barns",
+        feature_id="barn-1",
+        layer=LayerKind.BUILDING,
+        cell=GridCell(1, 0),
+        menu="Buildings",
+        cat1="Barn",
+        diagnostics={
+            "selected_footprint_polygon": Polygon([(4, 0), (12, 0), (12, 8), (4, 8)]),
+            "output_xidx": 0,
+            "output_yidx": -0.5,
+        },
+    )
+
+    result = build_debug_layers(
+        placements=(road, building),
+        output_rows=placements_to_output_rows((road, building), include_internal=True),
+        grid_index=grid,
+    )
+
+    assert {
+        "layer": "building_road_validation",
+        "index": 1,
+        "error": "ValueError: building footprint overlaps linear placement",
+        "linear_index": 0,
+        "cell": (0, 0),
+    } in result.diagnostics["layer_errors"]
 
 
 def test_debug_export_writes_optional_geojson_and_records_layer_failures() -> None:

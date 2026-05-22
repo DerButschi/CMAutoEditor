@@ -241,6 +241,46 @@ def test_complex_modular_footprint_is_not_collapsed_to_one_rectangle() -> None:
     assert result.placements[0].cm_type.cat2 == "Modular House"
 
 
+def test_modular_cover_building_has_explicit_output_anchor_for_output_rows() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+    from terrain_extraction.osm_extraction.models import GridKind
+    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+
+    grid = _grid()
+    outline = Polygon([(24, 0), (40, 0), (40, 8), (24, 8)])
+    catalog = (
+        {
+            "width": 4,
+            "height": 2,
+            "row": 0,
+            "col": 3,
+            "direction": 0,
+            "menu": "Modular Buildings",
+            "cat1": "1 Story",
+            "cat2": "Building 4",
+            "is_modular": True,
+            "weight": 1.0,
+        },
+    )
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+        (_feature("modular", outline, source_tags={"building": "industrial"}),),
+        catalogs={"houses": catalog},
+    )
+
+    placement = result.placements[0]
+    rows = placements_to_output_rows(result.placements, include_internal=True)
+
+    assert result.placed_count == 1
+    assert placement.grid_kind is GridKind.SUB_SQUARE
+    assert placement.diagnostics["output_xidx"] == 2.5
+    assert placement.diagnostics["output_yidx"] == -0.5
+    assert rows[0]["xidx"] == 2.5
+    assert rows[0]["yidx"] == -0.5
+    assert rows[0]["_cell_xidx"] == 3
+    assert rows[0]["_cell_yidx"] == 0
+
+
 def test_road_occupancy_is_avoided_when_shifted_candidate_is_available() -> None:
     from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
     from terrain_extraction.osm_extraction.models import (
@@ -409,7 +449,7 @@ def test_area_shortlist_selects_medium_footprint_instead_of_first_tiny_catalog_e
     assert result.placed_count == 1
     assert result.placements[0].cm_type.cat2 == "Medium Fit"
     assert diagnostics["selected_area_error_ratio"] == pytest.approx(0.0)
-    assert "selected_footprint_polygon" not in diagnostics
+    assert diagnostics["selected_footprint_polygon"].area == pytest.approx(outline.area)
 
 
 def test_single_rect_mode_does_not_hit_candidate_cap_for_late_area_compatible_footprints() -> None:
@@ -627,7 +667,7 @@ def test_many_ordinary_buildings_use_fast_single_rect_mode_without_candidate_cap
     assert max(scored) < 64
     assert max(shifted) <= 5 * 9
     assert result.diagnostics["shapely_score_evaluations"] == sum(scored)
-    assert all("selected_footprint_polygon" not in placement.diagnostics for placement in result.placements)
+    assert all(placement.diagnostics["selected_footprint_polygon"].area > 0 for placement in result.placements)
 
 
 def test_ordinary_residential_building_does_not_enter_modular_cover_by_default() -> None:

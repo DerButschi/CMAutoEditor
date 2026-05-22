@@ -176,7 +176,15 @@ def test_validation_rejects_duplicate_layer_rows_and_building_road_collisions() 
     )
     building_on_road = (
         _placement(layer=LayerKind.LINEAR_SURFACE, cell=GridCell(1, 1), config_name="road", priority=2, menu="Roads", cat1="Dirt"),
-        _placement(layer=LayerKind.BUILDING, cell=GridCell(1, 1), config_name="house", priority=1, menu="Buildings", cat1="House"),
+        _placement(
+            layer=LayerKind.BUILDING,
+            cell=GridCell(1, 1),
+            config_name="house",
+            priority=1,
+            menu="Buildings",
+            cat1="House",
+            diagnostics={"output_xidx": 0.5, "output_yidx": 0.5},
+        ),
     )
 
     with pytest.raises(OutputRowValidationError, match="duplicate mutually exclusive"):
@@ -215,6 +223,31 @@ def test_building_output_rows_use_selected_sub_square_coordinates() -> None:
     assert rows[0]["_grid_kind"] == GridKind.SUB_SQUARE.value
 
 
+def test_building_output_rows_require_explicit_selected_coordinates() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import (
+        OutputRowValidationError,
+        placements_to_output_rows,
+    )
+
+    with pytest.raises(OutputRowValidationError, match="building placement is missing explicit output coordinates"):
+        placements_to_output_rows(
+            (
+                _placement(
+                    layer=LayerKind.BUILDING,
+                    cell=GridCell(1, 1),
+                    config_name="houses",
+                    priority=5,
+                    menu="Independent Buildings",
+                    cat1="House",
+                    cat2="Building 1",
+                    direction="Direction 1",
+                    grid_kind=GridKind.SUB_SQUARE,
+                ),
+            )
+        )
+
+
 def test_building_output_rows_use_selected_diagonal_coordinates() -> None:
     from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
     from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
@@ -250,6 +283,45 @@ def test_building_output_rows_use_selected_diagonal_coordinates() -> None:
             "priority": 5,
         },
     )
+
+
+def test_building_road_validation_uses_all_blocked_building_cells() -> None:
+    from shapely.geometry import Polygon
+    from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
+    from terrain_extraction.osm_extraction.output_rows import (
+        OutputRowValidationError,
+        placements_to_output_rows,
+    )
+
+    road = _placement(
+        layer=LayerKind.LINEAR_SURFACE,
+        cell=GridCell(2, 1),
+        config_name="road",
+        priority=4,
+        menu="Roads",
+        cat1="Dirt",
+        feature_id="road-1",
+    )
+    building = _placement(
+        layer=LayerKind.BUILDING,
+        cell=GridCell(1, 1),
+        config_name="houses",
+        priority=5,
+        menu="Independent Buildings",
+        cat1="House",
+        cat2="Long House",
+        direction="Direction 1",
+        grid_kind=GridKind.SUB_SQUARE,
+        diagnostics={
+            "output_xidx": 0.5,
+            "output_yidx": 0.5,
+            "selected_footprint_polygon": Polygon([(8, 8), (24, 8), (24, 16), (8, 16)]),
+        },
+    )
+    object.__setattr__(building, "cells", (GridCell(1, 1), GridCell(2, 1)))
+
+    with pytest.raises(OutputRowValidationError, match="building-road collision"):
+        placements_to_output_rows((road, building), include_internal=True)
 
 
 def test_pipeline_assembles_output_rows_without_migration_flag() -> None:
@@ -421,6 +493,7 @@ def test_pipeline_clips_diagonal_edge_rows_before_validation() -> None:
                 cat2="Building 2-3",
                 direction="Direction 2",
                 grid_kind=GridKind.DIAGONAL,
+                diagnostics={"output_xidx": -0.25, "output_yidx": 15.25},
             ),
         ),
         bounds=(0, 0, 20, 15),

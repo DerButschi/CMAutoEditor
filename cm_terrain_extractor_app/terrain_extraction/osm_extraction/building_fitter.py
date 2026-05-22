@@ -106,13 +106,28 @@ class BuildingCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class _CandidateGeometry:
-    cells: tuple[GridCell, ...]
-    footprint_polygon: BaseGeometry
+class BuildingPlacementGeometry:
     output_xidx: float | None
     output_yidx: float | None
+    output_grid_kind: GridKind
+    anchor_cell: GridCell | None
+    blocked_normal_cells: tuple[GridCell, ...]
+    footprint_polygon: BaseGeometry
+    footprint_width_units: int
+    footprint_height_units: int
+    footprint_is_diagonal: bool
+    footprint_row: int
+    footprint_col: int
+    footprint_direction: int | None
     orientation: float
     orientation_class: str
+
+    @property
+    def cells(self) -> tuple[GridCell, ...]:
+        return self.blocked_normal_cells
+
+
+_CandidateGeometry = BuildingPlacementGeometry
 
 
 @dataclass(frozen=True, slots=True)
@@ -570,10 +585,18 @@ class BuildingFitter:
             if not cells:
                 continue
             yield _CandidateGeometry(
-                cells=cells,
-                footprint_polygon=footprint_polygon,
                 output_xidx=_output_index_from_local(self.grid_index, origin_x),
                 output_yidx=_output_index_from_local(self.grid_index, origin_y),
+                output_grid_kind=GridKind.DIAGONAL if footprint.is_diagonal else GridKind.SUB_SQUARE,
+                anchor_cell=cells[0],
+                blocked_normal_cells=cells,
+                footprint_polygon=footprint_polygon,
+                footprint_width_units=footprint.width_cells,
+                footprint_height_units=footprint.height_cells,
+                footprint_is_diagonal=footprint.is_diagonal,
+                footprint_row=footprint.row,
+                footprint_col=footprint.col,
+                footprint_direction=footprint.direction,
                 orientation=orientation,
                 orientation_class="diagonal" if footprint.is_diagonal else "axis",
             )
@@ -604,11 +627,21 @@ class BuildingFitter:
                 "modular_profiles_considered": len(modular_profiles),
             }
         footprint_polygon = unary_union([self.grid_index.cell_polygon(cell) for cell in modular_cells])
+        modular_footprint = modular_profiles[0].footprint
+        output_xidx, output_yidx = _output_indices_from_polygon_origin(self.grid_index, footprint_polygon)
         geometry = _CandidateGeometry(
-            cells=modular_cells,
+            output_xidx=output_xidx,
+            output_yidx=output_yidx,
+            output_grid_kind=GridKind.DIAGONAL if modular_footprint.is_diagonal else GridKind.SUB_SQUARE,
+            anchor_cell=modular_cells[0],
+            blocked_normal_cells=modular_cells,
             footprint_polygon=footprint_polygon,
-            output_xidx=None,
-            output_yidx=None,
+            footprint_width_units=modular_footprint.width_cells,
+            footprint_height_units=modular_footprint.height_cells,
+            footprint_is_diagonal=modular_footprint.is_diagonal,
+            footprint_row=modular_footprint.row,
+            footprint_col=modular_footprint.col,
+            footprint_direction=modular_footprint.direction,
             orientation=0.0,
             orientation_class="axis",
         )
@@ -785,11 +818,20 @@ class BuildingFitter:
             modular_cells = self._modular_cells(polygon)
             if modular_cells:
                 footprint_polygon = unary_union([self.grid_index.cell_polygon(cell) for cell in modular_cells])
+                output_xidx, output_yidx = _output_indices_from_polygon_origin(self.grid_index, footprint_polygon)
                 yield _CandidateGeometry(
-                    cells=modular_cells,
+                    output_xidx=output_xidx,
+                    output_yidx=output_yidx,
+                    output_grid_kind=GridKind.DIAGONAL if footprint.is_diagonal else GridKind.SUB_SQUARE,
+                    anchor_cell=modular_cells[0],
+                    blocked_normal_cells=modular_cells,
                     footprint_polygon=footprint_polygon,
-                    output_xidx=None,
-                    output_yidx=None,
+                    footprint_width_units=footprint.width_cells,
+                    footprint_height_units=footprint.height_cells,
+                    footprint_is_diagonal=footprint.is_diagonal,
+                    footprint_row=footprint.row,
+                    footprint_col=footprint.col,
+                    footprint_direction=footprint.direction,
                     orientation=0.0,
                     orientation_class="axis",
                 )
@@ -826,10 +868,18 @@ class BuildingFitter:
                     if not cells:
                         continue
                     geometry = _CandidateGeometry(
-                        cells=cells,
-                        footprint_polygon=footprint_polygon,
                         output_xidx=_output_index_from_local(self.grid_index, origin_x),
                         output_yidx=_output_index_from_local(self.grid_index, origin_y),
+                        output_grid_kind=GridKind.DIAGONAL if footprint.is_diagonal else GridKind.SUB_SQUARE,
+                        anchor_cell=cells[0],
+                        blocked_normal_cells=cells,
+                        footprint_polygon=footprint_polygon,
+                        footprint_width_units=footprint.width_cells,
+                        footprint_height_units=footprint.height_cells,
+                        footprint_is_diagonal=footprint.is_diagonal,
+                        footprint_row=footprint.row,
+                        footprint_col=footprint.col,
+                        footprint_direction=footprint.direction,
                         orientation=orientation,
                         orientation_class="diagonal" if footprint.is_diagonal else "axis",
                     )
@@ -1045,7 +1095,7 @@ class BuildingFitter:
             road_overlap_cells=candidate.road_overlap_cells,
             score=candidate.score,
             candidate_limit_reached=building.candidate_limit_reached,
-            selected_footprint_polygon=candidate.footprint_polygon if self.debug_geometry else None,
+            selected_footprint_polygon=candidate.footprint_polygon,
             output_xidx=candidate.output_xidx,
             output_yidx=candidate.output_yidx,
             orientation_class=candidate.orientation_class,
@@ -1363,6 +1413,11 @@ def _output_index_from_local(grid_index: Any, local_value: float) -> float:
     return _clean_float(local_value / grid_index.cell_size_m - 0.5)
 
 
+def _output_indices_from_polygon_origin(grid_index: Any, polygon: BaseGeometry) -> tuple[float, float]:
+    min_local_x, min_local_y, _, _ = _local_bounds(grid_index, polygon)
+    return _output_index_from_local(grid_index, min_local_x), _output_index_from_local(grid_index, min_local_y)
+
+
 def _clean_float(value: float) -> float:
     rounded = round(value, 6)
     return int(rounded) if float(rounded).is_integer() else rounded
@@ -1394,7 +1449,7 @@ def _placement_from_candidate(
     road_overlap_area_m2: float = 0.0,
     road_overlap_ratio: float = 0.0,
 ) -> PlacementRecord:
-    grid_kind = GridKind.NORMAL if footprint.is_modular else GridKind.SUB_SQUARE
+    grid_kind = GridKind.SUB_SQUARE
     if footprint.is_diagonal:
         grid_kind = GridKind.DIAGONAL
     diagnostics = {
@@ -1413,6 +1468,9 @@ def _placement_from_candidate(
         "selected_height_cells": footprint.height_cells,
         "selected_width_units": footprint.width_cells,
         "selected_height_units": footprint.height_cells,
+        "selected_row": footprint.row,
+        "selected_col": footprint.col,
+        "selected_direction": footprint.direction,
         "selected_is_diagonal": footprint.is_diagonal,
         "selected_is_modular": footprint.is_modular,
         "selected_iou": round(iou, 6),
@@ -1420,6 +1478,8 @@ def _placement_from_candidate(
         "selected_area_error_ratio": round(area_error, 6),
         "selected_area_error": round(area_error, 6),
         "selected_road_overlap": road_overlap_cells,
+        "output_grid_kind": grid_kind.value,
+        "blocked_normal_cells": tuple((cell.xidx, cell.yidx) for cell in sorted(cells)),
     }
     if selected_footprint_polygon is not None:
         diagnostics["selected_footprint_polygon"] = selected_footprint_polygon

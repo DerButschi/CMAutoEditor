@@ -10,7 +10,6 @@ from typing import Any
 import geopandas
 from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
-from shapely.ops import unary_union
 from terrain_extraction.osm_extraction.models import (
     GridCell,
     GridKind,
@@ -48,6 +47,7 @@ def build_debug_layers(
     placement_tuple = tuple(placements)
     output_row_tuple = tuple(output_rows)
     road_validation = validate_road_output_rows(output_row_tuple, profile=None)
+    _validate_building_road_footprints(placement_tuple, grid_index, layer_errors)
     layers = {
         **_layer("source_features", lambda: _source_features_layer(features, grid_index, layer_errors), layer_errors),
         **_layer("topology_nodes", lambda: _topology_nodes_layer(topology, grid_index), layer_errors),
@@ -465,14 +465,52 @@ def _building_footprints_layer(
             continue
         geometry = placement.diagnostics.get("selected_footprint_polygon")
         if not isinstance(geometry, BaseGeometry):
-            try:
-                geometry = unary_union([grid_index.cell_polygon(cell) for cell in placement.cells])
-            except Exception as exc:
-                layer_errors.append({"layer": "building_footprints", "index": index, "error": f"{type(exc).__name__}: {exc}"})
-                continue
+            layer_errors.append(
+                {
+                    "layer": "building_footprints",
+                    "index": index,
+                    "error": "ValueError: building placement is missing selected_footprint_polygon",
+                }
+            )
+            continue
         rows.append(_placement_row(placement, include_score=True))
         geometries.append(geometry)
     return _gdf(rows, geometries, grid_index)
+
+
+def _validate_building_road_footprints(
+    placements: tuple[PlacementRecord, ...],
+    grid_index: Any,
+    layer_errors: list[dict[str, Any]],
+) -> None:
+    if grid_index is None:
+        return
+    linear_geometries = []
+    for linear_index, placement in enumerate(placements):
+        if placement.layer not in {LayerKind.LINEAR_SURFACE, LayerKind.LINEAR_OBJECT}:
+            continue
+        for cell in placement.cells:
+            linear_geometries.append((linear_index, cell, grid_index.cell_polygon(cell)))
+    if not linear_geometries:
+        return
+    for building_index, placement in enumerate(placements):
+        if placement.layer is not LayerKind.BUILDING:
+            continue
+        geometry = placement.diagnostics.get("selected_footprint_polygon")
+        if not isinstance(geometry, BaseGeometry):
+            continue
+        for linear_index, cell, linear_geometry in linear_geometries:
+            if geometry.intersection(linear_geometry).area <= 1e-9:
+                continue
+            layer_errors.append(
+                {
+                    "layer": "building_road_validation",
+                    "index": building_index,
+                    "error": "ValueError: building footprint overlaps linear placement",
+                    "linear_index": linear_index,
+                    "cell": (cell.xidx, cell.yidx),
+                }
+            )
 
 
 def _final_rows_layer(
