@@ -41,6 +41,17 @@ def _processor_with_df(df: pd.DataFrame):
     return processor
 
 
+def test_building_catalogs_use_profile_cat2_notation() -> None:
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    processor = OSMProcessor("cold_war", SimpleNamespace(), "default_osm_config.json")
+
+    catalogs = processor._building_catalogs_for([SimpleNamespace(config_name="houses")])
+
+    assert "cat2" in catalogs["houses"].columns
+    assert catalogs["houses"].loc[0, "cat2"] == "Building 1"
+
+
 def test_post_process_resolves_duplicate_priorities_and_cm_rank() -> None:
     df = pd.DataFrame(
         [

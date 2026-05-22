@@ -46,12 +46,7 @@ _CATALOG_DIRECTION_COLUMNS = {
 }
 _DIRECTION_ORDER = DIRECTION_ORDER
 _OPPOSITE_DIRECTIONS = OPPOSITE_DIRECTIONS
-_LABEL_PREFIX = {
-    ProcessKind.ROAD: "Road",
-    ProcessKind.RAIL: "Rail",
-    ProcessKind.STREAM: "Stream",
-    ProcessKind.FENCE: "Fence",
-}
+_LINEAR_TILE_LABEL_PREFIX = "Road"
 _DEFAULT_CM_TYPES = {
     ProcessKind.ROAD: ("Roads", "Road"),
     ProcessKind.RAIL: ("Roads", "Railroad"),
@@ -1512,7 +1507,7 @@ def _variant_from_record(
     cm_type = CMType(
         menu=menu,
         cat1=cat1,
-        cat2=f"{_LABEL_PREFIX.get(process, 'Linear')} Tile {tile_number}",
+        cat2=f"{_LINEAR_TILE_LABEL_PREFIX} Tile {tile_number}",
         direction=direction_label,
         tile_id=record.get("id", f"{process.value}:{catalog_direction}:{row}:{col}:{variant}"),
         modifiers={"connections": dict(_connections_from_record(record))},

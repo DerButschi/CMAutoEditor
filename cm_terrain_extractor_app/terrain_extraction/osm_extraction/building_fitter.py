@@ -27,6 +27,30 @@ _DEFAULT_MAX_CANDIDATES = 256
 _DEFAULT_MAX_FOOTPRINT_TYPES = 24
 _DEFAULT_MAX_SHIFTED_CANDIDATES_PER_FOOTPRINT = 9
 _DEFAULT_MAX_SCORED_CANDIDATES = 64
+_DEFAULT_SINGLE_RECT_TOP_K = 5
+_DEFAULT_SINGLE_RECT_SHIFT_STEPS = 1
+_DEFAULT_MODULAR_AREA_THRESHOLD_M2 = 320.0
+_DEFAULT_MODULAR_RECTANGULARITY_THRESHOLD = 0.80
+_DEFAULT_MODULAR_SINGLE_SHAPE_ERROR_THRESHOLD = 0.55
+_DEFAULT_MAX_MODULAR_PIECES = 12
+_DEFAULT_MAX_MODULAR_STATES = 128
+_DEFAULT_MAX_MODULAR_TIME_MS = 30.0
+_SPECIAL_BUILDING_TAGS = frozenset(
+    {
+        "barn",
+        "church",
+        "civic",
+        "college",
+        "commercial",
+        "farm",
+        "farm_auxiliary",
+        "industrial",
+        "retail",
+        "school",
+        "university",
+        "warehouse",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +77,11 @@ class BuildingDescriptor:
     oriented_rectangle: Polygon
     rectangularity: float
     elongation: float
+    mrr_length_m: float
+    mrr_width_m: float
+    aspect_ratio: float
     orientation_radians: float
+    preferred_orientation: str
     nearest_road_distance_m: float | None
 
 
@@ -93,7 +121,11 @@ class _FootprintProfile:
     area_m2: float
     area_error_ratio: float
     best_angle_error: float
+    best_swapped: bool
+    length_error_ratio: float
+    width_error_ratio: float
     aspect_error: float
+    shape_error: float
     combined_error: float
     best_orientation_class: str
     tie_key: tuple[Any, ...]
@@ -166,8 +198,16 @@ class BuildingFitter:
         max_footprint_types_per_building: int = _DEFAULT_MAX_FOOTPRINT_TYPES,
         max_shifted_candidates_per_footprint: int = _DEFAULT_MAX_SHIFTED_CANDIDATES_PER_FOOTPRINT,
         max_scored_candidates_per_building: int = _DEFAULT_MAX_SCORED_CANDIDATES,
+        single_rect_top_k: int = _DEFAULT_SINGLE_RECT_TOP_K,
+        single_rect_shift_steps: int = _DEFAULT_SINGLE_RECT_SHIFT_STEPS,
         local_shift_cells: int = 1,
         modular_area_threshold: float = 1.0,
+        modular_area_threshold_m2: float = _DEFAULT_MODULAR_AREA_THRESHOLD_M2,
+        modular_rectangularity_threshold: float = _DEFAULT_MODULAR_RECTANGULARITY_THRESHOLD,
+        modular_single_shape_error_threshold: float = _DEFAULT_MODULAR_SINGLE_SHAPE_ERROR_THRESHOLD,
+        max_modular_pieces: int = _DEFAULT_MAX_MODULAR_PIECES,
+        max_modular_states: int = _DEFAULT_MAX_MODULAR_STATES,
+        max_modular_time_ms: float = _DEFAULT_MAX_MODULAR_TIME_MS,
         debug_geometry: bool = False,
     ) -> None:
         self.grid_index = grid_index
@@ -179,8 +219,16 @@ class BuildingFitter:
         self.max_shifted_candidates_per_footprint = max(1, max_shifted_candidates_per_footprint)
         self.max_scored_candidates_per_building = max(1, max_scored_candidates_per_building)
         self.max_candidates_per_building = self.max_scored_candidates_per_building
+        self.single_rect_top_k = max(1, single_rect_top_k)
+        self.single_rect_shift_steps = max(0, single_rect_shift_steps)
         self.local_shift_cells = local_shift_cells
         self.modular_area_threshold = modular_area_threshold
+        self.modular_area_threshold_m2 = modular_area_threshold_m2
+        self.modular_rectangularity_threshold = modular_rectangularity_threshold
+        self.modular_single_shape_error_threshold = modular_single_shape_error_threshold
+        self.max_modular_pieces = max(1, max_modular_pieces)
+        self.max_modular_states = max(1, max_modular_states)
+        self.max_modular_time_ms = max(0.0, max_modular_time_ms)
         self.debug_geometry = debug_geometry
         self._shapely_score_evaluations = 0
         self._shapely_overlap_evaluations = 0
@@ -226,6 +274,7 @@ class BuildingFitter:
             descriptor = self._descriptor(polygon)
             candidate_started_at = time.perf_counter()
             candidates, candidate_limit_reached, candidate_diagnostics = self._candidates_for(
+                feature,
                 polygon,
                 descriptor,
                 catalog.normalized(),
@@ -252,33 +301,8 @@ class BuildingFitter:
                 )
             )
 
-        placements: list[PlacementRecord] = []
-        cluster_order = []
-        for building in sorted(prepared, key=_cluster_sort_key):
-            cluster_order.append(building.feature_key)
-            placement_started_at = time.perf_counter()
-            placement = self._place_building(building)
-            placement_ms = round((time.perf_counter() - placement_started_at) * 1000.0, 3)
-            elapsed_ms = round(float(building.diagnostics.get("elapsed_ms", 0.0)) + placement_ms, 3)
-            timed_diagnostics = {
-                **dict(building.diagnostics),
-                "placement_ms": placement_ms,
-                "elapsed_ms": elapsed_ms,
-            }
-            if placement is None:
-                failure = _failure(
-                    building.feature,
-                    "no_non_colliding_candidate",
-                    diagnostics=timed_diagnostics,
-                )
-                failures.append(failure)
-                diagnostics_by_feature[building.feature_key] = failure
-                continue
-            placements.append(placement)
-            diagnostics_by_feature[building.feature_key] = {
-                **timed_diagnostics,
-                **dict(placement.diagnostics),
-            }
+        placements, placement_failures, cluster_order = self._place_prepared_buildings(prepared, diagnostics_by_feature)
+        failures.extend(placement_failures)
         candidates_scored_per_building = {
             str(feature_key): int(diagnostics.get("candidates_scored", 0))
             for feature_key, diagnostics in diagnostics_by_feature.items()
@@ -305,64 +329,336 @@ class BuildingFitter:
             diagnostics_by_feature=diagnostics_by_feature,
         )
 
+    def _place_prepared_buildings(
+        self,
+        prepared: list[_PreparedBuilding],
+        diagnostics_by_feature: dict[str | int, Mapping[str, Any]],
+    ) -> tuple[list[PlacementRecord], list[Mapping[str, Any]], list[str | int]]:
+        placements: list[PlacementRecord] = []
+        failures: list[Mapping[str, Any]] = []
+        placed_by_key: dict[str | int, PlacementRecord] = {}
+        placed_index_by_key: dict[str | int, int] = {}
+        prepared_by_key = {building.feature_key: building for building in prepared}
+        cluster_order = []
+        for building in sorted(prepared, key=_cluster_sort_key):
+            cluster_order.append(building.feature_key)
+            placement_started_at = time.perf_counter()
+            placement = self._place_building(building)
+            if placement is None:
+                repair = self._repair_with_neighbor(building, placed_by_key, prepared_by_key)
+                if repair is not None:
+                    neighbor_key, repaired_neighbor, placement = repair
+                    placements[placed_index_by_key[neighbor_key]] = repaired_neighbor
+                    placed_by_key[neighbor_key] = repaired_neighbor
+            placement_ms = round((time.perf_counter() - placement_started_at) * 1000.0, 3)
+            elapsed_ms = round(float(building.diagnostics.get("elapsed_ms", 0.0)) + placement_ms, 3)
+            timed_diagnostics = {
+                **dict(building.diagnostics),
+                "placement_ms": placement_ms,
+                "elapsed_ms": elapsed_ms,
+            }
+            if placement is None:
+                failure = _failure(
+                    building.feature,
+                    "no_non_colliding_candidate",
+                    diagnostics=timed_diagnostics,
+                )
+                failures.append(failure)
+                diagnostics_by_feature[building.feature_key] = failure
+                continue
+            placed_index_by_key[building.feature_key] = len(placements)
+            placed_by_key[building.feature_key] = placement
+            placements.append(placement)
+            diagnostics_by_feature[building.feature_key] = {
+                **timed_diagnostics,
+                **dict(placement.diagnostics),
+            }
+        return placements, failures, cluster_order
+
     def _descriptor(self, polygon: Polygon) -> BuildingDescriptor:
         rectangle = polygon.minimum_rotated_rectangle
         rectangle_area = rectangle.area
         side_lengths, orientation = _rectangle_sides_and_orientation(rectangle)
-        short_side = max(min(side_lengths), 1e-9)
+        mrr_length = max(side_lengths)
+        mrr_width = max(min(side_lengths), 1e-9)
         nearest_road_distance = self._nearest_linear_distance_m(polygon)
         return BuildingDescriptor(
             area=polygon.area,
             oriented_rectangle=rectangle,
             rectangularity=polygon.area / rectangle_area if rectangle_area > 0 else 0.0,
-            elongation=max(side_lengths) / short_side,
+            elongation=mrr_length / mrr_width,
+            mrr_length_m=mrr_length,
+            mrr_width_m=mrr_width,
+            aspect_ratio=mrr_length / mrr_width,
             orientation_radians=orientation,
+            preferred_orientation=_orientation_class(orientation),
             nearest_road_distance_m=nearest_road_distance,
         )
 
     def _candidates_for(
         self,
+        feature: FeatureRecord,
         polygon: Polygon,
         descriptor: BuildingDescriptor,
         footprints: tuple[BuildingFootprint, ...],
     ) -> tuple[tuple[BuildingCandidate, ...], bool, Mapping[str, Any]]:
+        single_profiles = self._single_rect_footprint_profiles(descriptor, footprints)
+        best_single = single_profiles[0] if single_profiles else None
+        fit_mode, fallback_reason = self._fit_mode(feature, descriptor, best_single)
         candidates: list[BuildingCandidate] = []
-        cheap_candidates: list[_CheapCandidate] = []
-        seen: set[tuple[str, tuple[GridCell, ...], float | None, float | None]] = set()
-        footprint_profiles = self._shortlisted_footprint_profiles(polygon, descriptor, footprints)
+        selected_single_profiles: tuple[_FootprintProfile, ...]
+        single_generated = 0
+        modular_attempted = False
+        modular_piece_count = 0
+        modular_limit_reached = False
+        modular_elapsed_ms = 0.0
+        modular_profiles_considered = 0
 
+        if fit_mode == "modular_cover":
+            selected_single_profiles = single_profiles[:1]
+            modular_attempted = True
+            modular_started_at = time.perf_counter()
+            modular_candidates, modular_limit_reached, modular_diagnostics = self._modular_cover_candidates_for(
+                polygon,
+                descriptor,
+                footprints,
+            )
+            modular_elapsed_ms = round((time.perf_counter() - modular_started_at) * 1000.0, 3)
+            modular_piece_count = int(modular_diagnostics.get("modular_piece_count", 0))
+            modular_profiles_considered = int(modular_diagnostics.get("modular_profiles_considered", 0))
+            candidates.extend(modular_candidates)
+            fallback_limit = max(0, self.max_scored_candidates_per_building - len(candidates))
+            single_candidates, single_generated = self._single_rect_candidates_for(
+                polygon,
+                descriptor,
+                selected_single_profiles,
+                placement_limit=fallback_limit,
+            )
+            candidates.extend(single_candidates)
+        else:
+            single_budget = min(self.single_rect_top_k, self.max_scored_candidates_per_building)
+            selected_single_profiles = single_profiles[:single_budget]
+            single_candidates, single_generated = self._single_rect_candidates_for(
+                polygon,
+                descriptor,
+                selected_single_profiles,
+            )
+            candidates.extend(single_candidates)
+
+        candidates.sort(key=_candidate_sort_key)
+
+        best_single_shape_error = None if best_single is None else round(best_single.shape_error, 6)
+        best_single_footprint = None if best_single is None else best_single.footprint.footprint_id
+        selected_best = candidates[0] if candidates else None
+        diagnostics = {
+            "fit_mode": fit_mode,
+            "preferred_orientation": descriptor.preferred_orientation,
+            "best_single_rect_footprint": best_single_footprint,
+            "best_single_rect_shape_error": best_single_shape_error,
+            "footprint_types_considered": len(selected_single_profiles) + modular_profiles_considered,
+            "shifted_candidates_generated": single_generated,
+            "expensive_candidates_scored": len(candidates),
+            "placements_tested": len(candidates),
+            "modular_attempted": modular_attempted,
+            "modular_piece_count": modular_piece_count,
+            "modular_elapsed_ms": modular_elapsed_ms,
+            "fallback_reason": fallback_reason,
+            "selected_width_units": None if selected_best is None else selected_best.footprint.width_cells,
+            "selected_height_units": None if selected_best is None else selected_best.footprint.height_cells,
+            "selected_is_diagonal": None if selected_best is None else selected_best.footprint.is_diagonal,
+            "selected_centroid_shift_m": None if selected_best is None else round(selected_best.centroid_shift_m, 6),
+            "selected_area_error": None if selected_best is None else round(selected_best.area_error_ratio, 6),
+            "selected_road_overlap": None if selected_best is None else selected_best.road_overlap_cells,
+        }
+        return tuple(candidates), modular_limit_reached, diagnostics
+
+    def _single_rect_footprint_profiles(
+        self,
+        descriptor: BuildingDescriptor,
+        footprints: tuple[BuildingFootprint, ...],
+    ) -> tuple[_FootprintProfile, ...]:
+        profiles = tuple(
+            self._footprint_profile(footprint, descriptor, descriptor.preferred_orientation)
+            for footprint in footprints
+            if not footprint.is_modular
+        )
+        return tuple(sorted(profiles, key=_footprint_combined_sort_key))
+
+    def _fit_mode(
+        self,
+        feature: FeatureRecord,
+        descriptor: BuildingDescriptor,
+        best_single: _FootprintProfile | None,
+    ) -> tuple[str, str | None]:
+        if best_single is None:
+            return "modular_cover", "missing_single_rect_footprint"
+        if _is_special_building(feature):
+            return "modular_cover", "special_building_type"
+        if descriptor.rectangularity < self.modular_rectangularity_threshold:
+            return "modular_cover", "low_rectangularity"
+        if (
+            not _is_residential_like_building(feature)
+            and best_single.shape_error > self.modular_single_shape_error_threshold
+        ):
+            return "modular_cover", "poor_single_rect_shape_fit"
+        if (
+            descriptor.area >= self.modular_area_threshold_m2 * 2.0
+            and best_single.shape_error > self.modular_single_shape_error_threshold * 0.5
+        ):
+            return "modular_cover", "large_area"
+        return "single_rect", None
+
+    def _single_rect_candidates_for(
+        self,
+        polygon: Polygon,
+        descriptor: BuildingDescriptor,
+        footprint_profiles: tuple[_FootprintProfile, ...],
+        placement_limit: int | None = None,
+    ) -> tuple[tuple[BuildingCandidate, ...], int]:
+        candidates: list[BuildingCandidate] = []
+        seen: set[tuple[str, tuple[GridCell, ...], float | None, float | None]] = set()
+        generated = 0
         for profile in footprint_profiles:
-            for geometry in self._candidate_geometries(polygon, descriptor, profile):
+            for geometry in self._single_rect_candidate_geometries(polygon, descriptor, profile):
                 key = _candidate_geometry_key(profile.footprint, geometry)
                 if key in seen:
                     continue
                 seen.add(key)
-                cheap_candidates.append(self._cheap_candidate(polygon, descriptor, profile, geometry))
+                if placement_limit is not None and len(candidates) >= placement_limit:
+                    candidates.sort(key=_candidate_sort_key)
+                    return tuple(candidates), generated
+                generated += 1
+                candidates.append(self._score_candidate(polygon, descriptor, profile.footprint, geometry))
+        candidates.sort(key=_candidate_sort_key)
+        return tuple(candidates), generated
 
-        cheap_candidates.sort(key=lambda candidate: candidate.sort_key)
-        scored_candidates = cheap_candidates[: self.max_scored_candidates_per_building]
-        limit_reached = (
-            (len(footprint_profiles) >= self.max_footprint_types_per_building and len(footprint_profiles) < len(footprints))
-            or len(cheap_candidates) > self.max_scored_candidates_per_building
+    def _single_rect_candidate_geometries(
+        self,
+        polygon: Polygon,
+        descriptor: BuildingDescriptor,
+        footprint_profile: _FootprintProfile,
+    ) -> Iterable[_CandidateGeometry]:
+        footprint = footprint_profile.footprint
+        half_cell_size = self.grid_index.cell_size_m / 2.0
+        source_centroid_local = self.grid_index.local_from_projected(polygon.centroid.x, polygon.centroid.y)
+        swapped = footprint_profile.best_swapped
+        orientation = _orientation_for_swapped(footprint, swapped)
+        origin_x_base, origin_y_base = _centered_origin_local(
+            source_centroid_local,
+            footprint,
+            self.grid_index.cell_size_m,
+            swapped=swapped,
         )
-
-        for cheap_candidate in scored_candidates:
-            candidates.append(
-                self._score_candidate(
-                    polygon,
-                    descriptor,
-                    cheap_candidate.footprint_profile.footprint,
-                    cheap_candidate.geometry,
-                )
+        snapped_origin_x = round(origin_x_base / half_cell_size) * half_cell_size
+        snapped_origin_y = round(origin_y_base / half_cell_size) * half_cell_size
+        shift_steps = self.single_rect_shift_steps
+        if descriptor.nearest_road_distance_m is not None and descriptor.nearest_road_distance_m <= self.grid_index.cell_size_m:
+            shift_steps += 1
+        for x_shift, y_shift in _placement_shift_offsets(shift_steps):
+            origin_x = snapped_origin_x + x_shift * half_cell_size
+            origin_y = snapped_origin_y + y_shift * half_cell_size
+            footprint_polygon = _footprint_polygon_from_origin(
+                self.grid_index,
+                footprint,
+                origin_x,
+                origin_y,
+                swapped=swapped,
+            )
+            if not _polygon_within_grid(self.grid_index, footprint_polygon):
+                continue
+            cells = _cells_overlapped_by_polygon(self.grid_index, footprint_polygon)
+            if not cells:
+                continue
+            yield _CandidateGeometry(
+                cells=cells,
+                footprint_polygon=footprint_polygon,
+                output_xidx=_output_index_from_local(self.grid_index, origin_x),
+                output_yidx=_output_index_from_local(self.grid_index, origin_y),
+                orientation=orientation,
+                orientation_class="diagonal" if footprint.is_diagonal else "axis",
             )
 
-        candidates.sort(key=_candidate_sort_key)
-        diagnostics = {
-            "footprint_types_considered": len(footprint_profiles),
-            "shifted_candidates_generated": len(cheap_candidates),
-            "expensive_candidates_scored": len(candidates),
+    def _modular_cover_candidates_for(
+        self,
+        polygon: Polygon,
+        descriptor: BuildingDescriptor,
+        footprints: tuple[BuildingFootprint, ...],
+    ) -> tuple[tuple[BuildingCandidate, ...], bool, Mapping[str, Any]]:
+        modular_profiles = tuple(
+            sorted(
+                (
+                    self._footprint_profile(footprint, descriptor, descriptor.preferred_orientation)
+                    for footprint in footprints
+                    if footprint.is_modular
+                ),
+                key=_footprint_combined_sort_key,
+            )[:1]
+        )
+        if not modular_profiles:
+            return (), False, {"modular_piece_count": 0, "modular_profiles_considered": 0}
+
+        modular_cells, piece_limit_reached = self._bounded_modular_cells(polygon)
+        if not modular_cells:
+            return (), piece_limit_reached, {
+                "modular_piece_count": 0,
+                "modular_profiles_considered": len(modular_profiles),
+            }
+        footprint_polygon = unary_union([self.grid_index.cell_polygon(cell) for cell in modular_cells])
+        geometry = _CandidateGeometry(
+            cells=modular_cells,
+            footprint_polygon=footprint_polygon,
+            output_xidx=None,
+            output_yidx=None,
+            orientation=0.0,
+            orientation_class="axis",
+        )
+        candidates = tuple(
+            self._score_candidate(polygon, descriptor, profile.footprint, geometry)
+            for profile in modular_profiles
+        )
+        return candidates, piece_limit_reached, {
+            "modular_piece_count": len(modular_cells),
+            "modular_profiles_considered": len(modular_profiles),
         }
-        return tuple(candidates), limit_reached, diagnostics
+
+    def _bounded_modular_cells(self, polygon: Polygon) -> tuple[tuple[GridCell, ...], bool]:
+        started_at = time.perf_counter()
+        min_x, min_y, max_x, max_y = polygon.bounds
+        min_local_x, min_local_y = self.grid_index.local_from_projected(min_x, min_y)
+        max_local_x, max_local_y = self.grid_index.local_from_projected(max_x, max_y)
+        window = self.grid_index.clipped_cell_window(
+            math.floor(min_local_x / self.grid_index.cell_size_m),
+            math.floor(min_local_y / self.grid_index.cell_size_m),
+            math.floor(max_local_x / self.grid_index.cell_size_m),
+            math.floor(max_local_y / self.grid_index.cell_size_m),
+        )
+        if window is None:
+            return (), False
+
+        min_xidx, min_yidx, max_xidx, max_yidx = window
+        cell_area = self.grid_index.cell_size_m * self.grid_index.cell_size_m
+        scored_cells: list[tuple[float, GridCell]] = []
+        limit_reached = False
+        states_seen = 0
+        for xidx in range(min_xidx, max_xidx + 1):
+            for yidx in range(min_yidx, max_yidx + 1):
+                states_seen += 1
+                if states_seen > self.max_modular_states:
+                    limit_reached = True
+                    break
+                if self.max_modular_time_ms and (time.perf_counter() - started_at) * 1000.0 > self.max_modular_time_ms:
+                    limit_reached = True
+                    break
+                cell = GridCell(xidx, yidx)
+                overlap_ratio = self.grid_index.cell_polygon(cell).intersection(polygon).area / cell_area
+                if overlap_ratio > 0.5:
+                    scored_cells.append((overlap_ratio, cell))
+            if limit_reached:
+                break
+        scored_cells.sort(key=lambda item: (-item[0], item[1]))
+        if len(scored_cells) > self.max_modular_pieces:
+            limit_reached = True
+        return tuple(sorted(cell for _, cell in scored_cells[: self.max_modular_pieces])), limit_reached
 
     def _shortlisted_footprint_profiles(
         self,
@@ -429,22 +725,38 @@ class BuildingFitter:
     ) -> _FootprintProfile:
         area_m2 = _footprint_area_m2(footprint, self.grid_index.cell_size_m)
         area_error = abs(area_m2 - descriptor.area) / descriptor.area if descriptor.area > 0 else 1.0
-        orientation_errors = tuple(
-            (
-                _angle_error(descriptor.orientation_radians, orientation),
-                "diagonal" if footprint.is_diagonal else "axis",
-            )
-            for _, orientation in _footprint_orientations(footprint)
+        variant_errors = []
+        for swapped, orientation in _footprint_orientations(footprint):
+            width_m, height_m = _footprint_dimensions_m(footprint, self.grid_index.cell_size_m, swapped=swapped)
+            candidate_length = max(width_m, height_m)
+            candidate_width = max(min(width_m, height_m), 1e-9)
+            length_error = abs(candidate_length - descriptor.mrr_length_m) / max(descriptor.mrr_length_m, 1e-9)
+            width_error = abs(candidate_width - descriptor.mrr_width_m) / max(descriptor.mrr_width_m, 1e-9)
+            aspect = candidate_length / candidate_width
+            aspect_error = abs(math.log(max(aspect, 1.0) / max(descriptor.aspect_ratio, 1.0)))
+            angle_error = _angle_error(descriptor.orientation_radians, orientation)
+            orientation_class = "diagonal" if footprint.is_diagonal else "axis"
+            variant_errors.append((swapped, length_error, width_error, aspect_error, angle_error, orientation_class))
+        best_swapped, length_error, width_error, aspect_error, best_angle_error, best_orientation_class = min(
+            variant_errors,
+            key=lambda item: (
+                0 if item[5] == source_orientation_class else 1,
+                item[1] + item[2] + item[3] + item[4],
+                item[5],
+            ),
         )
-        best_angle_error, best_orientation_class = min(orientation_errors, key=lambda item: (item[0], item[1]))
-        aspect_error = _footprint_aspect_error(footprint, descriptor.elongation)
         orientation_mismatch = 0 if source_orientation_class == best_orientation_class else 1
         modular_penalty = 0.2 if footprint.is_modular else 0.0
+        shape_error = (
+            length_error * 0.45
+            + width_error * 0.45
+            + area_error * 0.65
+            + aspect_error * 0.25
+            + best_angle_error * 0.35
+            + orientation_mismatch * 0.3
+        )
         combined_error = (
-            area_error
-            + best_angle_error * 0.8
-            + aspect_error * 0.35
-            + orientation_mismatch * 0.45
+            shape_error
             + modular_penalty
         )
         return _FootprintProfile(
@@ -452,7 +764,11 @@ class BuildingFitter:
             area_m2=area_m2,
             area_error_ratio=area_error,
             best_angle_error=best_angle_error,
+            best_swapped=best_swapped,
+            length_error_ratio=length_error,
+            width_error_ratio=width_error,
             aspect_error=aspect_error,
+            shape_error=shape_error,
             combined_error=combined_error,
             best_orientation_class=best_orientation_class,
             tie_key=_footprint_tie_key(footprint),
@@ -704,27 +1020,7 @@ class BuildingFitter:
     def _place_building(self, building: _PreparedBuilding) -> PlacementRecord | None:
         ordered_candidates = self._ordered_candidates(building.candidates)
         for candidate in ordered_candidates:
-            placement = _placement_from_candidate(
-                candidate.footprint,
-                candidate.cells,
-                building.geometry,
-                candidate.iou,
-                candidate.centroid_shift_m,
-                candidate.angle_error_radians,
-                candidate.area_error_ratio,
-                config_name=building.feature.config_name,
-                feature_id=building.feature.feature_id,
-                priority=building.feature.priority,
-                road_overlap_cells=candidate.road_overlap_cells,
-                score=candidate.score,
-                candidate_limit_reached=building.candidate_limit_reached,
-                selected_footprint_polygon=candidate.footprint_polygon if self.debug_geometry else None,
-                output_xidx=candidate.output_xidx,
-                output_yidx=candidate.output_yidx,
-                orientation_class=candidate.orientation_class,
-                road_overlap_area_m2=candidate.road_overlap_area_m2,
-                road_overlap_ratio=candidate.road_overlap_ratio,
-            )
+            placement = self._placement_for_candidate(building, candidate)
             decision = self.occupancy.place(
                 placement,
                 object_id=building.feature_key,
@@ -733,6 +1029,77 @@ class BuildingFitter:
             if decision.allowed:
                 return placement
         return None
+
+    def _placement_for_candidate(self, building: _PreparedBuilding, candidate: BuildingCandidate) -> PlacementRecord:
+        return _placement_from_candidate(
+            candidate.footprint,
+            candidate.cells,
+            building.geometry,
+            candidate.iou,
+            candidate.centroid_shift_m,
+            candidate.angle_error_radians,
+            candidate.area_error_ratio,
+            config_name=building.feature.config_name,
+            feature_id=building.feature.feature_id,
+            priority=building.feature.priority,
+            road_overlap_cells=candidate.road_overlap_cells,
+            score=candidate.score,
+            candidate_limit_reached=building.candidate_limit_reached,
+            selected_footprint_polygon=candidate.footprint_polygon if self.debug_geometry else None,
+            output_xidx=candidate.output_xidx,
+            output_yidx=candidate.output_yidx,
+            orientation_class=candidate.orientation_class,
+            road_overlap_area_m2=candidate.road_overlap_area_m2,
+            road_overlap_ratio=candidate.road_overlap_ratio,
+        )
+
+    def _repair_with_neighbor(
+        self,
+        building: _PreparedBuilding,
+        placed_by_key: Mapping[str | int, PlacementRecord],
+        prepared_by_key: Mapping[str | int, _PreparedBuilding],
+    ) -> tuple[str | int, PlacementRecord, PlacementRecord] | None:
+        for neighbor_key in self._blocking_building_keys(building):
+            old_neighbor = placed_by_key.get(neighbor_key)
+            neighbor_building = prepared_by_key.get(neighbor_key)
+            if old_neighbor is None or neighbor_building is None:
+                continue
+            if not self.occupancy.release(neighbor_key):
+                continue
+            blocked_placement = self._place_building(building)
+            if blocked_placement is None:
+                self.occupancy.place(
+                    old_neighbor,
+                    object_id=neighbor_key,
+                    metadata={"source_feature_id": neighbor_building.feature.feature_id},
+                )
+                continue
+            repaired_neighbor = self._place_building(neighbor_building)
+            if repaired_neighbor is not None:
+                return neighbor_key, repaired_neighbor, blocked_placement
+            self.occupancy.release(building.feature_key)
+            self.occupancy.place(
+                old_neighbor,
+                object_id=neighbor_key,
+                metadata={"source_feature_id": neighbor_building.feature.feature_id},
+            )
+        return None
+
+    def _blocking_building_keys(self, building: _PreparedBuilding) -> tuple[str | int, ...]:
+        blocking_keys: list[str | int] = []
+        seen = set()
+        for candidate in self._ordered_candidates(building.candidates):
+            decision = self.occupancy.can_place(self._placement_for_candidate(building, candidate))
+            for conflict in decision.conflicts:
+                if conflict.blocking_layer is not LayerKind.BUILDING:
+                    continue
+                if conflict.blocking_object_id in seen:
+                    continue
+                seen.add(conflict.blocking_object_id)
+                blocking_keys.append(conflict.blocking_object_id)
+            if blocking_keys:
+                break
+        return tuple(blocking_keys)
 
     def _ordered_candidates(self, candidates: tuple[BuildingCandidate, ...]) -> tuple[BuildingCandidate, ...]:
         ordered = sorted(candidates, key=_candidate_sort_key)
@@ -883,6 +1250,13 @@ def _footprint_orientations(footprint: BuildingFootprint) -> tuple[tuple[bool, f
     return tuple(orientations)
 
 
+def _orientation_for_swapped(footprint: BuildingFootprint, swapped: bool) -> float:
+    for variant_swapped, orientation in _footprint_orientations(footprint):
+        if variant_swapped == swapped:
+            return orientation
+    return -math.pi / 4 if footprint.is_diagonal else 0.0
+
+
 def _footprint_polygon_from_origin(
     grid_index: Any,
     footprint: BuildingFootprint,
@@ -904,6 +1278,24 @@ def _footprint_polygon_from_origin(
         p2 = (p1[0], p1[1] + half_cell_size * height)
         p3 = (p2[0] - half_cell_size * width, p2[1])
     return grid_index._polygon_from_local_offsets([p0, p1, p2, p3])
+
+
+def _centered_origin_local(
+    centroid_local: tuple[float, float],
+    footprint: BuildingFootprint,
+    cell_size_m: float,
+    *,
+    swapped: bool,
+) -> tuple[float, float]:
+    width_units = footprint.height_cells if swapped else footprint.width_cells
+    height_units = footprint.width_cells if swapped else footprint.height_cells
+    half_cell_size = cell_size_m / 2.0
+    width_m = width_units * half_cell_size
+    height_m = height_units * half_cell_size
+    if footprint.is_diagonal:
+        centroid_offset = ((width_m + height_m) / 2.0, (-width_m + height_m) / 2.0)
+        return centroid_local[0] - centroid_offset[0], centroid_local[1] - centroid_offset[1]
+    return centroid_local[0] - width_m / 2.0, centroid_local[1] - height_m / 2.0
 
 
 def _cells_overlapped_by_polygon(grid_index: Any, polygon: BaseGeometry) -> tuple[GridCell, ...]:
@@ -1019,11 +1411,15 @@ def _placement_from_candidate(
         "selected_footprint_id": footprint.footprint_id,
         "selected_width_cells": footprint.width_cells,
         "selected_height_cells": footprint.height_cells,
+        "selected_width_units": footprint.width_cells,
+        "selected_height_units": footprint.height_cells,
         "selected_is_diagonal": footprint.is_diagonal,
         "selected_is_modular": footprint.is_modular,
         "selected_iou": round(iou, 6),
         "selected_centroid_shift_m": round(centroid_shift, 6),
         "selected_area_error_ratio": round(area_error, 6),
+        "selected_area_error": round(area_error, 6),
+        "selected_road_overlap": road_overlap_cells,
     }
     if selected_footprint_polygon is not None:
         diagnostics["selected_footprint_polygon"] = selected_footprint_polygon
@@ -1056,8 +1452,12 @@ def _building_diagnostics(
         "area_m2": round(descriptor.area, 6),
         "source_area_m2": round(descriptor.area, 6),
         "source_orientation_class": _orientation_class(descriptor.orientation_radians),
+        "preferred_orientation": descriptor.preferred_orientation,
         "rectangularity": round(descriptor.rectangularity, 6),
         "elongation": round(descriptor.elongation, 6),
+        "mrr_length_m": round(descriptor.mrr_length_m, 6),
+        "mrr_width_m": round(descriptor.mrr_width_m, 6),
+        "aspect_ratio": round(descriptor.aspect_ratio, 6),
         "orientation_radians": round(descriptor.orientation_radians, 6),
         "nearest_road_distance_m": (
             None if descriptor.nearest_road_distance_m is None else round(descriptor.nearest_road_distance_m, 6)
@@ -1076,10 +1476,12 @@ def _timed_building_diagnostics(started_at: float) -> Mapping[str, Any]:
 
 
 def _cluster_sort_key(building: _PreparedBuilding) -> tuple[int, int, float, str]:
+    nearest_linear = building.descriptor.nearest_road_distance_m
     return (
         building.available_count,
+        math.inf if nearest_linear is None else nearest_linear,
         len(building.candidates),
-        building.descriptor.area,
+        -building.descriptor.area,
         str(building.feature_key),
     )
 
@@ -1143,6 +1545,27 @@ def _shift_offsets(local_shift_cells: int) -> tuple[tuple[int, int], ...]:
     return tuple(sorted(offsets, key=lambda item: (abs(item[0]) + abs(item[1]), abs(item[0]), abs(item[1]), item[0], item[1])))
 
 
+def _placement_shift_offsets(steps: int) -> tuple[tuple[int, int], ...]:
+    offsets = [(0, 0)]
+    for x_shift in range(-steps, steps + 1):
+        for y_shift in range(-steps, steps + 1):
+            if x_shift == 0 and y_shift == 0:
+                continue
+            offsets.append((x_shift, y_shift))
+    return tuple(
+        sorted(
+            offsets,
+            key=lambda item: (
+                abs(item[0]) + abs(item[1]),
+                abs(item[0]),
+                abs(item[1]),
+                item[0],
+                item[1],
+            ),
+        )
+    )
+
+
 def _allow_modular_footprints(
     polygon: Polygon,
     footprints: tuple[BuildingFootprint, ...],
@@ -1166,6 +1589,15 @@ def _footprint_area_m2(footprint: BuildingFootprint, cell_size_m: float) -> floa
     return footprint.area_cells * half_cell_area * diagonal_factor
 
 
+def _footprint_dimensions_m(footprint: BuildingFootprint, cell_size_m: float, *, swapped: bool) -> tuple[float, float]:
+    width_units = footprint.height_cells if swapped else footprint.width_cells
+    height_units = footprint.width_cells if swapped else footprint.height_cells
+    scale = cell_size_m / 2.0
+    if footprint.is_diagonal:
+        scale *= math.sqrt(2.0)
+    return width_units * scale, height_units * scale
+
+
 def _footprint_aspect_error(footprint: BuildingFootprint, source_elongation: float) -> float:
     source = max(source_elongation, 1.0)
     width = max(footprint.width_cells, 1)
@@ -1187,6 +1619,35 @@ def _orientation_class(angle: float) -> str:
     axis_diff = abs((angle + math.pi / 4) % (math.pi / 2) - math.pi / 4)
     diagonal_diff = abs(axis_diff - math.pi / 4)
     return "diagonal" if diagonal_diff < axis_diff else "axis"
+
+
+def _is_special_building(feature: FeatureRecord) -> bool:
+    values = [
+        feature.config_name,
+        *(str(value) for value in feature.source_tags.values()),
+        *(str(value) for value in feature.source_properties.values()),
+    ]
+    for value in values:
+        normalized = value.lower().replace("-", "_").replace(" ", "_")
+        if normalized in _SPECIAL_BUILDING_TAGS:
+            return True
+        if any(token in normalized for token in _SPECIAL_BUILDING_TAGS):
+            return True
+    return False
+
+
+def _is_residential_like_building(feature: FeatureRecord) -> bool:
+    values = [
+        feature.config_name,
+        *(str(value) for value in feature.source_tags.values()),
+        *(str(value) for value in feature.source_properties.values()),
+    ]
+    residential_tokens = ("house", "houses", "residential", "yes", "detached", "apartments", "terrace")
+    for value in values:
+        normalized = value.lower().replace("-", "_").replace(" ", "_")
+        if any(token in normalized for token in residential_tokens):
+            return True
+    return False
 
 
 def _uses_diagnostic_polygon(metadata: Any) -> bool:

@@ -24,7 +24,12 @@ from terrain_extraction.osm_extraction.pipeline import ExtractionContext, Extrac
 from terrain_extraction.osm_extraction.stats import ExtractionStats
 from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
 
-from profiles import get_building_outline_by_df_entry, get_building_tiles, process_to_building_type
+from profiles import (
+    get_building_cat2,
+    get_building_outline_by_df_entry,
+    get_building_tiles,
+    process_to_building_type,
+)
 from profiles.general import fence_tiles, rail_tiles, road_tiles, stream_tiles
 
 try:
@@ -556,7 +561,12 @@ class OSMProcessor:
                     building_type = process_to_building_type[legacy_process]
                     break
             if building_type is not None:
-                catalogs[feature.config_name] = get_building_tiles(building_type, self.profile)
+                building_tiles = get_building_tiles(building_type, self.profile).copy()
+                building_tiles["cat2"] = [
+                    get_building_cat2(building_type, row, col, self.profile)
+                    for row, col in building_tiles.loc[:, ["row", "col"]].itertuples(index=False, name=None)
+                ]
+                catalogs[feature.config_name] = building_tiles
         return catalogs
 
     def _typed_linear_feature_placements(self, placements):

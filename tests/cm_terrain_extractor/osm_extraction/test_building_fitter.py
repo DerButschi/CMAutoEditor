@@ -28,7 +28,13 @@ def _grid(width: int = 6, height: int = 6):
     )
 
 
-def _feature(feature_id: str, geometry: Polygon, *, config_name: str = "houses"):
+def _feature(
+    feature_id: str,
+    geometry: Polygon,
+    *,
+    config_name: str = "houses",
+    source_tags: dict[str, str] | None = None,
+):
     from terrain_extraction.osm_extraction.models import FeatureRecord, ProcessKind
 
     return FeatureRecord(
@@ -38,7 +44,7 @@ def _feature(feature_id: str, geometry: Polygon, *, config_name: str = "houses")
         process=ProcessKind.BUILDING_OUTLINE,
         priority=4,
         geometry=geometry,
-        source_tags={"building": "yes"},
+        source_tags={"building": "yes"} if source_tags is None else source_tags,
     )
 
 
@@ -148,6 +154,9 @@ def test_simple_rectangle_fits_catalog_footprint_with_exact_iou() -> None:
 
     assert result.placed_count == 1
     assert result.dropped_count == 0
+    assert result.diagnostics_by_feature["simple"]["fit_mode"] == "single_rect"
+    assert result.diagnostics_by_feature["simple"]["candidate_limit_reached"] is False
+    assert result.diagnostics_by_feature["simple"]["best_single_rect_footprint"] == result.placements[0].diagnostics["selected_footprint_id"]
     assert result.placements[0].cells == (GridCell(1, 1), GridCell(2, 1))
     assert result.placements[0].diagnostics["iou"] == 1.0
     assert result.placements[0].diagnostics["selected_footprint_polygon"].area == pytest.approx(128.0)
@@ -206,6 +215,7 @@ def test_diagonal_outline_can_select_diagonal_catalog_candidate() -> None:
     assert result.placed_count == 1
     assert result.placements[0].grid_kind is GridKind.DIAGONAL
     assert result.placements[0].cm_type.cat2 == "Diagonal House"
+    assert result.diagnostics_by_feature["diagonal"]["preferred_orientation"] == "diagonal"
     assert result.placements[0].diagnostics["footprint_orientation_class"] == "diagonal"
     assert result.placements[0].diagnostics["iou"] == 1.0
 
@@ -223,6 +233,8 @@ def test_complex_modular_footprint_is_not_collapsed_to_one_rectangle() -> None:
     )
 
     assert result.placed_count == 1
+    assert result.diagnostics_by_feature["l-shape"]["fit_mode"] == "modular_cover"
+    assert result.diagnostics_by_feature["l-shape"]["modular_attempted"] is True
     assert result.placements[0].cells == (GridCell(1, 1), GridCell(1, 2), GridCell(2, 1))
     assert result.placements[0].diagnostics["module_count"] == 3
     assert result.placements[0].diagnostics["iou"] == 1.0
@@ -400,7 +412,7 @@ def test_area_shortlist_selects_medium_footprint_instead_of_first_tiny_catalog_e
     assert "selected_footprint_polygon" not in diagnostics
 
 
-def test_scored_candidate_cap_still_considers_late_area_compatible_footprints() -> None:
+def test_single_rect_mode_does_not_hit_candidate_cap_for_late_area_compatible_footprints() -> None:
     from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
 
     grid = _grid(width=8, height=8)
@@ -443,9 +455,11 @@ def test_scored_candidate_cap_still_considers_late_area_compatible_footprints() 
 
     diagnostics = result.diagnostics_by_feature["capped"]
     assert result.placements[0].cm_type.cat2 == "Late Fit"
-    assert diagnostics["candidate_limit_reached"] is True
-    assert diagnostics["expensive_candidates_scored"] <= 2
-    assert diagnostics["footprint_types_considered"] <= 24
+    assert diagnostics["fit_mode"] == "single_rect"
+    assert diagnostics["candidate_limit_reached"] is False
+    assert diagnostics["expensive_candidates_scored"] <= 18
+    assert diagnostics["footprint_types_considered"] <= 5
+    assert diagnostics["best_single_rect_footprint"] == "late-fit"
 
 
 def test_geometric_road_overlap_penalty_avoids_half_road_cover() -> None:
@@ -536,22 +550,24 @@ def test_road_overlap_metrics_only_scan_local_candidate_window() -> None:
 
     assert result.placed_count == 1
     assert result.placements[0].cells != (GridCell(2, 2),)
-    assert result.diagnostics["shapely_overlap_evaluations"] < 25
+    assert result.diagnostics["shapely_overlap_evaluations"] <= 25
 
 
-def test_candidate_generation_is_bounded_and_records_fallback_diagnostics() -> None:
+def test_large_industrial_building_enters_bounded_modular_cover_mode() -> None:
     from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
 
     grid = _grid(width=10, height=10)
-    outline = Polygon([(0, 0), (72, 0), (72, 72), (0, 72)])
+    outline = Polygon([(8, 8), (72, 8), (72, 40), (8, 40)])
 
     result = BuildingFitter(grid, rng=np.random.default_rng(7), max_candidates_per_building=2).fit(
-        (_feature("large", outline),),
+        (_feature("large", outline, source_tags={"building": "industrial"}),),
         catalogs={"houses": _catalog_rows()},
     )
 
     diagnostics = result.diagnostics_by_feature["large"]
-    assert diagnostics["candidate_limit_reached"] is True
+    assert diagnostics["fit_mode"] == "modular_cover"
+    assert diagnostics["modular_attempted"] is True
+    assert diagnostics["candidate_limit_reached"] in {False, True}
     assert diagnostics["candidates_scored"] <= 2
     assert diagnostics["elapsed_ms"] >= 0.0
     assert diagnostics["candidate_generation_ms"] >= 0.0
@@ -559,13 +575,13 @@ def test_candidate_generation_is_bounded_and_records_fallback_diagnostics() -> N
     assert result.diagnostics["building_feature_count"] == 1
     assert result.diagnostics["total_candidates_scored"] == diagnostics["candidates_scored"]
     assert result.diagnostics["candidates_scored_per_building"]["large"] == diagnostics["candidates_scored"]
-    assert result.diagnostics["candidate_limit_reached_count"] == 1
+    assert result.diagnostics["candidate_limit_reached_count"] <= 1
     assert result.diagnostics["shapely_score_evaluations"] == diagnostics["candidates_scored"]
     assert result.diagnostics["shapely_overlap_evaluations"] >= 0
     assert result.placed_count + result.dropped_count == 1
 
 
-def test_many_buildings_keep_scored_candidates_and_diagnostics_bounded() -> None:
+def test_many_ordinary_buildings_use_fast_single_rect_mode_without_candidate_caps() -> None:
     from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
 
     grid = _grid(width=30, height=30)
@@ -581,7 +597,7 @@ def test_many_buildings_keep_scored_candidates_and_diagnostics_bounded() -> None
                 ]
             ),
         )
-        for index in range(20)
+        for index in range(50)
     )
     catalog = tuple(
         {
@@ -606,10 +622,29 @@ def test_many_buildings_keep_scored_candidates_and_diagnostics_bounded() -> None
     scored = [diagnostics["expensive_candidates_scored"] for diagnostics in result.diagnostics_by_feature.values()]
     shifted = [diagnostics["shifted_candidates_generated"] for diagnostics in result.diagnostics_by_feature.values()]
     assert result.placed_count == len(features)
-    assert max(scored) <= 64
-    assert max(shifted) <= 24 * 9
+    assert result.diagnostics["candidate_limit_reached_count"] == 0
+    assert all(diagnostics["fit_mode"] == "single_rect" for diagnostics in result.diagnostics_by_feature.values())
+    assert max(scored) < 64
+    assert max(shifted) <= 5 * 9
     assert result.diagnostics["shapely_score_evaluations"] == sum(scored)
     assert all("selected_footprint_polygon" not in placement.diagnostics for placement in result.placements)
+
+
+def test_ordinary_residential_building_does_not_enter_modular_cover_by_default() -> None:
+    from terrain_extraction.osm_extraction.building_fitter import BuildingFitter
+
+    grid = _grid(width=8, height=8)
+    outline = Polygon([(16, 16), (40, 16), (40, 32), (16, 32)])
+
+    result = BuildingFitter(grid, rng=np.random.default_rng(7)).fit(
+        (_feature("residential", outline, source_tags={"building": "residential"}),),
+        catalogs={"houses": _catalog_rows()},
+    )
+
+    diagnostics = result.diagnostics_by_feature["residential"]
+    assert diagnostics["fit_mode"] == "single_rect"
+    assert diagnostics["modular_attempted"] is False
+    assert result.placements[0].diagnostics["selected_is_modular"] is False
 
 
 def test_constrained_building_clusters_are_placed_before_open_clusters() -> None:

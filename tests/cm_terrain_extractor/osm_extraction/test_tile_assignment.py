@@ -195,15 +195,15 @@ def test_boundary_intersection_uses_adjacent_route_cell() -> None:
     assert all(cell.xidx <= 2 for placement in result.placements for cell in placement.cells)
 
 
-def test_process_specific_tile_labels_are_generated_for_linear_catalogs() -> None:
+def test_profile_menu_tile_labels_are_generated_for_linear_catalogs() -> None:
     from terrain_extraction.osm_extraction.models import ProcessKind
     from terrain_extraction.osm_extraction.tile_assignment import CompiledTileCatalog
 
     expected = {
         ProcessKind.ROAD: "Road Tile 1",
-        ProcessKind.RAIL: "Rail Tile 1",
-        ProcessKind.STREAM: "Stream Tile 1",
-        ProcessKind.FENCE: "Fence Tile 1",
+        ProcessKind.RAIL: "Road Tile 1",
+        ProcessKind.STREAM: "Road Tile 1",
+        ProcessKind.FENCE: "Road Tile 1",
     }
 
     for process, cat2 in expected.items():
