@@ -182,6 +182,18 @@ class OccupancyModel:
             return None
         return int(self.ranks[layer][cell.xidx, cell.yidx])
 
+    def cell_conflicts(
+        self,
+        cell: GridCell,
+        *,
+        layer: LayerKind,
+        priority: int,
+        allow_replace: bool = False,
+    ) -> tuple[OccupancyConflict, ...]:
+        if not self._contains(cell):
+            return ()
+        return tuple(self._cell_conflicts(cell, layer, priority, allow_replace))
+
     def _cell_conflicts(
         self,
         cell: GridCell,

@@ -16,6 +16,10 @@ from shapely.geometry import (
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import substring
 from shapely.strtree import STRtree
+from terrain_extraction.osm_extraction.linear_processing_plan import (
+    LinearInteractionPolicy,
+    default_linear_interaction_policy,
+)
 from terrain_extraction.osm_extraction.models import (
     CMType,
     FeatureRecord,
@@ -48,11 +52,18 @@ class _PointCluster:
 
 
 class NetworkTopologyBuilder:
-    def __init__(self, *, clip_geometry: BaseGeometry | None = None, snap_tolerance_m: float = 1.0) -> None:
+    def __init__(
+        self,
+        *,
+        clip_geometry: BaseGeometry | None = None,
+        snap_tolerance_m: float = 1.0,
+        interaction_policy: LinearInteractionPolicy | None = None,
+    ) -> None:
         if snap_tolerance_m < 0:
             raise ValueError("snap_tolerance_m must be non-negative")
         self.clip_geometry = clip_geometry
         self.snap_tolerance_m = snap_tolerance_m
+        self.interaction_policy = interaction_policy or default_linear_interaction_policy()
 
     def build(self, features: tuple[FeatureRecord, ...]) -> TopologyGraph:
         source_lines, clipped_lines = self._normalize_features(features)
@@ -100,6 +111,7 @@ class NetworkTopologyBuilder:
         split_points: list[Point] = []
         self._line_point_ids: dict[int, set[int]] = defaultdict(set)
         self._point_top_levels: dict[int, frozenset[str]] = {}
+        self._point_processes: dict[int, frozenset[Any]] = {}
         self._point_roles: dict[int, str] = {}
         self._false_intersections_by_line: dict[int, int] = defaultdict(int)
         self._false_intersections_avoided = 0
@@ -110,6 +122,7 @@ class NetworkTopologyBuilder:
                 split_points.append(Point(coord))
                 self._line_point_ids[line_idx].add(point_id)
                 self._point_top_levels[point_id] = frozenset((source_line.top_level_name,))
+                self._point_processes[point_id] = frozenset((source_line.feature.process,))
                 self._point_roles[point_id] = "endpoint"
 
         tree = STRtree([source_line.geometry for source_line in source_lines])
@@ -119,7 +132,7 @@ class NetworkTopologyBuilder:
                     continue
                 intersection = source_line.geometry.intersection(source_lines[candidate_idx].geometry)
                 for point in _extract_points(intersection):
-                    if source_line.top_level_name != source_lines[candidate_idx].top_level_name:
+                    if not self._lines_connect(source_line, source_lines[candidate_idx]):
                         self._false_intersections_avoided += 1
                         self._false_intersections_by_line[line_idx] += 1
                         self._false_intersections_by_line[candidate_idx] += 1
@@ -129,8 +142,16 @@ class NetworkTopologyBuilder:
                     self._line_point_ids[line_idx].add(point_id)
                     self._line_point_ids[candidate_idx].add(point_id)
                     self._point_top_levels[point_id] = frozenset((source_line.top_level_name,))
+                    self._point_processes[point_id] = frozenset(
+                        (source_line.feature.process, source_lines[candidate_idx].feature.process)
+                    )
                     self._point_roles[point_id] = "intersection"
         return split_points
+
+    def _lines_connect(self, first: _SourceLine, second: _SourceLine) -> bool:
+        if first.top_level_name == second.top_level_name:
+            return True
+        return self.interaction_policy.decision(first.feature.process, second.feature.process).interaction == "connect"
 
     def _cluster_points(self, points: list[Point]) -> list[_PointCluster]:
         parent = list(range(len(points)))
@@ -154,7 +175,7 @@ class NetworkTopologyBuilder:
                 for candidate_id in _query_point_indices(tree, search_area, points):
                     if candidate_id <= point_id:
                         continue
-                    if self._point_top_levels.get(point_id, frozenset()) != self._point_top_levels.get(candidate_id, frozenset()):
+                    if not self._points_connect(point_id, candidate_id):
                         continue
                     if point.distance(points[candidate_id]) <= self.snap_tolerance_m:
                         union(point_id, candidate_id)
@@ -171,6 +192,19 @@ class NetworkTopologyBuilder:
             snapped = any(not first_point.equals_exact(points[point_id], tolerance=0.001) for point_id in point_ids[1:])
             clusters.append(_PointCluster(point_ids=point_ids, point=Point(x, y), snapped=snapped))
         return clusters
+
+    def _points_connect(self, first_point_id: int, second_point_id: int) -> bool:
+        if self._point_top_levels.get(first_point_id, frozenset()) == self._point_top_levels.get(
+            second_point_id, frozenset()
+        ):
+            return True
+        first_processes = self._point_processes.get(first_point_id, frozenset())
+        second_processes = self._point_processes.get(second_point_id, frozenset())
+        return any(
+            self.interaction_policy.decision(first_process, second_process).interaction == "connect"
+            for first_process in first_processes
+            for second_process in second_processes
+        )
 
     def _build_nodes(
         self,

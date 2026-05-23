@@ -184,10 +184,58 @@ def test_impossible_catalog_route_fails_with_tile_feasibility_diagnostics() -> N
     route = result.routes[0]
 
     assert not route.success
-    assert route.diagnostics["failure_reason"] == "no_tile_feasible_path"
+    assert route.diagnostics["failure_reason"] == "tile_catalog_gap"
     assert route.diagnostics["tile_feasible_rejections"] >= 1
     assert result.linear_state is not None
     assert not result.linear_state.occupied
+
+
+def test_same_family_overlap_failure_uses_specific_diagnostic() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    state = LinearNetworkState(width=5, height=1)
+    assert state.reserve_path(_route(10, ((1, 0), (2, 0), (3, 0)))).success
+    secondary = _edge(0, (0, (4, 4)), (1, (28, 4)), config_name="secondary", priority=6)
+
+    result = NetworkRouter(
+        grid_index=_grid(width=5, height=1),
+        linear_state=state,
+        corridor_deviation_m=0.0,
+    ).route(_graph((secondary,)))
+    route = result.routes[0]
+
+    assert not route.success
+    assert route.diagnostics["failure_reason"] == "unplanned_same_family_overlap"
+    assert route.diagnostics["conflict_family"] == "same_family"
+
+
+def test_reservation_failure_is_distinct_from_route_search_failure() -> None:
+    from terrain_extraction.osm_extraction.linear_network_state import LinearNetworkState
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind, RouteRecord
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    catalog = _catalog(include_four_way=False)
+    state = LinearNetworkState(width=5, height=5, catalogs={ProcessKind.ROAD: catalog})
+    assert state.reserve_path(_route(10, ((1, 2), (2, 2), (3, 2)))).success
+    rejected = RouteRecord(
+        edge_id=11,
+        start_node_id=0,
+        end_node_id=1,
+        process=ProcessKind.ROAD,
+        config_name="primary",
+        priority=1,
+        tile_cells=(GridCell(2, 1), GridCell(2, 2), GridCell(2, 3)),
+    )
+
+    route = NetworkRouter(grid_index=_grid(width=5, height=5))._reservation_failed_route(
+        rejected,
+        state.reserve_path(rejected),
+    )
+
+    assert not route.success
+    assert route.diagnostics["failure_reason"] == "reservation_failed"
+    assert route.diagnostics["linear_state_failures"][0]["failure_reason"] == "catalog_gap"
 
 
 def test_four_way_anchor_routes_as_single_catalog_feasible_intersection() -> None:

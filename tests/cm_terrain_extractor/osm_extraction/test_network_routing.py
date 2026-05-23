@@ -177,14 +177,112 @@ def test_cross_family_route_failure_reports_policy_diagnostics_deterministically
 
     assert tuple(route.edge_id for route in first.routes) == tuple(route.edge_id for route in second.routes)
     assert tuple(route.tile_cells for route in first.routes) == tuple(route.tile_cells for route in second.routes)
-    failed = [route for route in first.routes if not route.success]
-    assert len(failed) == 1
-    assert failed[0].process is ProcessKind.STREAM
-    assert failed[0].diagnostics["top_level_name"] == "stream"
-    assert failed[0].diagnostics["conflict_family"] == "cross_family"
-    assert failed[0].diagnostics["soft_avoid_cells"] >= 1
-    assert failed[0].diagnostics["false_intersection_avoided"] is True
+    assert first.failed_count == 0
+    stream = next(route for route in first.routes if route.process is ProcessKind.STREAM)
+    assert stream.diagnostics["top_level_name"] == "stream"
+    assert stream.diagnostics["conflict_family"] == "cross_family"
+    assert stream.diagnostics["soft_avoid_cells"] >= 1
+    assert stream.diagnostics["false_intersection_avoided"] is True
+    assert stream.diagnostics["state_skipped_conflict_cells"]
+    assert first.linear_state is not None
+    assert all(first.linear_state.process_at_cell[cell] is not ProcessKind.STREAM for cell in stream.diagnostics["state_skipped_conflict_cells"])
     assert first.diagnostics["false_intersections_avoided"] >= 1
+
+
+def test_lower_authority_same_family_overlap_shifts_without_intersection() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    primary = _with_authority(_edge(0, (0, (8, 4)), (1, (32, 4)), config_name="primary", priority=1))
+    secondary = _with_authority(_edge(1, (2, (0, 6)), (3, (40, 6)), config_name="secondary", priority=6))
+
+    result = NetworkRouter(grid_index=_grid(width=6, height=3), corridor_deviation_m=8.0).route(
+        _graph((primary, secondary))
+    )
+    routes = {route.edge_id: route for route in result.routes}
+
+    assert result.failed_count == 0
+    assert set(routes[0].tile_cells).isdisjoint(routes[1].tile_cells)
+    assert GridCell(2, 0) in routes[0].tile_cells
+    assert GridCell(2, 1) in routes[1].tile_cells
+    assert routes[1].diagnostics["conflict_family"] == "same_family"
+    assert routes[1].diagnostics["forbidden_occupied_cells"]
+    assert result.linear_state is not None
+    assert result.linear_state.intersection_kind_at(GridCell(2, 0)) == "straight"
+
+
+def test_same_family_true_topology_intersection_creates_junction() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+
+    from tests.cm_terrain_extractor.osm_extraction.test_network_topology import _feature
+
+    topology = NetworkTopologyBuilder().build(
+        (
+            _feature("road-0", "primary", ProcessKind.ROAD, LineString([(4, 20), (36, 20)]), priority=1),
+            _feature("road-1", "secondary", ProcessKind.ROAD, LineString([(20, 4), (20, 36)]), priority=6),
+        )
+    )
+
+    result = NetworkRouter(grid_index=_grid(width=5, height=5), corridor_deviation_m=8.0).route(topology)
+
+    assert result.failed_count == 0
+    assert result.linear_state is not None
+    assert result.linear_state.intersection_kind_at(GridCell(2, 2)) in {"t_junction", "four_way"}
+    assert any(GridCell(2, 2) in route.diagnostics["planned_connect_cells"] for route in result.routes)
+
+
+def test_endpoint_snap_connects_but_accidental_overlap_does_not() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+
+    from tests.cm_terrain_extractor.osm_extraction.test_network_topology import _feature
+
+    snapped_topology = NetworkTopologyBuilder(snap_tolerance_m=1.0).build(
+        (
+            _feature("road-0", "primary", ProcessKind.ROAD, LineString([(0, 4), (24, 4)]), priority=1),
+            _feature("road-1", "secondary", ProcessKind.ROAD, LineString([(24.5, 4), (40, 4)]), priority=6),
+        )
+    )
+    overlap_graph = _graph(
+        (
+            _with_authority(_edge(0, (0, (0, 4)), (1, (24, 4)), config_name="primary", priority=1)),
+            _with_authority(_edge(1, (2, (24.5, 4)), (3, (40, 4)), config_name="secondary", priority=6)),
+        )
+    )
+
+    snapped = NetworkRouter(grid_index=_grid(width=6, height=3), corridor_deviation_m=8.0).route(snapped_topology)
+    overlapped = NetworkRouter(grid_index=_grid(width=6, height=3), corridor_deviation_m=8.0).route(overlap_graph)
+
+    assert snapped.linear_state is not None
+    assert snapped.linear_state.intersection_kind_at(GridCell(3, 0)) == "straight"
+    assert any(GridCell(3, 0) in route.diagnostics["planned_connect_cells"] for route in snapped.routes)
+    assert overlapped.linear_state is not None
+    assert overlapped.linear_state.route_id_at_cell[GridCell(3, 0)] == (0,)
+    assert any(GridCell(3, 0) in route.diagnostics["forbidden_occupied_cells"] for route in overlapped.routes)
+
+
+def test_fence_near_road_prefers_adjacency_without_merging() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    road = _with_authority(_edge(0, (0, (0, 4)), (1, (40, 4)), config_name="primary", priority=1))
+    fence = _with_authority(
+        _edge(1, (2, (0, 12)), (3, (40, 12)), config_name="hedge", priority=8, process=ProcessKind.FENCE),
+        top_level_name="hedge",
+    )
+
+    result = NetworkRouter(grid_index=_grid(width=6, height=3), corridor_deviation_m=8.0).route(_graph((road, fence)))
+    routes = {route.edge_id: route for route in result.routes}
+
+    assert result.failed_count == 0
+    assert set(routes[0].tile_cells).isdisjoint(routes[1].tile_cells)
+    assert {cell.yidx for cell in routes[1].tile_cells} == {1}
+    assert GridCell(2, 1) in routes[1].diagnostics["preferred_adjacency_cells"]
+    assert result.linear_state is not None
+    assert all(result.linear_state.process_at_cell[cell] is ProcessKind.FENCE for cell in routes[1].tile_cells)
 
 
 def test_route_cells_are_output_cells_not_grid_corner_edges() -> None:

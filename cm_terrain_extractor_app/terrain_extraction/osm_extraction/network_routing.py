@@ -129,6 +129,20 @@ class _RouteAttempt:
         return bool(self.nodes)
 
 
+@dataclass(frozen=True, slots=True)
+class _RouteConflictMasks:
+    planned_connect_cells: frozenset[GridCell] = frozenset()
+    forbidden_occupied_cells: frozenset[GridCell] = frozenset()
+    soft_avoid_cells: frozenset[GridCell] = frozenset()
+    preferred_adjacency_cells: frozenset[GridCell] = frozenset()
+    allowed_cross_family_conflict_cells: frozenset[GridCell] = frozenset()
+    state_skip_cells: frozenset[GridCell] = frozenset()
+
+    @property
+    def requires_displacement(self) -> bool:
+        return bool(self.forbidden_occupied_cells or self.soft_avoid_cells or self.preferred_adjacency_cells)
+
+
 class NetworkRouter:
     def __init__(
         self,
@@ -179,6 +193,7 @@ class NetworkRouter:
         anchor_plans = {}
         anchor_diagnostics: list[Mapping[str, Any]] = []
         routes = []
+        topology_degrees = {node.node_id: topology.degree(node.node_id) for node in topology.nodes}
         for group in processing_plan.groups:
             group_topology = group.topology(topology.nodes)
             anchor_selection = AnchorSelector(
@@ -197,10 +212,14 @@ class NetworkRouter:
                 if dropped_route is not None:
                     routes.append(dropped_route)
                     continue
-                route = self._route_edge(edge, group_anchors, group_degrees, anchor_selection.plans)
+                route = self._route_edge(edge, group_anchors, topology_degrees, anchor_selection.plans)
                 route = self._with_processing_diagnostics(route, group)
                 if route.success:
-                    reservation = linear_state.reserve_path(route)
+                    reservation = linear_state.reserve_path(
+                        route,
+                        planned_connect_cells=route.diagnostics.get("planned_connect_cells", ()),
+                        skip_cells=route.diagnostics.get("state_skipped_conflict_cells", ()),
+                    )
                     if not reservation.success:
                         route = self._reservation_failed_route(route, reservation)
                 routes.append(route)
@@ -232,11 +251,8 @@ class NetworkRouter:
             line=edge.geometry,
             grid_index=self.grid_index,
         )
-        attempts: list[tuple[str | None, float, bool]] = [(None, self.corridor_deviation_m, False)]
-        if self._is_minor(edge) and self.minor_relaxation_m > self.corridor_deviation_m:
-            attempts.append(("minor_corridor", self.minor_relaxation_m, False))
-        if self.allow_soft_crossing:
-            attempts.append(("soft_crossing", attempts[-1][1], True))
+        masks = self._route_conflict_masks(edge, start, goal, degrees)
+        attempts = self._routing_attempts(edge, masks)
 
         total_blocked = 0
         total_hard_blocked = 0
@@ -262,6 +278,7 @@ class NetworkRouter:
                 edge.process,
                 _edge_top_level_name(edge),
                 edge.priority,
+                masks,
             )
             total_blocked += attempt.blocked_cells_considered
             total_hard_blocked += attempt.hard_blocked_occupied_cells
@@ -286,11 +303,12 @@ class NetworkRouter:
                     a_star_expansions=total_expansions,
                     tile_feasible_rejections=total_tile_rejections,
                     tile_feasible_failures=tuple(tile_failures),
+                    masks=masks,
                 )
                 return _route_with_elapsed(route, route_started_at)
 
         if edge.geometry.length > self.split_long_edge_m:
-            split_record = self._try_split_route(edge, start, goal, degrees, raster_spine)
+            split_record = self._try_split_route(edge, start, goal, degrees, raster_spine, masks)
             if split_record is not None:
                 diagnostics = {
                     **dict(split_record.diagnostics),
@@ -303,7 +321,7 @@ class NetworkRouter:
                 }
                 return _route_with_elapsed(_route_with_diagnostics(split_record, diagnostics), route_started_at)
 
-        failure_reason = "no_tile_feasible_path" if total_tile_rejections else "no_path"
+        failure_reason = _route_failure_reason(tile_failures, total_tile_rejections)
         route = RouteRecord(
             edge_id=edge.edge_id,
             start_node_id=edge.start_node_id,
@@ -332,6 +350,7 @@ class NetworkRouter:
                 "retry_count": len(retry_modes),
                 "a_star_expansions": total_expansions,
                 "retry_modes": tuple(retry_modes),
+                **_mask_diagnostics(masks),
                 "source_feature_ids": edge.feature_ids,
                 "source_indices": edge.source_indices,
             },
@@ -350,6 +369,7 @@ class NetworkRouter:
         process: ProcessKind,
         top_level_name: str,
         priority: int,
+        masks: _RouteConflictMasks,
     ) -> _RouteAttempt:
         if start == goal:
             return _RouteAttempt(nodes=(start,), blocked_cells_considered=0)
@@ -414,6 +434,7 @@ class NetworkRouter:
                     process=process,
                     top_level_name=top_level_name,
                     priority=priority,
+                    masks=masks,
                 )
                 if not step_decision.allowed:
                     if step_decision.failures:
@@ -440,6 +461,14 @@ class NetworkRouter:
                 )
                 spine_cost = self._spine_alignment_cost(traversed_cell, raster_spine)
                 soft_cost = 25.0 if blocked else 0.0
+                if traversed_cell in masks.soft_avoid_cells:
+                    soft_cost += 12.0
+                    soft_avoid_cells += 1
+                if traversed_cell in masks.allowed_cross_family_conflict_cells:
+                    soft_cost += 50.0
+                    soft_avoid_cells += 1
+                if traversed_cell in masks.preferred_adjacency_cells:
+                    soft_cost -= 0.45
                 next_cost = cost_so_far + 1.0 + turn_cost + distance_cost + spine_cost + soft_cost
                 next_state = (neighbor.xidx, neighbor.yidx, step.direction)
                 if next_cost >= best_cost.get(next_state, math.inf):
@@ -466,6 +495,7 @@ class NetworkRouter:
         goal: GridNode,
         degrees: Mapping[int, int],
         raster_spine: RasterSpine,
+        masks: _RouteConflictMasks,
     ) -> RouteRecord | None:
         midpoint = edge.geometry.interpolate(0.5, normalized=True)
         midpoint_node = self._clamp_node(self.grid_index.projected_to_cell(midpoint.x, midpoint.y))
@@ -482,6 +512,7 @@ class NetworkRouter:
             edge.process,
             _edge_top_level_name(edge),
             edge.priority,
+            masks,
         )
         second = self._a_star(
             edge.geometry,
@@ -494,6 +525,7 @@ class NetworkRouter:
             edge.process,
             _edge_top_level_name(edge),
             edge.priority,
+            masks,
         )
         if not first.success or not second.success:
             return None
@@ -514,6 +546,7 @@ class NetworkRouter:
             a_star_expansions=first.a_star_expansions + second.a_star_expansions,
             tile_feasible_rejections=first.tile_feasible_rejections + second.tile_feasible_rejections,
             tile_feasible_failures=first.tile_feasible_failures + second.tile_feasible_failures,
+            masks=masks,
         )
         diagnostics = {**dict(record.diagnostics), "split_intersections": 1}
         return RouteRecord(
@@ -550,8 +583,11 @@ class NetworkRouter:
         a_star_expansions: int = 0,
         tile_feasible_rejections: int = 0,
         tile_feasible_failures: tuple[Mapping[str, Any], ...] = (),
+        masks: _RouteConflictMasks | None = None,
     ) -> RouteRecord:
         tile_cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
+        masks = masks or _RouteConflictMasks()
+        used_conflict_skip_cells = frozenset(tile_cells).intersection(masks.state_skip_cells)
         route_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
         source_length = edge.geometry.length
         spine_diagnostics = self._spine_diagnostics(edge.geometry, nodes, tile_cells, raster_spine)
@@ -565,7 +601,8 @@ class NetworkRouter:
             "blocked_cells_considered": blocked_cells_considered,
             "hard_blocked_occupied_cells": hard_blocked_occupied_cells,
             "soft_avoid_cells": soft_avoid_cells,
-            "conflict_family": _conflict_family(tile_feasible_failures),
+            "conflict_family": _conflict_family(tile_feasible_failures)
+            or _mask_conflict_family(masks, used_conflict_skip_cells),
             "false_intersection_avoided": bool(edge.diagnostics.get("false_intersection_avoided", False)),
             "forced_relaxation": relaxation,
             "soft_crossings": soft_crossings,
@@ -578,6 +615,7 @@ class NetworkRouter:
             "tile_feasible_failures": tile_feasible_failures,
             "source_feature_ids": edge.feature_ids,
             "source_indices": edge.source_indices,
+            **_mask_diagnostics(masks, used_state_skip_cells=used_conflict_skip_cells),
             **spine_diagnostics,
         }
         return RouteRecord(
@@ -604,7 +642,8 @@ class NetworkRouter:
         failure = dict(reservation.failures[0]) if reservation.failures else {"failure_reason": "linear_state_rejected"}
         diagnostics = {
             **dict(route.diagnostics),
-            "failure_reason": failure.get("failure_reason", "linear_state_rejected"),
+            "failure_reason": "reservation_failed",
+            "reservation_failure_reason": failure.get("failure_reason", "linear_state_rejected"),
             "conflict_family": _conflict_family(reservation.failures),
             "hard_blocked_occupied_cells": int(route.diagnostics.get("hard_blocked_occupied_cells", 0))
             + _hard_blocked_failure_count(reservation.failures),
@@ -840,8 +879,23 @@ class NetworkRouter:
         process: ProcessKind,
         top_level_name: str,
         priority: int,
+        masks: _RouteConflictMasks,
         allow_lower_priority_connection: bool = False,
     ) -> Any:
+        if cell in masks.forbidden_occupied_cells:
+            return _AllowedCellDecision(
+                allowed=False,
+                failures=(
+                    _route_failure(
+                        process,
+                        cell,
+                        "unplanned_same_family_overlap",
+                        top_level_name=top_level_name,
+                    ),
+                ),
+            )
+        if cell in masks.allowed_cross_family_conflict_cells:
+            return _AllowedCellDecision()
         if self.linear_state is None:
             return _AllowedCellDecision()
         return self.linear_state.can_enter_cell(
@@ -851,7 +905,7 @@ class NetworkRouter:
             process=process,
             top_level_name=top_level_name,
             priority=priority,
-            allow_lower_priority_connection=allow_lower_priority_connection,
+            allow_lower_priority_connection=allow_lower_priority_connection or cell in masks.planned_connect_cells,
         )
 
     def _route_step_decision(
@@ -868,6 +922,7 @@ class NetworkRouter:
         process: ProcessKind,
         top_level_name: str,
         priority: int,
+        masks: _RouteConflictMasks,
     ) -> Any:
         if _state_path_contains(came_from, state, neighbor):
             return _AllowedCellDecision(allowed=False)
@@ -878,6 +933,7 @@ class NetworkRouter:
             process=process,
             top_level_name=top_level_name,
             priority=priority,
+            masks=masks,
             allow_lower_priority_connection=current in {start, goal},
         )
         if not current_decision.allowed:
@@ -889,6 +945,7 @@ class NetworkRouter:
             process=process,
             top_level_name=top_level_name,
             priority=priority,
+            masks=masks,
             allow_lower_priority_connection=neighbor in {start, goal},
         )
 
@@ -937,7 +994,7 @@ class NetworkRouter:
             cm_type=CMType(menu="Route", cat1="Route"),
             score=1.0,
         )
-        return not self.occupancy.can_place(placement).allowed
+        return bool(self.occupancy.cell_conflicts(cell, layer=placement.layer, priority=placement.priority))
 
     def _cached_cell_is_blocked(
         self,
@@ -964,6 +1021,112 @@ class NetworkRouter:
         if edge.process in {ProcessKind.FENCE, ProcessKind.LINEAR, ProcessKind.RAIL}:
             return LayerKind.LINEAR_OBJECT
         return LayerKind.LINEAR_SURFACE
+
+    def _routing_attempts(
+        self,
+        edge: TopologyEdge,
+        masks: _RouteConflictMasks,
+    ) -> list[tuple[str | None, float, bool]]:
+        attempts: list[tuple[str | None, float, bool]] = [(None, self.corridor_deviation_m, False)]
+        budget_m = self._displacement_budget_m(edge, masks)
+        if budget_m > self.corridor_deviation_m:
+            attempts.append(("minor_corridor", budget_m, False))
+        if masks.allowed_cross_family_conflict_cells or self.allow_soft_crossing:
+            attempts.append(("soft_crossing", max(budget_m, self.corridor_deviation_m), True))
+        return attempts
+
+    def _displacement_budget_m(self, edge: TopologyEdge, masks: _RouteConflictMasks) -> float:
+        if edge.process in {ProcessKind.FENCE, ProcessKind.LINEAR}:
+            return max(self.minor_relaxation_m, self.corridor_deviation_m + self.grid_index.cell_size_m)
+        if edge.process is ProcessKind.STREAM:
+            return max(self.corridor_deviation_m, self.grid_index.cell_size_m * 2)
+        if self._is_minor(edge) or _NETWORK_CLASS_RANK.get(edge.config_name, 99) >= 2:
+            return max(self.minor_relaxation_m, self.corridor_deviation_m)
+        if masks.requires_displacement and edge.geometry.length <= self.grid_index.cell_size_m * 8:
+            return max(self.minor_relaxation_m, self.corridor_deviation_m)
+        return self.corridor_deviation_m
+
+    def _route_conflict_masks(
+        self,
+        edge: TopologyEdge,
+        start: GridNode,
+        goal: GridNode,
+        degrees: Mapping[int, int],
+    ) -> _RouteConflictMasks:
+        if self.linear_state is None:
+            return _RouteConflictMasks()
+
+        planned_connect_cells = {
+            GridCell(start.xidx, start.yidx)
+            for node_id, node in ((edge.start_node_id, start),)
+            if degrees.get(node_id, 0) > 1
+        }
+        planned_connect_cells.update(
+            GridCell(goal.xidx, goal.yidx)
+            for node_id, node in ((edge.end_node_id, goal),)
+            if degrees.get(node_id, 0) > 1
+        )
+        shifted_planned_connect_cells = set(planned_connect_cells)
+        for cell in tuple(planned_connect_cells):
+            shifted_planned_connect_cells.update(self._adjacent_cells(cell))
+        planned_connect_cells = shifted_planned_connect_cells
+
+        forbidden_occupied_cells: set[GridCell] = set()
+        soft_avoid_cells: set[GridCell] = set()
+        preferred_adjacency_cells: set[GridCell] = set()
+        allowed_cross_family_conflict_cells: set[GridCell] = set()
+        state_skip_cells: set[GridCell] = set()
+        top_level_name = _edge_top_level_name(edge)
+        route_endpoint_cells = {GridCell(start.xidx, start.yidx), GridCell(goal.xidx, goal.yidx)}
+
+        for snapshot in self.linear_state.cell_snapshots():
+            cell = snapshot["cell"]
+            existing_process = snapshot["process"]
+            existing_top_level = snapshot["top_level_name"]
+            existing_priority = int(snapshot["priority"])
+            if existing_top_level == top_level_name:
+                interaction = "connect"
+            else:
+                interaction = self.interaction_policy.decision(existing_process, edge.process).interaction
+
+            if interaction == "connect":
+                if cell in planned_connect_cells:
+                    continue
+                if existing_top_level == top_level_name and cell in route_endpoint_cells:
+                    continue
+                if edge.priority >= existing_priority:
+                    forbidden_occupied_cells.add(cell)
+                else:
+                    soft_avoid_cells.add(cell)
+                continue
+
+            soft_avoid_cells.add(cell)
+            if edge.process is ProcessKind.STREAM:
+                allowed_cross_family_conflict_cells.add(cell)
+                state_skip_cells.add(cell)
+
+            if existing_process is ProcessKind.ROAD and edge.process in {ProcessKind.FENCE, ProcessKind.LINEAR}:
+                preferred_adjacency_cells.update(self._adjacent_cells(cell))
+
+        preferred_adjacency_cells.difference_update(forbidden_occupied_cells)
+        preferred_adjacency_cells.difference_update(allowed_cross_family_conflict_cells)
+        preferred_adjacency_cells.difference_update(self.linear_state.occupied)
+        return _RouteConflictMasks(
+            planned_connect_cells=frozenset(planned_connect_cells),
+            forbidden_occupied_cells=frozenset(forbidden_occupied_cells),
+            soft_avoid_cells=frozenset(soft_avoid_cells),
+            preferred_adjacency_cells=frozenset(preferred_adjacency_cells),
+            allowed_cross_family_conflict_cells=frozenset(allowed_cross_family_conflict_cells),
+            state_skip_cells=frozenset(state_skip_cells),
+        )
+
+    def _adjacent_cells(self, cell: GridCell) -> set[GridCell]:
+        cells = set()
+        for dx, dy in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+            adjacent = GridCell(cell.xidx + dx, cell.yidx + dy)
+            if 0 <= adjacent.xidx < self.grid_index.width and 0 <= adjacent.yidx < self.grid_index.height:
+                cells.add(adjacent)
+        return cells
 
     def _is_minor(self, edge: TopologyEdge) -> bool:
         return edge.config_name in _MINOR_CLASSES or edge.priority >= 7
@@ -1083,6 +1246,39 @@ def _extend_failures(
     collected.extend(dict(failure) for failure in tuple(failures)[:remaining])
 
 
+def _route_failure(
+    process: ProcessKind,
+    cell: GridCell,
+    reason: str,
+    **extra: Any,
+) -> Mapping[str, Any]:
+    return {
+        "process": process.value,
+        "cell": (cell.xidx, cell.yidx),
+        "failure_reason": reason,
+        **extra,
+    }
+
+
+def _mask_diagnostics(
+    masks: _RouteConflictMasks,
+    *,
+    used_state_skip_cells: Iterable[GridCell] = (),
+) -> dict[str, Any]:
+    return {
+        "planned_connect_cells": _ordered_cells(masks.planned_connect_cells),
+        "forbidden_occupied_cells": _ordered_cells(masks.forbidden_occupied_cells),
+        "soft_avoid_mask_cells": _ordered_cells(masks.soft_avoid_cells),
+        "preferred_adjacency_cells": _ordered_cells(masks.preferred_adjacency_cells),
+        "allowed_cross_family_conflict_cells": _ordered_cells(masks.allowed_cross_family_conflict_cells),
+        "state_skipped_conflict_cells": _ordered_cells(used_state_skip_cells),
+    }
+
+
+def _ordered_cells(cells: Iterable[GridCell]) -> tuple[GridCell, ...]:
+    return tuple(sorted(cells, key=lambda cell: (cell.yidx, cell.xidx)))
+
+
 def _authority_diagnostics(edge: TopologyEdge) -> dict[str, Any]:
     if edge.linear_authority is not None:
         return dict(edge.linear_authority.as_diagnostics())
@@ -1120,11 +1316,30 @@ def _authority_sort_key(edge: TopologyEdge) -> tuple[int, int, float, int, str]:
 
 def _conflict_family(failures: Iterable[Mapping[str, Any]]) -> str | None:
     reasons = {str(failure.get("failure_reason")) for failure in failures}
-    if reasons.intersection({"process_avoidance", "process_conflict"}):
+    if reasons.intersection({"process_avoidance", "process_conflict", "cross_family_conflict"}):
         return "cross_family"
     if reasons:
         return "same_family"
     return None
+
+
+def _mask_conflict_family(masks: _RouteConflictMasks, used_state_skip_cells: Iterable[GridCell] = ()) -> str | None:
+    if tuple(used_state_skip_cells):
+        return "cross_family"
+    if masks.forbidden_occupied_cells:
+        return "same_family"
+    return None
+
+
+def _route_failure_reason(failures: Iterable[Mapping[str, Any]], rejection_count: int) -> str:
+    reasons = {str(failure.get("failure_reason")) for failure in failures}
+    if "unplanned_same_family_overlap" in reasons or "lower_priority_overwrite" in reasons:
+        return "unplanned_same_family_overlap"
+    if reasons.intersection({"process_avoidance", "process_conflict", "cross_family_conflict"}):
+        return "cross_family_conflict"
+    if "catalog_gap" in reasons or rejection_count:
+        return "tile_catalog_gap"
+    return "no_path"
 
 
 def _hard_blocked_failure_count(failures: Iterable[Mapping[str, Any]]) -> int:

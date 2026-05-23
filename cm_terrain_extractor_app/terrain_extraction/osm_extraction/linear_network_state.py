@@ -90,17 +90,44 @@ class LinearNetworkState:
         )
         return LinearCellDecision(allowed=not failures, failures=failures)
 
-    def reserve_path(self, route: RouteRecord, *, route_id: int | str | None = None) -> LinearReservationResult:
+    def reserve_path(
+        self,
+        route: RouteRecord,
+        *,
+        route_id: int | str | None = None,
+        planned_connect_cells: Iterable[GridCell] = (),
+        skip_cells: Iterable[GridCell] = (),
+    ) -> LinearReservationResult:
+        return self.reserve_path_cells(
+            route,
+            route_id=route_id,
+            planned_connect_cells=planned_connect_cells,
+            skip_cells=skip_cells,
+        )
+
+    def reserve_path_cells(
+        self,
+        route: RouteRecord,
+        *,
+        route_id: int | str | None = None,
+        planned_connect_cells: Iterable[GridCell] = (),
+        skip_cells: Iterable[GridCell] = (),
+    ) -> LinearReservationResult:
         route_key = route.edge_id if route_id is None else route_id
         top_level_name = _route_top_level_name(route)
-        additions = _route_direction_additions(route.tile_cells)
+        skip_cell_set = frozenset(skip_cells)
+        additions = {
+            cell: directions
+            for cell, directions in _route_direction_additions(route.tile_cells).items()
+            if cell not in skip_cell_set
+        }
         failures = self._reservation_failures(
             additions=additions,
             process=route.process,
             top_level_name=top_level_name,
             priority=route.priority,
             route_id=route_key,
-            lower_priority_connection_cells=_endpoint_cells(route.tile_cells),
+            lower_priority_connection_cells=_endpoint_cells(route.tile_cells) | frozenset(planned_connect_cells),
         )
         if failures:
             return LinearReservationResult(success=False, route_id=route_key, failures=failures)
@@ -140,6 +167,28 @@ class LinearNetworkState:
 
     def intersection_kind_at(self, cell: GridCell) -> str | None:
         return self.intersection_kind_at_cell.get(cell)
+
+    def cell_snapshot(self, cell: GridCell) -> Mapping[str, Any] | None:
+        if cell not in self.occupied:
+            return None
+        return MappingProxyType(
+            {
+                "cell": cell,
+                "process": self.process_at_cell[cell],
+                "top_level_name": self.top_level_at_cell[cell],
+                "priority": self.priority_at_cell[cell],
+                "required_directions": self.required_dirs(cell),
+                "route_ids": self.route_id_at_cell[cell],
+                "intersection_kind": self.intersection_kind_at_cell[cell],
+            }
+        )
+
+    def cell_snapshots(self) -> tuple[Mapping[str, Any], ...]:
+        return tuple(
+            self.cell_snapshot(cell)
+            for cell in sorted(self.occupied, key=lambda item: (item.yidx, item.xidx))
+            if self.cell_snapshot(cell) is not None
+        )
 
     def as_debug_layer(self) -> tuple[Mapping[str, Any], ...]:
         rows = []
@@ -218,12 +267,14 @@ class LinearNetworkState:
                     )
                     continue
 
-            allows_lower_priority_connection = (
-                existing_process is not None
-                and existing_top_level == top_level_name
-                and len(new_dirs) == 1
-                and cell in lower_priority_connection_cells
-            )
+            allows_lower_priority_connection = False
+            if existing_process is not None and len(new_dirs) == 1 and cell in lower_priority_connection_cells:
+                if existing_top_level == top_level_name:
+                    allows_lower_priority_connection = True
+                else:
+                    allows_lower_priority_connection = (
+                        self.interaction_policy.decision(existing_process, process).interaction == "connect"
+                    )
             if (
                 existing_priority is not None
                 and priority > existing_priority

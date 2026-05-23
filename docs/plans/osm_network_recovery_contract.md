@@ -78,7 +78,7 @@ Responsibilities:
 Primary module ownership:
 
 - `network_topology.py`: line clipping, normalization, noding, topology nodes, topology edges, snapping, and source-line topology diagnostics.
-- `network_routing.py`: route planning, route records, route diagnostics, route retry policy, and integration with raster spines, anchor plans, tile feasibility, and linear state.
+- `network_routing.py`: route planning, route-local conflict masks, route records, route diagnostics, route retry policy, and integration with raster spines, anchor plans, tile feasibility, and linear state.
 - `tile_assignment.py`: compiled tile catalogs, direction-set feasibility, strict tile variant selection, and tile failure diagnostics.
 - `occupancy.py`: dense layer occupancy used by roads, buildings, areas, and conflict policy.
 - `output_rows.py`: final CM row assembly and output conflict validation.
@@ -95,6 +95,8 @@ Invariants:
 - Add focused modules when they clarify ownership. Do not create a second parallel architecture.
 - Network recovery must strengthen the typed pipeline, not expand quarantined legacy helpers.
 - Public row semantics remain owned by `output_rows.py`; debug layers remain owned by `debug_export.py`.
+- `LinearNetworkState.reserve_path(...)` may skip route cells that are deliberate cross-family conflict holes; skipped cells can remain in the route record for diagnostics/output priority, but they must not create topology connections in state-derived tile finalization.
+- Same-family occupied cells are route-search constraints unless they are planned topology connections or nearby shifted planned junction cells; cross-family conflict holes must be diagnosed without creating cross-family junctions.
 
 ### Tests and Fixtures
 
@@ -205,7 +207,7 @@ Required methods:
 
 ```python
 can_enter_cell(cell, incoming_dir, outgoing_dir, process, priority)
-reserve_path(route, process, priority)
+reserve_path(route, planned_connect_cells=(), skip_cells=())
 release_path(route_id)
 required_dirs(cell)
 as_debug_layer()
