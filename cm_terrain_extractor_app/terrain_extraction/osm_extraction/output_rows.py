@@ -211,6 +211,8 @@ def _validate_building_placements(placements: tuple[PlacementRecord, ...], *, gr
             continue
         if placement.diagnostics.get("output_xidx") is None or placement.diagnostics.get("output_yidx") is None:
             raise OutputRowValidationError(f"building placement is missing explicit output coordinates: {placement}")
+        if grid_index is not None:
+            _validate_building_footprint(placement, placements, grid_index)
         for cell in placement.cells:
             if cell in linear_cells:
                 raise OutputRowValidationError(f"building-road collision at cell ({cell.xidx}, {cell.yidx})")

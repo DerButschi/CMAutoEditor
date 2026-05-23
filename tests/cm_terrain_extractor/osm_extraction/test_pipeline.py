@@ -55,6 +55,53 @@ def test_context_initializes_deterministic_rng_and_noop_progress() -> None:
     assert first.progress("stage", 0.5, None) is None
 
 
+def test_building_fitter_occupancy_uses_resolved_linear_rows() -> None:
+    from terrain_extraction.osm_extraction.grid_index import GridIndex
+    from terrain_extraction.osm_extraction.models import (
+        CMType,
+        GridCell,
+        GridKind,
+        LayerKind,
+        PlacementRecord,
+    )
+    from terrain_extraction.osm_extraction.pipeline import _resolved_occupancy_for_building_fitter
+
+    grid = GridIndex(
+        origin_x=0,
+        origin_y=0,
+        x_axis_unit=(1.0, 0.0),
+        y_axis_unit=(0.0, 1.0),
+        width=4,
+        height=2,
+    )
+    weak = PlacementRecord(
+        layer=LayerKind.LINEAR_SURFACE,
+        grid_kind=GridKind.NORMAL,
+        cells=(GridCell(0, 0), GridCell(1, 0)),
+        config_name="road",
+        feature_id="weak-road",
+        priority=5,
+        cm_type=CMType(menu="Roads", cat1="Dirt"),
+        score=1.0,
+    )
+    strong = PlacementRecord(
+        layer=LayerKind.LINEAR_SURFACE,
+        grid_kind=GridKind.NORMAL,
+        cells=(GridCell(1, 0), GridCell(2, 0)),
+        config_name="road",
+        feature_id="strong-road",
+        priority=1,
+        cm_type=CMType(menu="Roads", cat1="Dirt"),
+        score=1.0,
+    )
+
+    occupancy = _resolved_occupancy_for_building_fitter(grid, (weak, strong))
+
+    assert occupancy.object_id_at(LayerKind.LINEAR_SURFACE, GridCell(0, 0)) == "weak-road"
+    assert occupancy.object_id_at(LayerKind.LINEAR_SURFACE, GridCell(1, 0)) == "strong-road"
+    assert occupancy.object_id_at(LayerKind.LINEAR_SURFACE, GridCell(2, 0)) == "strong-road"
+
+
 def test_osm_processor_imports_without_streamlit_and_holds_pipeline(monkeypatch) -> None:
     config_path = "default_osm_config.json"
 

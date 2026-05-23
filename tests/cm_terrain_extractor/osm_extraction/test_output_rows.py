@@ -355,7 +355,7 @@ def test_final_rows_still_emit_one_row_per_building_piece() -> None:
         diagnostics={
             "output_xidx": 0.5,
             "output_yidx": 0.5,
-            "selected_footprint_polygon": Polygon([(8, 8), (24, 8), (24, 16), (8, 16)]),
+            "selected_footprint_polygon": Polygon([(10, 6), (26, 6), (26, 14), (10, 14)]),
             "selected_width_units": 4,
             "selected_height_units": 2,
             "selected_is_diagonal": False,
@@ -388,7 +388,7 @@ def test_geometric_building_validation_accepts_effective_swapped_dimensions() ->
         diagnostics={
             "output_xidx": 0.5,
             "output_yidx": 0.5,
-            "selected_footprint_polygon": Polygon([(8, 8), (24, 8), (24, 16), (8, 16)]),
+            "selected_footprint_polygon": Polygon([(10, 6), (26, 6), (26, 14), (10, 14)]),
             "selected_width_units": 4,
             "selected_height_units": 2,
             "selected_is_diagonal": False,
@@ -429,9 +429,9 @@ def test_geometric_building_road_validation_rejects_partial_overlap() -> None:
         direction="Direction 1",
         grid_kind=GridKind.SUB_SQUARE,
         diagnostics={
-            "output_xidx": 0.25,
+            "output_xidx": 0,
             "output_yidx": 0.5,
-            "selected_footprint_polygon": Polygon([(6, 8), (14, 8), (14, 16), (6, 16)]),
+            "selected_footprint_polygon": Polygon([(6, 6), (14, 6), (14, 14), (6, 14)]),
             "selected_width_units": 2,
             "selected_height_units": 2,
             "selected_is_diagonal": False,
@@ -439,14 +439,17 @@ def test_geometric_building_road_validation_rejects_partial_overlap() -> None:
         },
     )
 
-    with pytest.raises(OutputRowValidationError, match="final building-linear geometry collision"):
+    with pytest.raises(OutputRowValidationError, match="building-road footprint collision"):
         placements_to_output_rows((road, building), include_internal=True, grid_index=_grid())
 
 
-def test_geometric_building_validation_uses_final_row_not_diagnostics_polygon() -> None:
+def test_geometric_building_validation_rejects_diagnostics_polygon_that_differs_from_final_row() -> None:
     from shapely.geometry import Polygon
     from terrain_extraction.osm_extraction.models import GridCell, GridKind, LayerKind
-    from terrain_extraction.osm_extraction.output_rows import placements_to_output_rows
+    from terrain_extraction.osm_extraction.output_rows import (
+        OutputRowValidationError,
+        placements_to_output_rows,
+    )
 
     building = _placement(
         layer=LayerKind.BUILDING,
@@ -469,9 +472,8 @@ def test_geometric_building_validation_uses_final_row_not_diagnostics_polygon() 
         },
     )
 
-    rows = placements_to_output_rows((building,), include_internal=True, grid_index=_grid())
-
-    assert rows[0]["xidx"] == 0.5
+    with pytest.raises(OutputRowValidationError, match="inconsistent with output coordinates"):
+        placements_to_output_rows((building,), include_internal=True, grid_index=_grid())
 
 
 def test_final_geometry_reconstructs_normal_half_shift_and_legacy_offset_contract() -> None:
@@ -505,9 +507,9 @@ def test_final_geometry_reconstructs_normal_half_shift_and_legacy_offset_contrac
         },
     ).geometry
 
-    assert normal.bounds == pytest.approx((8.0, 8.0, 16.0, 16.0))
+    assert normal.bounds == pytest.approx((10.0, 6.0, 18.0, 14.0))
     assert normal.area == pytest.approx(64.0)
-    assert half_shifted.bounds == pytest.approx((6.0, 8.0, 14.0, 16.0))
+    assert half_shifted.bounds == pytest.approx((8.0, 6.0, 16.0, 14.0))
 
 
 def test_final_geometry_reconstructs_diagonal_and_direction_rotation() -> None:
@@ -555,10 +557,10 @@ def test_final_geometry_reconstructs_diagonal_and_direction_rotation() -> None:
     ).geometry
 
     assert diagonal.is_diagonal is True
-    assert diagonal.geometry.bounds == pytest.approx((16.0, 4.0, 32.0, 20.0))
+    assert diagonal.geometry.bounds == pytest.approx((18.0, 2.0, 34.0, 18.0))
     assert diagonal.geometry.area == pytest.approx(128.0)
-    assert direction_1.bounds == pytest.approx((8.0, 8.0, 20.0, 16.0))
-    assert direction_2.bounds == pytest.approx((8.0, 8.0, 16.0, 20.0))
+    assert direction_1.bounds == pytest.approx((10.0, 6.0, 22.0, 14.0))
+    assert direction_2.bounds == pytest.approx((10.0, 6.0, 18.0, 18.0))
 
 
 def test_final_row_geometry_catches_collision_that_cell_only_validation_misses() -> None:
@@ -581,7 +583,7 @@ def test_final_row_geometry_catches_collision_that_cell_only_validation_misses()
             "_cell_yidx": 1,
         },
         {
-            "xidx": 0.25,
+            "xidx": 0,
             "yidx": 0.5,
             "z": -1,
             "menu": "Independent Buildings",
@@ -606,7 +608,7 @@ def test_final_row_geometry_catches_collision_that_cell_only_validation_misses()
 
     assert cell_only_overlap is False
     assert validation.is_valid is False
-    assert validation.issues[0].overlap_area_m2 == pytest.approx(16.0)
+    assert validation.issues[0].overlap_area_m2 == pytest.approx(12.0)
 
 
 def test_pipeline_assembles_output_rows_without_migration_flag() -> None:

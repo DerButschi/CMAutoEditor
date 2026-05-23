@@ -199,6 +199,7 @@ class ExtractionPipeline:
         _reserve_output_placements(occupancy_model, linear_dependent_placements)
 
         if building_features:
+            occupancy_model = _resolved_occupancy_for_building_fitter(grid_index, tuple(placements))
             building_catalogs = (
                 self._building_catalogs_for(building_features, config)
                 if building_catalog_provider is None
@@ -905,6 +906,15 @@ def _reserve_output_placements(occupancy: OccupancyModel | None, placements: tup
             else f"{placement.config_name}:{placement.cells[0].xidx}:{placement.cells[0].yidx}"
         )
         occupancy.place(placement, object_id=object_id, allow_replace=False)
+
+
+def _resolved_occupancy_for_building_fitter(
+    grid_index: GridIndex,
+    placements: tuple[PlacementRecord, ...],
+) -> OccupancyModel:
+    occupancy = OccupancyModel.from_grid_index(grid_index)
+    _reserve_output_placements(occupancy, _resolve_output_layer_conflicts(placements))
+    return occupancy
 
 
 def _resolve_output_layer_conflicts(placements: tuple[PlacementRecord, ...]) -> tuple[PlacementRecord, ...]:

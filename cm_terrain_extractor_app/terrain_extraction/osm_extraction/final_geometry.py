@@ -6,7 +6,11 @@ from typing import Any
 
 from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
-from terrain_extraction.osm_extraction.building_geometry import EPSILON_M2
+from terrain_extraction.osm_extraction.building_geometry import (
+    EPSILON_M2,
+    building_anchor_local_from_selected_grid_index,
+    selected_grid_index_from_building_output,
+)
 from terrain_extraction.osm_extraction.models import GridCell, LayerKind
 
 _LINEAR_LAYERS = frozenset({LayerKind.LINEAR_SURFACE.value, LayerKind.LINEAR_OBJECT.value})
@@ -222,8 +226,12 @@ def _profile_outline_at_output_anchor(
     output_xidx: float,
     output_yidx: float,
 ) -> Polygon:
-    anchor_local_x = (output_xidx + 0.5) * grid_index.cell_size_m
-    anchor_local_y = (output_yidx + 0.5) * grid_index.cell_size_m
+    selected_xidx, selected_yidx = selected_grid_index_from_building_output(output_xidx, output_yidx)
+    anchor_local_x, anchor_local_y = building_anchor_local_from_selected_grid_index(
+        grid_index,
+        selected_xidx,
+        selected_yidx,
+    )
     points = []
     for local_x, local_y in list(outline.exterior.coords)[:-1]:
         projected = grid_index.projected_from_local(anchor_local_x + local_x, anchor_local_y + local_y)

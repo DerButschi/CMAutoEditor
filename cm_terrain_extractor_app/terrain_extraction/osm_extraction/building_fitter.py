@@ -12,13 +12,13 @@ from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 from terrain_extraction.osm_extraction.building_geometry import (
     EPSILON_M2,
+    building_output_from_selected_grid_index,
     cell_window_for_geometry,
     local_bounds,
     normal_cells_overlapped_by_polygon,
-    output_index_from_local,
     reconstruct_building_footprint_polygon,
+    selected_grid_index_from_building_output,
 )
-from terrain_extraction.osm_extraction.final_geometry import reconstruct_building_row_geometry
 from terrain_extraction.osm_extraction.models import (
     BuildingFittingResult,
     CMType,
@@ -100,8 +100,13 @@ class BuildingCandidate:
     footprint: BuildingFootprint
     cells: tuple[GridCell, ...]
     footprint_polygon: BaseGeometry
+    selected_grid_xidx: float | None
+    selected_grid_yidx: float | None
     output_xidx: float | None
     output_yidx: float | None
+    reconstructed_selected_grid_xidx: float | None
+    reconstructed_selected_grid_yidx: float | None
+    roundtrip_error: float
     footprint_width_units: int
     footprint_height_units: int
     footprint_is_diagonal: bool
@@ -123,8 +128,13 @@ class BuildingCandidate:
 
 @dataclass(frozen=True, slots=True)
 class BuildingPlacementGeometry:
+    selected_grid_xidx: float | None
+    selected_grid_yidx: float | None
     output_xidx: float | None
     output_yidx: float | None
+    reconstructed_selected_grid_xidx: float | None
+    reconstructed_selected_grid_yidx: float | None
+    roundtrip_error: float
     output_grid_kind: GridKind
     anchor_cell: GridCell | None
     blocked_normal_cells: tuple[GridCell, ...]
@@ -594,36 +604,18 @@ class BuildingFitter:
         for x_shift, y_shift in _placement_shift_offsets(shift_steps):
             origin_x = snapped_origin_x + x_shift * half_cell_size
             origin_y = snapped_origin_y + y_shift * half_cell_size
-            width_units = footprint.height_cells if swapped else footprint.width_cells
-            height_units = footprint.width_cells if swapped else footprint.height_cells
-            footprint_polygon = _footprint_polygon_from_origin(
+            geometry = _candidate_geometry_from_local_origin(
                 self.grid_index,
                 footprint,
                 origin_x,
                 origin_y,
                 swapped=swapped,
-            )
-            if not _polygon_within_grid(self.grid_index, footprint_polygon):
-                continue
-            cells = _cells_overlapped_by_polygon(self.grid_index, footprint_polygon)
-            if not cells:
-                continue
-            yield _CandidateGeometry(
-                output_xidx=_output_index_from_local(self.grid_index, origin_x),
-                output_yidx=_output_index_from_local(self.grid_index, origin_y),
-                output_grid_kind=GridKind.DIAGONAL if footprint.is_diagonal else GridKind.SUB_SQUARE,
-                anchor_cell=cells[0],
-                blocked_normal_cells=cells,
-                footprint_polygon=footprint_polygon,
-                footprint_width_units=width_units,
-                footprint_height_units=height_units,
-                footprint_is_diagonal=footprint.is_diagonal,
-                footprint_row=footprint.row,
-                footprint_col=footprint.col,
-                footprint_direction=footprint.direction,
                 orientation=orientation,
                 orientation_class="diagonal" if footprint.is_diagonal else "axis",
             )
+            if geometry is None:
+                continue
+            yield geometry
 
     def _modular_cover_candidates_for(
         self,
@@ -653,23 +645,21 @@ class BuildingFitter:
             }
         footprint_polygon = unary_union([self.grid_index.cell_polygon(cell) for cell in modular_cells])
         modular_footprint = modular_profiles[0].footprint
-        output_xidx, output_yidx = _output_indices_from_polygon_origin(self.grid_index, footprint_polygon)
-        geometry = _CandidateGeometry(
-            output_xidx=output_xidx,
-            output_yidx=output_yidx,
-            output_grid_kind=GridKind.DIAGONAL if modular_footprint.is_diagonal else GridKind.SUB_SQUARE,
-            anchor_cell=modular_cells[0],
-            blocked_normal_cells=modular_cells,
-            footprint_polygon=footprint_polygon,
-            footprint_width_units=modular_footprint.width_cells,
-            footprint_height_units=modular_footprint.height_cells,
-            footprint_is_diagonal=modular_footprint.is_diagonal,
-            footprint_row=modular_footprint.row,
-            footprint_col=modular_footprint.col,
-            footprint_direction=modular_footprint.direction,
+        origin_x, origin_y = _polygon_origin_local(self.grid_index, footprint_polygon)
+        geometry = _candidate_geometry_from_local_origin(
+            self.grid_index,
+            modular_footprint,
+            origin_x,
+            origin_y,
+            swapped=False,
             orientation=0.0,
-            orientation_class="axis",
+            orientation_class="diagonal" if modular_footprint.is_diagonal else "axis",
         )
+        if geometry is None:
+            return (), piece_limit_reached, {
+                "modular_piece_count": len(modular_cells),
+                "modular_profiles_considered": len(modular_profiles),
+            }
         candidates = tuple(
             self._score_candidate(polygon, descriptor, profile.footprint, geometry, config_name)
             for profile in modular_profiles
@@ -843,23 +833,18 @@ class BuildingFitter:
             modular_cells = self._modular_cells(polygon)
             if modular_cells:
                 footprint_polygon = unary_union([self.grid_index.cell_polygon(cell) for cell in modular_cells])
-                output_xidx, output_yidx = _output_indices_from_polygon_origin(self.grid_index, footprint_polygon)
-                yield _CandidateGeometry(
-                    output_xidx=output_xidx,
-                    output_yidx=output_yidx,
-                    output_grid_kind=GridKind.DIAGONAL if footprint.is_diagonal else GridKind.SUB_SQUARE,
-                    anchor_cell=modular_cells[0],
-                    blocked_normal_cells=modular_cells,
-                    footprint_polygon=footprint_polygon,
-                    footprint_width_units=footprint.width_cells,
-                    footprint_height_units=footprint.height_cells,
-                    footprint_is_diagonal=footprint.is_diagonal,
-                    footprint_row=footprint.row,
-                    footprint_col=footprint.col,
-                    footprint_direction=footprint.direction,
+                origin_x, origin_y = _polygon_origin_local(self.grid_index, footprint_polygon)
+                geometry = _candidate_geometry_from_local_origin(
+                    self.grid_index,
+                    footprint,
+                    origin_x,
+                    origin_y,
+                    swapped=False,
                     orientation=0.0,
-                    orientation_class="axis",
+                    orientation_class="diagonal" if footprint.is_diagonal else "axis",
                 )
+                if geometry is not None:
+                    yield geometry
             return
 
         yield from self._profile_candidate_geometries(polygon, descriptor, footprint_profile)
@@ -880,36 +865,17 @@ class BuildingFitter:
                 for x_shift, y_shift in _shift_offsets(self.local_shift_cells):
                     origin_x = (origin_x_base + x_shift) * half_cell_size
                     origin_y = (origin_y_base + y_shift) * half_cell_size
-                    width_units = footprint.height_cells if swapped else footprint.width_cells
-                    height_units = footprint.width_cells if swapped else footprint.height_cells
-                    footprint_polygon = _footprint_polygon_from_origin(
+                    geometry = _candidate_geometry_from_local_origin(
                         self.grid_index,
                         footprint,
                         origin_x,
                         origin_y,
                         swapped=swapped,
-                    )
-                    if not _polygon_within_grid(self.grid_index, footprint_polygon):
-                        continue
-                    cells = _cells_overlapped_by_polygon(self.grid_index, footprint_polygon)
-                    if not cells:
-                        continue
-                    geometry = _CandidateGeometry(
-                        output_xidx=_output_index_from_local(self.grid_index, origin_x),
-                        output_yidx=_output_index_from_local(self.grid_index, origin_y),
-                        output_grid_kind=GridKind.DIAGONAL if footprint.is_diagonal else GridKind.SUB_SQUARE,
-                        anchor_cell=cells[0],
-                        blocked_normal_cells=cells,
-                        footprint_polygon=footprint_polygon,
-                        footprint_width_units=width_units,
-                        footprint_height_units=height_units,
-                        footprint_is_diagonal=footprint.is_diagonal,
-                        footprint_row=footprint.row,
-                        footprint_col=footprint.col,
-                        footprint_direction=footprint.direction,
                         orientation=orientation,
                         orientation_class="diagonal" if footprint.is_diagonal else "axis",
                     )
+                    if geometry is None:
+                        continue
                     geometries.append(self._cheap_candidate(polygon, descriptor, footprint_profile, geometry))
 
         geometries.sort(key=lambda candidate: candidate.sort_key)
@@ -1055,8 +1021,13 @@ class BuildingFitter:
             angle_error,
             area_error,
             selected_footprint_polygon=footprint_polygon,
+            selected_grid_xidx=geometry.selected_grid_xidx,
+            selected_grid_yidx=geometry.selected_grid_yidx,
             output_xidx=geometry.output_xidx,
             output_yidx=geometry.output_yidx,
+            reconstructed_selected_grid_xidx=geometry.reconstructed_selected_grid_xidx,
+            reconstructed_selected_grid_yidx=geometry.reconstructed_selected_grid_yidx,
+            roundtrip_error=geometry.roundtrip_error,
             footprint_width_units=geometry.footprint_width_units,
             footprint_height_units=geometry.footprint_height_units,
             footprint_is_diagonal=geometry.footprint_is_diagonal,
@@ -1090,8 +1061,13 @@ class BuildingFitter:
             footprint=footprint,
             cells=final_cells,
             footprint_polygon=footprint_polygon,
+            selected_grid_xidx=geometry.selected_grid_xidx,
+            selected_grid_yidx=geometry.selected_grid_yidx,
             output_xidx=geometry.output_xidx,
             output_yidx=geometry.output_yidx,
+            reconstructed_selected_grid_xidx=geometry.reconstructed_selected_grid_xidx,
+            reconstructed_selected_grid_yidx=geometry.reconstructed_selected_grid_yidx,
+            roundtrip_error=geometry.roundtrip_error,
             footprint_width_units=geometry.footprint_width_units,
             footprint_height_units=geometry.footprint_height_units,
             footprint_is_diagonal=geometry.footprint_is_diagonal,
@@ -1117,22 +1093,7 @@ class BuildingFitter:
         geometry: _CandidateGeometry,
         config_name: str,
     ) -> BaseGeometry:
-        if geometry.output_xidx is None or geometry.output_yidx is None:
-            return geometry.footprint_polygon
-        row = {
-            "xidx": geometry.output_xidx,
-            "yidx": geometry.output_yidx,
-            "menu": footprint.cm_type.menu,
-            "cat1": footprint.cm_type.cat1,
-            "cat2": footprint.cm_type.cat2,
-            "direction": footprint.cm_type.direction,
-            "name": config_name,
-            "_building_type": footprint.building_type,
-        }
-        try:
-            return reconstruct_building_row_geometry(self.grid_index, row, profile=self.profile).geometry
-        except ValueError:
-            return geometry.footprint_polygon
+        return geometry.footprint_polygon
 
     def _place_building(self, building: _PreparedBuilding) -> PlacementRecord | None:
         ordered_candidates = self._ordered_candidates(building.candidates)
@@ -1165,8 +1126,13 @@ class BuildingFitter:
             score=candidate.score,
             candidate_limit_reached=building.candidate_limit_reached,
             selected_footprint_polygon=candidate.footprint_polygon,
+            selected_grid_xidx=candidate.selected_grid_xidx,
+            selected_grid_yidx=candidate.selected_grid_yidx,
             output_xidx=candidate.output_xidx,
             output_yidx=candidate.output_yidx,
+            reconstructed_selected_grid_xidx=candidate.reconstructed_selected_grid_xidx,
+            reconstructed_selected_grid_yidx=candidate.reconstructed_selected_grid_yidx,
+            roundtrip_error=candidate.roundtrip_error,
             footprint_width_units=candidate.footprint_width_units,
             footprint_height_units=candidate.footprint_height_units,
             footprint_is_diagonal=candidate.footprint_is_diagonal,
@@ -1372,9 +1338,13 @@ def _footprint_orientations(footprint: BuildingFootprint) -> tuple[tuple[bool, f
     if footprint.is_diagonal:
         return ((False, -math.pi / 4),)
     orientations = [(False, 0.0)]
-    if footprint.width_cells != footprint.height_cells:
+    if footprint.width_cells != footprint.height_cells and _allows_synthetic_rotation(footprint):
         orientations.append((True, math.pi / 2))
     return tuple(orientations)
+
+
+def _allows_synthetic_rotation(footprint: BuildingFootprint) -> bool:
+    return footprint.building_type is None
 
 
 def _orientation_for_swapped(footprint: BuildingFootprint, swapped: bool) -> float:
@@ -1384,21 +1354,120 @@ def _orientation_for_swapped(footprint: BuildingFootprint, swapped: bool) -> flo
     return -math.pi / 4 if footprint.is_diagonal else 0.0
 
 
-def _footprint_polygon_from_origin(
+def _candidate_geometry_from_local_origin(
     grid_index: Any,
     footprint: BuildingFootprint,
     origin_local_x: float,
     origin_local_y: float,
     *,
     swapped: bool,
-) -> Polygon:
-    return reconstruct_building_footprint_polygon(
+    orientation: float,
+    orientation_class: str,
+) -> _CandidateGeometry | None:
+    width_units = footprint.height_cells if swapped else footprint.width_cells
+    height_units = footprint.width_cells if swapped else footprint.height_cells
+    try:
+        selected_xidx, selected_yidx = _nearest_selected_grid_index(
+            grid_index,
+            origin_local_x,
+            origin_local_y,
+            GridKind.DIAGONAL if footprint.is_diagonal else GridKind.SUB_SQUARE,
+        )
+    except ValueError:
+        return None
+    return _candidate_geometry_from_selected_grid_index(
         grid_index,
-        output_index_from_local(grid_index, origin_local_x),
-        output_index_from_local(grid_index, origin_local_y),
+        footprint,
+        selected_xidx,
+        selected_yidx,
+        swapped=swapped,
+        width_units=width_units,
+        height_units=height_units,
+        orientation=orientation,
+        orientation_class=orientation_class,
+    )
+
+
+def _candidate_geometry_from_selected_grid_index(
+    grid_index: Any,
+    footprint: BuildingFootprint,
+    selected_grid_xidx: float,
+    selected_grid_yidx: float,
+    *,
+    swapped: bool,
+    width_units: int,
+    height_units: int,
+    orientation: float,
+    orientation_class: str,
+) -> _CandidateGeometry | None:
+    output_xidx, output_yidx = building_output_from_selected_grid_index(selected_grid_xidx, selected_grid_yidx)
+    reconstructed_xidx, reconstructed_yidx = selected_grid_index_from_building_output(output_xidx, output_yidx)
+    roundtrip_error = math.hypot(reconstructed_xidx - selected_grid_xidx, reconstructed_yidx - selected_grid_yidx)
+    footprint_polygon = reconstruct_building_footprint_polygon(
+        grid_index,
+        output_xidx,
+        output_yidx,
         footprint,
         swapped=swapped,
     )
+    if not _polygon_within_grid(grid_index, footprint_polygon):
+        return None
+    cells = _cells_overlapped_by_polygon(grid_index, footprint_polygon)
+    if not cells:
+        return None
+    return _CandidateGeometry(
+        selected_grid_xidx=selected_grid_xidx,
+        selected_grid_yidx=selected_grid_yidx,
+        output_xidx=output_xidx,
+        output_yidx=output_yidx,
+        reconstructed_selected_grid_xidx=reconstructed_xidx,
+        reconstructed_selected_grid_yidx=reconstructed_yidx,
+        roundtrip_error=roundtrip_error,
+        output_grid_kind=GridKind.DIAGONAL if footprint.is_diagonal else GridKind.SUB_SQUARE,
+        anchor_cell=cells[0],
+        blocked_normal_cells=cells,
+        footprint_polygon=footprint_polygon,
+        footprint_width_units=width_units,
+        footprint_height_units=height_units,
+        footprint_is_diagonal=footprint.is_diagonal,
+        footprint_row=footprint.row,
+        footprint_col=footprint.col,
+        footprint_direction=footprint.direction,
+        orientation=orientation,
+        orientation_class=orientation_class,
+    )
+
+
+def _nearest_selected_grid_index(
+    grid_index: Any,
+    origin_local_x: float,
+    origin_local_y: float,
+    grid_kind: GridKind,
+) -> tuple[float, float]:
+    center_cell = GridCell(
+        math.floor(origin_local_x / grid_index.cell_size_m),
+        math.floor(origin_local_y / grid_index.cell_size_m),
+    )
+    candidates: list[tuple[float, float, float]] = []
+    for xidx in range(center_cell.xidx - 1, center_cell.xidx + 2):
+        for yidx in range(center_cell.yidx - 1, center_cell.yidx + 2):
+            cell = GridCell(xidx, yidx)
+            if not _contains_cell(grid_index, cell):
+                continue
+            centers = grid_index.diagonal_centers(cell) if grid_kind is GridKind.DIAGONAL else grid_index.sub_square_centers(cell)
+            for (selected_xidx, selected_yidx), point in centers.items():
+                local_x, local_y = grid_index.local_from_projected(point.x, point.y)
+                candidates.append(
+                    (
+                        math.hypot(local_x - origin_local_x, local_y - origin_local_y),
+                        selected_xidx,
+                        selected_yidx,
+                    )
+                )
+    if not candidates:
+        raise ValueError("no valid selected building placement grid coordinate near origin")
+    _, selected_xidx, selected_yidx = min(candidates, key=lambda item: (item[0], item[1], item[2]))
+    return _clean_float(selected_xidx), _clean_float(selected_yidx)
 
 
 def _centered_origin_local(
@@ -1447,13 +1516,9 @@ def _polygon_within_grid(grid_index: Any, polygon: BaseGeometry) -> bool:
     )
 
 
-def _output_index_from_local(grid_index: Any, local_value: float) -> float:
-    return output_index_from_local(grid_index, local_value)
-
-
-def _output_indices_from_polygon_origin(grid_index: Any, polygon: BaseGeometry) -> tuple[float, float]:
+def _polygon_origin_local(grid_index: Any, polygon: BaseGeometry) -> tuple[float, float]:
     min_local_x, min_local_y, _, _ = _local_bounds(grid_index, polygon)
-    return _output_index_from_local(grid_index, min_local_x), _output_index_from_local(grid_index, min_local_y)
+    return min_local_x, min_local_y
 
 
 def _clean_float(value: float) -> float:
@@ -1481,8 +1546,13 @@ def _placement_from_candidate(
     score: float = 0.0,
     candidate_limit_reached: bool = False,
     selected_footprint_polygon: BaseGeometry | None = None,
+    selected_grid_xidx: float | None = None,
+    selected_grid_yidx: float | None = None,
     output_xidx: float | None = None,
     output_yidx: float | None = None,
+    reconstructed_selected_grid_xidx: float | None = None,
+    reconstructed_selected_grid_yidx: float | None = None,
+    roundtrip_error: float = 0.0,
     footprint_width_units: int | None = None,
     footprint_height_units: int | None = None,
     footprint_is_diagonal: bool | None = None,
@@ -1543,6 +1613,17 @@ def _placement_from_candidate(
         diagnostics["output_yidx"] = output_yidx
         diagnostics["selected_output_xidx"] = output_xidx
         diagnostics["selected_output_yidx"] = output_yidx
+        diagnostics["emitted_output_xidx"] = output_xidx
+        diagnostics["emitted_output_yidx"] = output_yidx
+    if selected_grid_xidx is not None and selected_grid_yidx is not None:
+        diagnostics["selected_grid_xidx"] = selected_grid_xidx
+        diagnostics["selected_grid_yidx"] = selected_grid_yidx
+    if reconstructed_selected_grid_xidx is not None and reconstructed_selected_grid_yidx is not None:
+        diagnostics["reconstructed_selected_grid_xidx"] = reconstructed_selected_grid_xidx
+        diagnostics["reconstructed_selected_grid_yidx"] = reconstructed_selected_grid_yidx
+        diagnostics["roundtrip_error"] = round(roundtrip_error, 9)
+    if selected_footprint_polygon is not None:
+        diagnostics["final_reconstructed_bounds"] = tuple(round(value, 6) for value in selected_footprint_polygon.bounds)
     if orientation_class is not None:
         diagnostics["footprint_orientation_class"] = orientation_class
     return PlacementRecord(

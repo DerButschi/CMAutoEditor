@@ -20,6 +20,25 @@ def reconstruct_building_footprint_polygon(
 ) -> Polygon:
     """Reconstruct the CM building footprint consumed by output rows."""
 
+    selected_xidx, selected_yidx = selected_grid_index_from_building_output(output_xidx, output_yidx)
+    return reconstruct_building_footprint_polygon_from_selected_grid_index(
+        grid_index,
+        selected_xidx,
+        selected_yidx,
+        footprint,
+        swapped=swapped,
+    )
+
+
+def reconstruct_building_footprint_polygon_from_selected_grid_index(
+    grid_index: Any,
+    selected_grid_xidx: int | float,
+    selected_grid_yidx: int | float,
+    footprint: Any,
+    swapped: bool = False,
+) -> Polygon:
+    """Reconstruct a building footprint from the legacy selected placement grid coordinate."""
+
     width_units = _footprint_int(footprint, "width_cells", "width", "selected_width_units", "selected_width_cells")
     height_units = _footprint_int(footprint, "height_cells", "height", "selected_height_units", "selected_height_cells")
     is_diagonal = _footprint_bool(footprint, "is_diagonal", "selected_is_diagonal")
@@ -27,8 +46,11 @@ def reconstruct_building_footprint_polygon(
         width_units, height_units = height_units, width_units
 
     half_cell_size = grid_index.cell_size_m / 2.0
-    origin_local_x = (float(output_xidx) + 0.5) * grid_index.cell_size_m
-    origin_local_y = (float(output_yidx) + 0.5) * grid_index.cell_size_m
+    origin_local_x, origin_local_y = building_anchor_local_from_selected_grid_index(
+        grid_index,
+        selected_grid_xidx,
+        selected_grid_yidx,
+    )
     p0 = (origin_local_x, origin_local_y)
     if is_diagonal:
         p1 = (p0[0] + half_cell_size * width_units, p0[1] - half_cell_size * width_units)
@@ -39,6 +61,40 @@ def reconstruct_building_footprint_polygon(
         p2 = (p1[0], p1[1] + half_cell_size * height_units)
         p3 = (p2[0] - half_cell_size * width_units, p2[1])
     return _polygon_from_local_offsets(grid_index, (p0, p1, p2, p3))
+
+
+def building_output_from_selected_grid_index(
+    xidx: int | float,
+    yidx: int | float,
+) -> tuple[float, float]:
+    """Convert the legacy selected building grid coordinate to CMAutoEditor CSV output.
+
+    The old OSM extractor selected buildings on the sub-square or diagonal placement
+    grids, then emitted ``xidx - 0.25`` and ``yidx + 0.25``. CMAutoEditor/Combat
+    Mission building placement depends on that domain-specific correction.
+    """
+
+    return _clean_float(float(xidx) - 0.25), _clean_float(float(yidx) + 0.25)
+
+
+def selected_grid_index_from_building_output(
+    xidx: int | float,
+    yidx: int | float,
+) -> tuple[float, float]:
+    """Invert the legacy CMAutoEditor building CSV coordinate correction."""
+
+    return _clean_float(float(xidx) + 0.25), _clean_float(float(yidx) - 0.25)
+
+
+def building_anchor_local_from_selected_grid_index(
+    grid_index: Any,
+    selected_grid_xidx: int | float,
+    selected_grid_yidx: int | float,
+) -> tuple[float, float]:
+    return (
+        (float(selected_grid_xidx) + 0.5) * grid_index.cell_size_m,
+        (float(selected_grid_yidx) + 0.5) * grid_index.cell_size_m,
+    )
 
 
 def output_index_from_local(grid_index: Any, local_value: float) -> float:
