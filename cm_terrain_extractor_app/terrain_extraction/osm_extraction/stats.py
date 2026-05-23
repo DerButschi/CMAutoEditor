@@ -39,6 +39,14 @@ def stats_from_network_routing(routing_result: Any) -> ExtractionStats:
         quality={
             "network_route_mean_detour_ratio": diagnostics.get("mean_detour_ratio"),
             "network_route_max_source_line_distance_m": diagnostics.get("max_source_line_distance_m"),
+            "network_route_mean_distance_to_source_m": diagnostics.get("mean_distance_to_source_m"),
+            "network_route_p95_distance_to_source_m": diagnostics.get("p95_distance_to_source_m"),
+            "network_route_max_distance_to_source_m": diagnostics.get("max_distance_to_source_m"),
+            "placed_source_length_fraction_by_cm_type": diagnostics.get("placed_source_length_fraction_by_cm_type"),
+            "mean_displacement_by_cm_type": diagnostics.get("mean_displacement_by_cm_type"),
+            "p95_displacement_by_cm_type": diagnostics.get("p95_displacement_by_cm_type"),
+            "dropped_source_length_by_cm_type": diagnostics.get("dropped_source_length_by_cm_type"),
+            "relaxed_routes_by_reason": diagnostics.get("relaxed_routes_by_reason"),
         },
         diagnostics={"mode": "network_routing", **diagnostics},
     )

@@ -110,6 +110,15 @@ def summarize_routing(routing: Any, *, top_n: int = 10) -> dict[str, Any]:
         "route_retries": int(diagnostics.get("route_retries", 0)),
         "total_a_star_expansions": int(diagnostics.get("total_a_star_expansions", 0)),
         "total_tile_feasible_rejections": int(diagnostics.get("total_tile_feasible_rejections", 0)),
+        "source_faithfulness_by_cm_type": dict(diagnostics.get("source_faithfulness_by_cm_type", {}) or {}),
+        "source_faithfulness_by_top_level": dict(diagnostics.get("source_faithfulness_by_top_level", {}) or {}),
+        "placed_source_length_fraction_by_cm_type": dict(
+            diagnostics.get("placed_source_length_fraction_by_cm_type", {}) or {}
+        ),
+        "mean_displacement_by_cm_type": dict(diagnostics.get("mean_displacement_by_cm_type", {}) or {}),
+        "p95_displacement_by_cm_type": dict(diagnostics.get("p95_displacement_by_cm_type", {}) or {}),
+        "dropped_source_length_by_cm_type": dict(diagnostics.get("dropped_source_length_by_cm_type", {}) or {}),
+        "relaxed_routes_by_reason": dict(diagnostics.get("relaxed_routes_by_reason", {}) or {}),
         "top_slowest_routes": tuple(
             sorted(
                 route_summaries,
@@ -226,6 +235,19 @@ def _route_summary(route: Any) -> dict[str, Any]:
         "soft_avoid_cells": diagnostics.get("soft_avoid_cells", 0),
         "conflict_family": diagnostics.get("conflict_family"),
         "false_intersection_avoided": diagnostics.get("false_intersection_avoided", False),
+        "source_length_m": diagnostics.get("source_length_m"),
+        "placed_length_m": diagnostics.get("placed_length_m"),
+        "placed_cell_count": diagnostics.get("placed_cell_count"),
+        "mean_distance_to_source_m": diagnostics.get("mean_distance_to_source_m"),
+        "p95_distance_to_source_m": diagnostics.get("p95_distance_to_source_m"),
+        "max_distance_to_source_m": diagnostics.get("max_distance_to_source_m"),
+        "detour_ratio": diagnostics.get("detour_ratio"),
+        "placed_source_length_fraction": diagnostics.get("placed_source_length_fraction"),
+        "topology_preserved": diagnostics.get("topology_preserved"),
+        "topology_issue_count": diagnostics.get("topology_issue_count"),
+        "faithfulness_tier": diagnostics.get("faithfulness_tier"),
+        "faithfulness_budget_exceeded": diagnostics.get("faithfulness_budget_exceeded", False),
+        "relaxation_reason": diagnostics.get("relaxation_reason"),
         "failure_reason": diagnostics.get("failure_reason"),
     }
 

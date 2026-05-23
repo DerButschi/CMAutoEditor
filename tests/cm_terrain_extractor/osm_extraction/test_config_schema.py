@@ -54,6 +54,17 @@ def test_config_schema_defaults_road_validation_mode_to_warn() -> None:
     assert config.tile_assignment_solver.max_cutset_candidate_product_log10 == 5.0
     assert config.tile_assignment_solver.tiny_exact_max_cells == 12
     assert config.tile_assignment_solver.tiny_exact_candidate_product_log10 == 5.0
+    assert config.linear_route_faithfulness.high.mean_distance_m == 6.0
+    assert config.linear_route_faithfulness.high.p95_distance_m == 12.0
+    assert config.linear_route_faithfulness.high.max_distance_m == 24.0
+    assert config.linear_route_faithfulness.high.max_detour_ratio == 1.35
+    assert config.linear_route_faithfulness.high.min_placed_source_length_fraction == 0.90
+    assert config.linear_route_faithfulness.secondary.mean_distance_m == 10.0
+    assert config.linear_route_faithfulness.minor.max_distance_m == 48.0
+    assert config.linear_route_faithfulness.source_distance_weight == 0.1
+    assert config.linear_route_faithfulness.secondary_source_distance_multiplier == 3.0
+    assert config.linear_route_faithfulness.high_source_distance_multiplier == 6.0
+    assert config.linear_route_faithfulness.length_weight_threshold_m == 128.0
 
 
 def test_config_schema_accepts_tile_assignment_solver_limits() -> None:
@@ -86,6 +97,61 @@ def test_config_schema_rejects_invalid_tile_assignment_solver_limits() -> None:
 
     with pytest.raises(ConfigValidationError, match="tile_assignment_solver.max_cutset_vertices"):
         ExtractionConfig.from_mapping({"tile_assignment_solver": {"max_cutset_vertices": -1}})
+
+
+def test_config_schema_accepts_linear_route_faithfulness_overrides() -> None:
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+
+    config = ExtractionConfig.from_mapping(
+        {
+            "linear_route_faithfulness": {
+                "high": {"mean_distance_m": 5.0},
+                "minor": {
+                    "max_distance_m": 64.0,
+                    "min_placed_source_length_fraction": 0.4,
+                },
+                "source_distance_weight": {
+                    "base": 0.2,
+                    "secondary_multiplier": 4.0,
+                    "high_multiplier": 7.0,
+                    "length_threshold_m": 96.0,
+                    "max_length_multiplier": 3.0,
+                },
+            }
+        }
+    )
+
+    assert config.linear_route_faithfulness.high.mean_distance_m == 5.0
+    assert config.linear_route_faithfulness.high.p95_distance_m == 12.0
+    assert config.linear_route_faithfulness.minor.max_distance_m == 64.0
+    assert config.linear_route_faithfulness.minor.min_placed_source_length_fraction == 0.4
+    assert config.linear_route_faithfulness.source_distance_weight == 0.2
+    assert config.linear_route_faithfulness.secondary_source_distance_multiplier == 4.0
+    assert config.linear_route_faithfulness.high_source_distance_multiplier == 7.0
+    assert config.linear_route_faithfulness.length_weight_threshold_m == 96.0
+    assert config.linear_route_faithfulness.max_length_weight_multiplier == 3.0
+
+
+def test_config_schema_rejects_invalid_linear_route_faithfulness() -> None:
+    from terrain_extraction.osm_extraction.config_schema import (
+        ConfigValidationError,
+        ExtractionConfig,
+    )
+
+    with pytest.raises(ConfigValidationError, match="linear_route_faithfulness.high.max_distance_m"):
+        ExtractionConfig.from_mapping({"linear_route_faithfulness": {"high": {"max_distance_m": -1}}})
+
+    with pytest.raises(
+        ConfigValidationError,
+        match="linear_route_faithfulness.minor.min_placed_source_length_fraction",
+    ):
+        ExtractionConfig.from_mapping(
+            {
+                "linear_route_faithfulness": {
+                    "minor": {"min_placed_source_length_fraction": 1.5},
+                }
+            }
+        )
 
 
 @pytest.mark.parametrize("mode", ["strict", "warn"])

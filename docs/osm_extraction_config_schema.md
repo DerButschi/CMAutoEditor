@@ -7,6 +7,21 @@ Top-level options:
 | Field | Type | Purpose |
 | --- | --- | --- |
 | `road_validation_mode` | `"warn"` or `"strict"` | Controls final road-structure validation and tile-assignment failure handling. Defaults to `"warn"` for normal OSM extraction so invalid local road output is returned with diagnostics instead of aborting, and tile-assignment catalog gaps suppress only affected local route pieces. Use `"strict"` for tests and debugging that should fail on invalid road or tile output. |
+| `linear_route_faithfulness` | object | Optional source-faithfulness budgets for routed linear features. Omitted fields inherit defaults. |
+
+`linear_route_faithfulness` contains `high`, `secondary`, and `minor` budget objects plus optional `source_distance_weight` cost controls. Budget fields are `mean_distance_m`, `p95_distance_m`, `max_distance_m`, `max_detour_ratio`, and `min_placed_source_length_fraction`.
+
+Default budgets:
+
+| Tier | Mean | P95 | Max | Detour | Min placed source fraction |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `high` | 6 m | 12 m | 24 m | 1.35 | 0.90 |
+| `secondary` | 10 m | 20 m | 32 m | 1.75 | 0.75 |
+| `minor` | 16 m | 32 m | 48 m | 2.50 | 0.55 |
+
+High-authority routes include rail, motorway/trunk/primary roads, long first-choice `cm_types`, and logical chains at least 256 m. Secondary routes include secondary/tertiary/residential/unclassified roads, moderate-priority entries, and chains at least 96 m. Minor routes include service/track/path-like routes, fences, linear objects, and anything not promoted above.
+
+The router records source length, placed length/cells, mean/p95/max distance to source, detour ratio, placed source length fraction, topology preservation, tier, budget, and budget-exceeded reasons on each route. P95/max distance and topology preservation are hard gates. Mean distance, detour, and placed source fraction are reported with the same budget object for review and aggregates, but they do not reject routes by themselves because normal cell-center snapping, cardinal tile quantization, and boundary clipping can inflate them while the route remains visually source-faithful. Initial candidates exceeding a hard budget are rejected; a route may exceed a hard budget only when an explicit controlled relaxation such as `minor_corridor`, `soft_crossing`, or `split_long_edge` records the relaxation reason. Aggregate diagnostics include placed source length fraction, displacement, dropped source length, and relaxed-route counts by `cm_type` and top-level entry.
 
 ## Entry Shape
 

@@ -138,6 +138,15 @@ def test_routes_simple_topology_edge_on_integer_grid() -> None:
     assert result.diagnostics["route_retries"] == 0
     assert result.diagnostics["total_a_star_expansions"] == result.routes[0].diagnostics["a_star_expansions"]
     assert result.diagnostics["total_tile_feasible_rejections"] == 0
+    assert result.routes[0].diagnostics["placed_length_m"] == pytest.approx(32.0)
+    assert result.routes[0].diagnostics["placed_cell_count"] == 5
+    assert result.routes[0].diagnostics["mean_distance_to_source_m"] >= 0.0
+    assert result.routes[0].diagnostics["p95_distance_to_source_m"] >= 0.0
+    assert result.routes[0].diagnostics["max_distance_to_source_m"] >= 0.0
+    assert result.routes[0].diagnostics["placed_source_length_fraction"] == pytest.approx(1.0)
+    assert result.routes[0].diagnostics["topology_preserved"] is True
+    assert result.routes[0].diagnostics["topology_issue_count"] == 0
+    assert result.routes[0].diagnostics["faithfulness_tier"] == "high"
 
 
 def test_route_order_uses_authority_cm_type_tag_length_and_source_order() -> None:
@@ -155,6 +164,73 @@ def test_route_order_uses_authority_cm_type_tag_length_and_source_order() -> Non
     assert [route.edge_id for route in result.routes] == [3, 1, 2, 0]
     assert [route.diagnostics["cm_type_index"] for route in result.routes] == [0, 0, 0, 1]
     assert [route.diagnostics["tag_rank"] for route in result.routes] == [0, 0, 1, 0]
+
+
+def test_long_primary_route_rejects_large_source_displacement() -> None:
+    from terrain_extraction.osm_extraction.config_schema import (
+        LinearRouteFaithfulnessBudget,
+        LinearRouteFaithfulnessConfig,
+    )
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    edge = _with_authority(_edge(0, (0, (0, 0)), (1, (80, 0)), config_name="primary", priority=1))
+    occupancy = OccupancyModel.from_grid_index(_grid(width=12, height=5))
+    occupancy.reserve((GridCell(5, 0),), object_id="blocked", priority=0)
+    faithfulness = LinearRouteFaithfulnessConfig(
+        high=LinearRouteFaithfulnessBudget(4.0, 8.0, 8.0, 1.35, 0.90)
+    )
+
+    route = NetworkRouter(
+        grid_index=_grid(width=12, height=5),
+        occupancy=occupancy,
+        corridor_deviation_m=24.0,
+        route_faithfulness_config=faithfulness,
+    ).route(_graph((edge,))).routes[0]
+
+    assert route.success is False
+    assert route.diagnostics["failure_reason"] == "faithfulness_budget_exceeded"
+    assert route.diagnostics["faithfulness_rejections"]
+    assert route.diagnostics["faithfulness_rejections"][0]["max_distance_to_source_m"] > 8.0
+
+
+def test_short_lower_rank_spur_may_shift_more_than_primary() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+    from terrain_extraction.osm_extraction.occupancy import OccupancyModel
+
+    primary = _with_authority(_edge(0, (0, (0, 0)), (1, (40, 0)), config_name="primary", priority=1))
+    track = _with_authority(_edge(1, (2, (0, 16)), (3, (40, 16)), config_name="track", priority=9))
+    occupancy = OccupancyModel.from_grid_index(_grid(width=6, height=5))
+    occupancy.reserve((GridCell(2, 2), GridCell(2, 3)), object_id="blocked", priority=0)
+
+    result = NetworkRouter(
+        grid_index=_grid(width=6, height=5),
+        occupancy=occupancy,
+        corridor_deviation_m=8.0,
+        minor_relaxation_m=24.0,
+    ).route(_graph((primary, track)))
+    routes = {route.edge_id: route for route in result.routes}
+
+    assert routes[0].success
+    assert routes[1].success
+    assert routes[0].diagnostics["faithfulness_tier"] == "high"
+    assert routes[1].diagnostics["faithfulness_tier"] == "minor"
+    assert routes[1].diagnostics["mean_distance_to_source_m"] > routes[0].diagnostics["mean_distance_to_source_m"]
+    assert routes[1].diagnostics["detour_ratio"] > routes[0].diagnostics["detour_ratio"]
+
+
+def test_source_faithfulness_aggregate_stats_include_cm_type_fraction() -> None:
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edge = _with_authority(_edge(0, (0, (0, 0)), (1, (32, 0))), cm_type_index=0)
+
+    result = NetworkRouter(grid_index=_grid()).route(_graph((edge,)))
+
+    assert result.diagnostics["placed_source_length_fraction_by_cm_type"]["0"] == pytest.approx(1.0)
+    assert result.diagnostics["source_faithfulness_by_cm_type"]["0"]["source_length_m"] == pytest.approx(32.0)
+    assert "0" in result.diagnostics["mean_displacement_by_cm_type"]
 
 
 def test_cross_family_route_failure_reports_policy_diagnostics_deterministically() -> None:

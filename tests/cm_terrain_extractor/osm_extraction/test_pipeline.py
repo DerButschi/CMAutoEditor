@@ -189,9 +189,10 @@ def test_pipeline_run_owns_typed_orchestration_and_catalog_gap_diagnostics() -> 
         FeatureRecord("area-1", 2, "trees", ProcessKind.AREA, 5, Point(8, 8).buffer(4)),
     )
 
+    config = ExtractionConfig.from_mapping({"linear_route_faithfulness": {"high": {"max_distance_m": 18.0}}})
     result = pipeline.run(
         features=features,
-        config=ExtractionConfig.from_mapping({}),
+        config=config,
         grid_index=grid_index,
         bounds=(0, 0, 3, 2),
         linear_catalog_provider=lambda _features: {
@@ -221,6 +222,8 @@ def test_pipeline_run_owns_typed_orchestration_and_catalog_gap_diagnostics() -> 
     ):
         assert result.diagnostics["timings"][stage]["elapsed_ms"] >= 0.0
     assert result.diagnostics["routing_diagnostics"]["route_count"] == 1
+    assert pipeline.route_kwargs["route_faithfulness_config"] is config.linear_route_faithfulness
+    assert result.diagnostics["routing_diagnostics"]["placed_source_length_fraction_by_cm_type"]["0"] == 1.0
     assert result.diagnostics["tile_assignment_diagnostics"]["top_slowest_components"] == ()
     assert result.diagnostics["building_fitting_diagnostics"]["building_feature_count"] == 0
 
@@ -739,6 +742,7 @@ class _TypedPipelineHarness:
         self.road_placement = road_placement
         self.building_placement = building_placement
         self.area_placement = area_placement
+        self.route_kwargs = {}
 
     from terrain_extraction.osm_extraction.pipeline import ExtractionPipeline
 
@@ -754,11 +758,16 @@ class _TypedPipelineHarness:
         from terrain_extraction.osm_extraction.models import ExtractionResult
 
         self.calls.append("routing")
+        self.route_kwargs = dict(_kwargs)
         return ExtractionResult(
             diagnostics={
                 "network_routes": SimpleNamespace(
                     routes=(object(),),
                     linear_state=object(),
+                    diagnostics={
+                        "route_count": 1,
+                        "placed_source_length_fraction_by_cm_type": {"0": 1.0},
+                    },
                 )
             }
         )

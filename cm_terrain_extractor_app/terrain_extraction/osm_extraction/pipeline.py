@@ -8,6 +8,7 @@ from typing import Any, Protocol
 import numpy as np
 from terrain_extraction.osm_extraction.config_schema import (
     ExtractionConfig,
+    LinearRouteFaithfulnessConfig,
     RoadValidationMode,
     TileAssignmentSolverConfig,
 )
@@ -156,6 +157,11 @@ class ExtractionPipeline:
                     grid_index=grid_index,
                     occupancy=occupancy_model,
                     catalogs=linear_catalogs,
+                    route_faithfulness_config=getattr(
+                        config,
+                        "linear_route_faithfulness",
+                        LinearRouteFaithfulnessConfig(),
+                    ),
                 ),
             )
             routing = routing_result.diagnostics["network_routes"]
@@ -314,6 +320,7 @@ class ExtractionPipeline:
         catalogs: Mapping[Any, Any] | None = None,
         corridor_deviation_m: float = 32.0,
         minor_relaxation_m: float = 48.0,
+        route_faithfulness_config: LinearRouteFaithfulnessConfig | None = None,
     ) -> ExtractionResult:
         from terrain_extraction.osm_extraction.network_routing import NetworkRouter
 
@@ -323,6 +330,7 @@ class ExtractionPipeline:
             catalogs=catalogs,
             corridor_deviation_m=corridor_deviation_m,
             minor_relaxation_m=minor_relaxation_m,
+            route_faithfulness_config=route_faithfulness_config,
         )
         routes = router.route(topology)
         self.context.progress("network_routing", 1.0, "Network routing complete")

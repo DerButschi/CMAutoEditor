@@ -9,6 +9,10 @@ from typing import Any
 
 from shapely.geometry import LineString
 from terrain_extraction.osm_extraction.anchor_selection import AnchorSelector, anchor_cell_for_plan
+from terrain_extraction.osm_extraction.config_schema import (
+    LinearRouteFaithfulnessBudget,
+    LinearRouteFaithfulnessConfig,
+)
 from terrain_extraction.osm_extraction.direction_resolution import (
     CARDINAL_DIRECTIONS,
     DIRECTION_STEPS,
@@ -60,6 +64,8 @@ _NETWORK_CLASS_RANK = {
     "footway": 7,
 }
 _MINOR_CLASSES = frozenset({"service", "track", "path", "footway", "cycleway", "bridleway"})
+_HIGH_CLASSES = frozenset({"motorway", "trunk", "primary"})
+_SECONDARY_CLASSES = frozenset({"secondary", "tertiary", "residential", "unclassified"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +149,37 @@ class _RouteConflictMasks:
         return bool(self.forbidden_occupied_cells or self.soft_avoid_cells or self.preferred_adjacency_cells)
 
 
+@dataclass(frozen=True, slots=True)
+class _RouteFaithfulnessMetrics:
+    source_length_m: float
+    placed_length_m: float
+    placed_cell_count: int
+    mean_distance_to_source_m: float
+    p95_distance_to_source_m: float
+    max_distance_to_source_m: float
+    detour_ratio: float
+    placed_source_length_fraction: float
+    topology_preserved: bool
+    topology_issue_count: int
+
+    def as_diagnostics(self) -> dict[str, Any]:
+        return {
+            "source_length_m": self.source_length_m,
+            "placed_length_m": self.placed_length_m,
+            "placed_length_m_or_cells": self.placed_length_m,
+            "placed_cell_count": self.placed_cell_count,
+            "mean_distance_to_source_m": self.mean_distance_to_source_m,
+            "p95_distance_to_source_m": self.p95_distance_to_source_m,
+            "max_distance_to_source_m": self.max_distance_to_source_m,
+            "mean_source_line_distance_m": self.mean_distance_to_source_m,
+            "max_source_line_distance_m": self.max_distance_to_source_m,
+            "detour_ratio": self.detour_ratio,
+            "placed_source_length_fraction": self.placed_source_length_fraction,
+            "topology_preserved": self.topology_preserved,
+            "topology_issue_count": self.topology_issue_count,
+        }
+
+
 class NetworkRouter:
     def __init__(
         self,
@@ -157,6 +194,7 @@ class NetworkRouter:
         catalogs: Mapping[ProcessKind, Any] | None = None,
         linear_state: LinearNetworkState | None = None,
         interaction_policy: LinearInteractionPolicy | None = None,
+        route_faithfulness_config: LinearRouteFaithfulnessConfig | None = None,
     ) -> None:
         if corridor_deviation_m < 0:
             raise ValueError("corridor_deviation_m must be non-negative")
@@ -176,6 +214,7 @@ class NetworkRouter:
         }
         self.linear_state = linear_state
         self.interaction_policy = interaction_policy or default_linear_interaction_policy()
+        self.route_faithfulness_config = route_faithfulness_config or LinearRouteFaithfulnessConfig()
 
     def route(self, topology: TopologyGraph) -> NetworkRoutingResult:
         processing_plan = LinearProcessingPlan.from_topology(
@@ -253,6 +292,7 @@ class NetworkRouter:
         )
         masks = self._route_conflict_masks(edge, start, goal, degrees)
         attempts = self._routing_attempts(edge, masks)
+        source_distance_weight = self._source_distance_weight(edge)
 
         total_blocked = 0
         total_hard_blocked = 0
@@ -261,6 +301,7 @@ class NetworkRouter:
         total_expansions = 0
         attempt_count = 0
         tile_failures: list[Mapping[str, Any]] = []
+        faithfulness_rejections: list[Mapping[str, Any]] = []
         retry_modes: list[str] = []
         for relaxation, corridor_m, soft_crossing in attempts:
             attempt_count += 1
@@ -279,6 +320,7 @@ class NetworkRouter:
                 _edge_top_level_name(edge),
                 edge.priority,
                 masks,
+                source_distance_weight,
             )
             total_blocked += attempt.blocked_cells_considered
             total_hard_blocked += attempt.hard_blocked_occupied_cells
@@ -305,6 +347,9 @@ class NetworkRouter:
                     tile_feasible_failures=tuple(tile_failures),
                     masks=masks,
                 )
+                if route.diagnostics.get("faithfulness_budget_exceeded") and relaxation is None:
+                    faithfulness_rejections.append(_faithfulness_rejection_diagnostics(route, relaxation))
+                    continue
                 return _route_with_elapsed(route, route_started_at)
 
         if edge.geometry.length > self.split_long_edge_m:
@@ -318,10 +363,18 @@ class NetworkRouter:
                     + int(split_record.diagnostics.get("a_star_expansions", 0)),
                     "tile_feasible_rejections": total_tile_rejections
                     + int(split_record.diagnostics.get("tile_feasible_rejections", 0)),
+                    "relaxation_reason": "split_long_edge",
                 }
                 return _route_with_elapsed(_route_with_diagnostics(split_record, diagnostics), route_started_at)
 
-        failure_reason = _route_failure_reason(tile_failures, total_tile_rejections)
+        failure_reason = (
+            "faithfulness_budget_exceeded"
+            if faithfulness_rejections and not tile_failures and total_tile_rejections == 0
+            else _route_failure_reason(tile_failures, total_tile_rejections)
+        )
+        failure_faithfulness = dict(faithfulness_rejections[-1]) if faithfulness_rejections else {}
+        tier = self._faithfulness_tier(edge)
+        budget = self.route_faithfulness_config.budget_for_tier(tier)
         route = RouteRecord(
             edge_id=edge.edge_id,
             start_node_id=edge.start_node_id,
@@ -336,8 +389,17 @@ class NetworkRouter:
             diagnostics={
                 **_authority_diagnostics(edge),
                 "failure_reason": failure_reason,
+                "faithfulness_rejections": tuple(faithfulness_rejections),
+                **failure_faithfulness,
                 "conflict_family": _conflict_family(tile_failures),
                 "source_length_m": edge.geometry.length,
+                "placed_length_m": 0.0,
+                "placed_length_m_or_cells": 0.0,
+                "placed_cell_count": 0,
+                "placed_source_length_fraction": 0.0,
+                "faithfulness_tier": tier,
+                "faithfulness_budget": budget.to_dict(),
+                "faithfulness_budget_exceeded": bool(faithfulness_rejections),
                 "raster_spine_cell_count": len(raster_spine.cells),
                 "blocked_cells_considered": total_blocked,
                 "hard_blocked_occupied_cells": total_hard_blocked,
@@ -370,6 +432,7 @@ class NetworkRouter:
         top_level_name: str,
         priority: int,
         masks: _RouteConflictMasks,
+        source_distance_weight: float,
     ) -> _RouteAttempt:
         if start == goal:
             return _RouteAttempt(nodes=(start,), blocked_cells_considered=0)
@@ -457,7 +520,7 @@ class NetworkRouter:
                 distance_cost = (
                     self._cached_node_source_distance(neighbor, line, distance_cache)
                     / max(self.grid_index.cell_size_m, 1.0)
-                    * 0.1
+                    * source_distance_weight
                 )
                 spine_cost = self._spine_alignment_cost(traversed_cell, raster_spine)
                 soft_cost = 25.0 if blocked else 0.0
@@ -501,6 +564,7 @@ class NetworkRouter:
         midpoint_node = self._clamp_node(self.grid_index.projected_to_cell(midpoint.x, midpoint.y))
         if midpoint_node in {start, goal}:
             return None
+        source_distance_weight = self._source_distance_weight(edge)
         first = self._a_star(
             edge.geometry,
             start,
@@ -513,6 +577,7 @@ class NetworkRouter:
             _edge_top_level_name(edge),
             edge.priority,
             masks,
+            source_distance_weight,
         )
         second = self._a_star(
             edge.geometry,
@@ -526,6 +591,7 @@ class NetworkRouter:
             _edge_top_level_name(edge),
             edge.priority,
             masks,
+            source_distance_weight,
         )
         if not first.success or not second.success:
             return None
@@ -588,16 +654,15 @@ class NetworkRouter:
         tile_cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
         masks = masks or _RouteConflictMasks()
         used_conflict_skip_cells = frozenset(tile_cells).intersection(masks.state_skip_cells)
-        route_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
-        source_length = edge.geometry.length
+        metrics = self._faithfulness_metrics(edge, nodes, tile_cells, raster_spine)
+        tier = self._faithfulness_tier(edge)
+        budget = self.route_faithfulness_config.budget_for_tier(tier)
+        budget_exceeded, budget_reasons = _faithfulness_budget_exceeded(metrics, budget)
         spine_diagnostics = self._spine_diagnostics(edge.geometry, nodes, tile_cells, raster_spine)
         diagnostics = {
             **_authority_diagnostics(edge),
-            "source_length_m": source_length,
-            "route_length_m": route_length,
-            "detour_ratio": route_length / source_length if source_length > 0 else 1.0,
-            "mean_source_line_distance_m": self._mean_node_source_distance(nodes, edge.geometry),
-            "max_source_line_distance_m": max((self._node_source_distance(node, edge.geometry) for node in nodes), default=0.0),
+            **metrics.as_diagnostics(),
+            "route_length_m": metrics.placed_length_m,
             "blocked_cells_considered": blocked_cells_considered,
             "hard_blocked_occupied_cells": hard_blocked_occupied_cells,
             "soft_avoid_cells": soft_avoid_cells,
@@ -605,6 +670,7 @@ class NetworkRouter:
             or _mask_conflict_family(masks, used_conflict_skip_cells),
             "false_intersection_avoided": bool(edge.diagnostics.get("false_intersection_avoided", False)),
             "forced_relaxation": relaxation,
+            "relaxation_reason": relaxation,
             "soft_crossings": soft_crossings,
             "intersection_importance": max(degrees.get(edge.start_node_id, 0), degrees.get(edge.end_node_id, 0)),
             "retry_modes": retry_modes,
@@ -615,6 +681,11 @@ class NetworkRouter:
             "tile_feasible_failures": tile_feasible_failures,
             "source_feature_ids": edge.feature_ids,
             "source_indices": edge.source_indices,
+            "faithfulness_tier": tier,
+            "faithfulness_budget": budget.to_dict(),
+            "faithfulness_budget_exceeded": budget_exceeded,
+            "faithfulness_budget_exceeded_reasons": budget_reasons,
+            "faithfulness_rejection_reason": "hard_budget_exceeded" if budget_exceeded else None,
             **_mask_diagnostics(masks, used_state_skip_cells=used_conflict_skip_cells),
             **spine_diagnostics,
         }
@@ -768,6 +839,8 @@ class NetworkRouter:
         decision = _anchor_fallback_drop_decision(edge, anchor_plans)
         if decision is None:
             return None
+        tier = self._faithfulness_tier(edge)
+        budget = self.route_faithfulness_config.budget_for_tier(tier)
         return RouteRecord(
             edge_id=edge.edge_id,
             start_node_id=edge.start_node_id,
@@ -784,6 +857,13 @@ class NetworkRouter:
                 "soft_avoid_cells": 0,
                 "false_intersection_avoided": bool(edge.diagnostics.get("false_intersection_avoided", False)),
                 "intersection_fallback_decision": decision,
+                "placed_length_m": 0.0,
+                "placed_length_m_or_cells": 0.0,
+                "placed_cell_count": 0,
+                "placed_source_length_fraction": 0.0,
+                "faithfulness_tier": tier,
+                "faithfulness_budget": budget.to_dict(),
+                "faithfulness_budget_exceeded": False,
                 "elapsed_ms": 0.0,
                 "attempt_count": 0,
                 "retry_count": 0,
@@ -859,6 +939,80 @@ class NetworkRouter:
         if not nodes:
             return 0.0
         return sum(self._node_source_distance(node, line) for node in nodes) / len(nodes)
+
+    def _faithfulness_metrics(
+        self,
+        edge: TopologyEdge,
+        nodes: Sequence[GridNode],
+        tile_cells: Sequence[GridCell],
+        raster_spine: RasterSpine,
+    ) -> _RouteFaithfulnessMetrics:
+        distances = tuple(self._node_source_distance(node, edge.geometry) for node in nodes)
+        source_length = float(edge.geometry.length)
+        placed_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
+        topology_issue_count = int(not nodes or nodes[0] == nodes[-1] and source_length > 0)
+        return _RouteFaithfulnessMetrics(
+            source_length_m=source_length,
+            placed_length_m=placed_length,
+            placed_cell_count=len(tile_cells),
+            mean_distance_to_source_m=sum(distances) / len(distances) if distances else 0.0,
+            p95_distance_to_source_m=_percentile(distances, 0.95),
+            max_distance_to_source_m=max(distances, default=0.0),
+            detour_ratio=placed_length / source_length if source_length > 0 else 1.0,
+            placed_source_length_fraction=_placed_source_length_fraction(tile_cells, raster_spine),
+            topology_preserved=topology_issue_count == 0,
+            topology_issue_count=topology_issue_count,
+        )
+
+    def _faithfulness_tier(self, edge: TopologyEdge) -> str:
+        authority = edge.linear_authority
+        chain_length = float(
+            authority.logical_chain_length_m
+            if authority is not None
+            else edge.geometry.length
+        )
+        cm_type_index = authority.cm_type_index if authority is not None else None
+        if edge.process is ProcessKind.RAIL:
+            return "high"
+        if edge.config_name in _HIGH_CLASSES:
+            return "high"
+        if cm_type_index == 0 and chain_length >= 96.0:
+            return "high"
+        if chain_length >= 256.0:
+            return "high"
+        if edge.process in {ProcessKind.FENCE, ProcessKind.LINEAR}:
+            return "minor"
+        if edge.config_name in _MINOR_CLASSES:
+            return "minor"
+        if edge.config_name in _SECONDARY_CLASSES:
+            return "secondary"
+        if edge.priority <= 6:
+            return "secondary"
+        if chain_length >= 96.0:
+            return "secondary"
+        return "minor"
+
+    def _source_distance_weight(self, edge: TopologyEdge) -> float:
+        tier = self._faithfulness_tier(edge)
+        config = self.route_faithfulness_config
+        multiplier = 1.0
+        if tier == "high":
+            multiplier = config.high_source_distance_multiplier
+        elif tier == "secondary":
+            multiplier = config.secondary_source_distance_multiplier
+        authority = edge.linear_authority
+        chain_length = float(
+            authority.logical_chain_length_m
+            if authority is not None
+            else edge.geometry.length
+        )
+        if config.length_weight_threshold_m > 0 and chain_length > config.length_weight_threshold_m:
+            length_multiplier = min(
+                config.max_length_weight_multiplier,
+                chain_length / config.length_weight_threshold_m,
+            )
+            multiplier *= max(1.0, length_multiplier)
+        return config.source_distance_weight * multiplier
 
     def _spine_alignment_cost(self, cell: GridCell, raster_spine: RasterSpine) -> float:
         if not raster_spine.cells:
@@ -1158,8 +1312,12 @@ class NetworkRouter:
         successful = [route for route in routes if route.success]
         failed = [route for route in routes if not route.success]
         detours = [float(route.diagnostics["detour_ratio"]) for route in successful]
-        distances = [float(route.diagnostics["max_source_line_distance_m"]) for route in successful]
+        distances = [float(route.diagnostics["max_distance_to_source_m"]) for route in successful]
+        mean_distances = [float(route.diagnostics["mean_distance_to_source_m"]) for route in successful]
+        p95_distances = [float(route.diagnostics["p95_distance_to_source_m"]) for route in successful]
         spine_distances = [float(route.diagnostics["max_spine_distance_m"]) for route in successful]
+        by_cm_type = _source_faithfulness_by(routes, key_fn=_cm_type_aggregate_key)
+        by_top_level = _source_faithfulness_by(routes, key_fn=_top_level_aggregate_key)
         return {
             "successful_routes": len(successful),
             "failed_routes": len(failed),
@@ -1178,11 +1336,29 @@ class NetworkRouter:
             "false_intersections_avoided": sum(1 for route in routes if route.diagnostics.get("false_intersection_avoided")),
             "mean_detour_ratio": sum(detours) / len(detours) if detours else None,
             "max_source_line_distance_m": max(distances) if distances else None,
+            "mean_distance_to_source_m": sum(mean_distances) / len(mean_distances) if mean_distances else None,
+            "p95_distance_to_source_m": _percentile(p95_distances, 0.95),
+            "max_distance_to_source_m": max(distances) if distances else None,
             "max_spine_distance_m": max(spine_distances) if spine_distances else None,
             "raster_spines": sum(1 for route in routes if route.raster_spine is not None),
             "raster_spine_cells": sum(len(route.raster_spine.cells) for route in routes if route.raster_spine is not None),
             "forced_relaxations": sum(1 for route in successful if route.diagnostics.get("forced_relaxation")),
             "soft_crossings": sum(int(route.diagnostics.get("soft_crossings", 0)) for route in successful),
+            "source_faithfulness_by_cm_type": by_cm_type,
+            "source_faithfulness_by_top_level": by_top_level,
+            "placed_source_length_fraction_by_cm_type": {
+                key: value["placed_source_length_fraction"] for key, value in by_cm_type.items()
+            },
+            "mean_displacement_by_cm_type": {
+                key: value["mean_distance_to_source_m"] for key, value in by_cm_type.items()
+            },
+            "p95_displacement_by_cm_type": {
+                key: value["p95_distance_to_source_m"] for key, value in by_cm_type.items()
+            },
+            "dropped_source_length_by_cm_type": {
+                key: value["dropped_source_length_m"] for key, value in by_cm_type.items()
+            },
+            "relaxed_routes_by_reason": _relaxed_routes_by_reason(successful),
         }
 
 
@@ -1190,6 +1366,66 @@ class NetworkRouter:
 class _AllowedCellDecision:
     allowed: bool = True
     failures: tuple[Mapping[str, Any], ...] = ()
+
+
+def _percentile(values: Sequence[float], percentile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, math.ceil(len(ordered) * percentile) - 1))
+    return float(ordered[index])
+
+
+def _placed_source_length_fraction(tile_cells: Sequence[GridCell], raster_spine: RasterSpine) -> float:
+    if not raster_spine.cells:
+        return 1.0 if tile_cells else 0.0
+    placed_cells = set(tile_cells)
+    covered_progress = [
+        progress
+        for cell, progress in zip(raster_spine.cells, raster_spine.progress, strict=True)
+        if cell in placed_cells
+    ]
+    if not covered_progress:
+        return 0.0
+    if len(raster_spine.progress) <= 1:
+        return 1.0
+    progress_span = max(raster_spine.progress) - min(raster_spine.progress)
+    if progress_span <= 0:
+        return 1.0
+    covered_span = max(covered_progress) - min(covered_progress)
+    cell_allowance = 1.0 / max(1, len(raster_spine.progress) - 1)
+    return min(1.0, max(0.0, covered_span / progress_span + cell_allowance))
+
+
+def _faithfulness_budget_exceeded(
+    metrics: _RouteFaithfulnessMetrics,
+    budget: LinearRouteFaithfulnessBudget,
+) -> tuple[bool, tuple[str, ...]]:
+    reasons = []
+    if metrics.p95_distance_to_source_m > budget.p95_distance_m:
+        reasons.append("p95_distance")
+    if metrics.max_distance_to_source_m > budget.max_distance_m:
+        reasons.append("max_distance")
+    if not metrics.topology_preserved:
+        reasons.append("topology")
+    return bool(reasons), tuple(reasons)
+
+
+def _faithfulness_rejection_diagnostics(route: RouteRecord, relaxation: str | None) -> Mapping[str, Any]:
+    diagnostics = dict(route.diagnostics)
+    return {
+        "edge_id": route.edge_id,
+        "faithfulness_rejection_reason": "hard_budget_exceeded",
+        "relaxation_reason": relaxation,
+        "faithfulness_tier": diagnostics.get("faithfulness_tier"),
+        "faithfulness_budget": diagnostics.get("faithfulness_budget"),
+        "faithfulness_budget_exceeded_reasons": diagnostics.get("faithfulness_budget_exceeded_reasons", ()),
+        "mean_distance_to_source_m": diagnostics.get("mean_distance_to_source_m"),
+        "p95_distance_to_source_m": diagnostics.get("p95_distance_to_source_m"),
+        "max_distance_to_source_m": diagnostics.get("max_distance_to_source_m"),
+        "detour_ratio": diagnostics.get("detour_ratio"),
+        "placed_source_length_fraction": diagnostics.get("placed_source_length_fraction"),
+    }
 
 
 def _route_with_elapsed(route: RouteRecord, started_at: float) -> RouteRecord:
@@ -1340,6 +1576,86 @@ def _route_failure_reason(failures: Iterable[Mapping[str, Any]], rejection_count
     if "catalog_gap" in reasons or rejection_count:
         return "tile_catalog_gap"
     return "no_path"
+
+
+def _cm_type_aggregate_key(route: RouteRecord) -> str:
+    diagnostics = dict(route.diagnostics)
+    cm_type_index = diagnostics.get("cm_type_index")
+    if cm_type_index is not None:
+        return str(cm_type_index)
+    if route.cm_type is not None:
+        return "|".join(
+            str(value)
+            for value in (
+                route.cm_type.menu,
+                route.cm_type.cat1,
+                route.cm_type.cat2,
+                route.cm_type.direction,
+                route.cm_type.tile_id,
+            )
+            if value is not None
+        )
+    return route.config_name
+
+
+def _top_level_aggregate_key(route: RouteRecord) -> str:
+    return str(route.diagnostics.get("top_level_name", route.config_name))
+
+
+def _source_faithfulness_by(
+    routes: Sequence[RouteRecord],
+    *,
+    key_fn: Any,
+) -> dict[str, dict[str, Any]]:
+    grouped: dict[str, list[RouteRecord]] = {}
+    for route in routes:
+        grouped.setdefault(key_fn(route), []).append(route)
+
+    summaries = {}
+    for key, group in grouped.items():
+        total_source_length = sum(float(route.diagnostics.get("source_length_m", 0.0) or 0.0) for route in group)
+        placed_source_length = sum(
+            float(route.diagnostics.get("source_length_m", 0.0) or 0.0)
+            * float(route.diagnostics.get("placed_source_length_fraction", 0.0) or 0.0)
+            for route in group
+            if route.success
+        )
+        mean_displacements = [
+            float(route.diagnostics.get("mean_distance_to_source_m", 0.0) or 0.0)
+            for route in group
+            if route.success
+        ]
+        p95_displacements = [
+            float(route.diagnostics.get("p95_distance_to_source_m", 0.0) or 0.0)
+            for route in group
+            if route.success
+        ]
+        summaries[key] = {
+            "route_count": len(group),
+            "successful_routes": sum(1 for route in group if route.success),
+            "failed_routes": sum(1 for route in group if not route.success),
+            "source_length_m": total_source_length,
+            "placed_source_length_m": placed_source_length,
+            "placed_source_length_fraction": (
+                placed_source_length / total_source_length if total_source_length > 0 else None
+            ),
+            "mean_distance_to_source_m": (
+                sum(mean_displacements) / len(mean_displacements) if mean_displacements else None
+            ),
+            "p95_distance_to_source_m": _percentile(p95_displacements, 0.95),
+            "dropped_source_length_m": max(0.0, total_source_length - placed_source_length),
+            "relaxed_routes": sum(1 for route in group if route.diagnostics.get("relaxation_reason")),
+        }
+    return summaries
+
+
+def _relaxed_routes_by_reason(routes: Sequence[RouteRecord]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for route in routes:
+        reason = route.diagnostics.get("relaxation_reason") or route.diagnostics.get("forced_relaxation")
+        if reason:
+            counts[str(reason)] = counts.get(str(reason), 0) + 1
+    return counts
 
 
 def _hard_blocked_failure_count(failures: Iterable[Mapping[str, Any]]) -> int:
