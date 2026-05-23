@@ -54,11 +54,13 @@ class LinearNetworkState:
     route_id_at_cell: dict[GridCell, tuple[int | str, ...]] = field(init=False, default_factory=dict)
     priority_at_cell: dict[GridCell, int] = field(init=False, default_factory=dict)
     process_at_cell: dict[GridCell, ProcessKind] = field(init=False, default_factory=dict)
+    top_level_at_cell: dict[GridCell, str] = field(init=False, default_factory=dict)
     intersection_kind_at_cell: dict[GridCell, str] = field(init=False, default_factory=dict)
     _direction_route_ids: dict[GridCell, dict[str, set[int | str]]] = field(init=False, default_factory=dict)
     _route_cells: dict[int | str, set[GridCell]] = field(init=False, default_factory=dict)
     _route_priorities: dict[int | str, int] = field(init=False, default_factory=dict)
     _route_processes: dict[int | str, ProcessKind] = field(init=False, default_factory=dict)
+    _route_top_levels: dict[int | str, str] = field(init=False, default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.width <= 0 or self.height <= 0:
@@ -73,12 +75,15 @@ class LinearNetworkState:
         process: ProcessKind,
         priority: int,
         *,
+        top_level_name: str | None = None,
         allow_lower_priority_connection: bool = False,
     ) -> LinearCellDecision:
+        top_level = process.value if top_level_name is None else top_level_name
         dirs = {direction for direction in (incoming_dir, outgoing_dir) if direction}
         failures = self._reservation_failures(
             additions={cell: dirs},
             process=process,
+            top_level_name=top_level,
             priority=priority,
             route_id=None,
             lower_priority_connection_cells=frozenset((cell,)) if allow_lower_priority_connection else frozenset(),
@@ -87,10 +92,12 @@ class LinearNetworkState:
 
     def reserve_path(self, route: RouteRecord, *, route_id: int | str | None = None) -> LinearReservationResult:
         route_key = route.edge_id if route_id is None else route_id
+        top_level_name = _route_top_level_name(route)
         additions = _route_direction_additions(route.tile_cells)
         failures = self._reservation_failures(
             additions=additions,
             process=route.process,
+            top_level_name=top_level_name,
             priority=route.priority,
             route_id=route_key,
             lower_priority_connection_cells=_endpoint_cells(route.tile_cells),
@@ -108,6 +115,7 @@ class LinearNetworkState:
         self._route_cells[route_key] = touched_cells
         self._route_priorities[route_key] = route.priority
         self._route_processes[route_key] = route.process
+        self._route_top_levels[route_key] = top_level_name
         for cell in touched_cells:
             self._refresh_cell(cell)
         return LinearReservationResult(success=True, route_id=route_key)
@@ -116,6 +124,7 @@ class LinearNetworkState:
         cells = self._route_cells.pop(route_id, set())
         self._route_priorities.pop(route_id, None)
         self._route_processes.pop(route_id, None)
+        self._route_top_levels.pop(route_id, None)
         for cell in cells:
             direction_routes = self._direction_route_ids.get(cell, {})
             for direction in tuple(direction_routes):
@@ -142,6 +151,7 @@ class LinearNetworkState:
                         "xidx": cell.xidx,
                         "yidx": cell.yidx,
                         "process": self.process_at_cell[cell].value,
+                        "top_level_name": self.top_level_at_cell[cell],
                         "priority": self.priority_at_cell[cell],
                         "connection_bits": self.connection_bits[cell],
                         "required_directions": _ordered_directions(directions),
@@ -169,6 +179,7 @@ class LinearNetworkState:
         *,
         additions: Mapping[GridCell, Iterable[str]],
         process: ProcessKind,
+        top_level_name: str,
         priority: int,
         route_id: int | str | None,
         lower_priority_connection_cells: frozenset[GridCell],
@@ -187,8 +198,9 @@ class LinearNetworkState:
             existing_dirs = self.required_dirs(cell)
             new_dirs = normalized_dirs.difference(existing_dirs)
             existing_process = self.process_at_cell.get(cell)
+            existing_top_level = self.top_level_at_cell.get(cell)
             existing_priority = self.priority_at_cell.get(cell)
-            if existing_process is not None and existing_process != process and new_dirs:
+            if existing_top_level is not None and existing_top_level != top_level_name and new_dirs:
                 decision = self.interaction_policy.decision(existing_process, process)
                 if decision.interaction != "connect":
                     reason = "process_avoidance" if decision.interaction == "avoid" else "process_conflict"
@@ -199,6 +211,8 @@ class LinearNetworkState:
                             existing_dirs | normalized_dirs,
                             reason,
                             existing_process=existing_process,
+                            existing_top_level_name=existing_top_level,
+                            incoming_top_level_name=top_level_name,
                             interaction=decision.interaction,
                         )
                     )
@@ -206,7 +220,7 @@ class LinearNetworkState:
 
             allows_lower_priority_connection = (
                 existing_process is not None
-                and self.interaction_policy.decision(existing_process, process).interaction == "connect"
+                and existing_top_level == top_level_name
                 and len(new_dirs) == 1
                 and cell in lower_priority_connection_cells
             )
@@ -245,6 +259,7 @@ class LinearNetworkState:
             self.route_id_at_cell.pop(cell, None)
             self.priority_at_cell.pop(cell, None)
             self.process_at_cell.pop(cell, None)
+            self.top_level_at_cell.pop(cell, None)
             self.intersection_kind_at_cell.pop(cell, None)
             return
 
@@ -254,6 +269,7 @@ class LinearNetworkState:
         self.route_id_at_cell[cell] = route_ids
         self.priority_at_cell[cell] = min(self._route_priorities[route_id] for route_id in route_ids)
         self.process_at_cell[cell] = self._route_processes[route_ids[0]]
+        self.top_level_at_cell[cell] = self._route_top_levels[route_ids[0]]
         self.intersection_kind_at_cell[cell] = _intersection_kind(directions)
 
 
@@ -276,6 +292,12 @@ def _endpoint_cells(tile_cells: Iterable[GridCell]) -> frozenset[GridCell]:
     if not cells:
         return frozenset()
     return frozenset((cells[0], cells[-1]))
+
+
+def _route_top_level_name(route: RouteRecord) -> str:
+    if route.linear_authority is not None:
+        return route.linear_authority.top_level_name
+    return route.process.value
 
 
 def _direction_between_cells(first: GridCell, second: GridCell) -> str | None:

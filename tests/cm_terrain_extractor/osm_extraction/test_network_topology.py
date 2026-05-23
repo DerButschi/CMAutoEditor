@@ -12,7 +12,21 @@ if str(APP_DIR) not in sys.path:
 
 
 def _feature(feature_id, config_name, process, geometry, *, priority=5):
-    from terrain_extraction.osm_extraction.models import FeatureRecord
+    from terrain_extraction.osm_extraction.models import FeatureRecord, LinearFeatureAuthority
+
+    authority = None
+    if process.name in {"ROAD", "RAIL", "STREAM", "FENCE"}:
+        authority = LinearFeatureAuthority(
+            top_level_name=config_name,
+            process=process,
+            config_priority=priority,
+            cm_type_index=0,
+            first_matching_tag_index=0,
+            source_feature_length_m=float(geometry.length),
+            logical_chain_length_m=float(geometry.length),
+            stable_source_order=int(str(feature_id).split("-")[-1]) if "-" in str(feature_id) else 0,
+            source_feature_id=feature_id,
+        )
 
     return FeatureRecord(
         feature_id=feature_id,
@@ -23,6 +37,7 @@ def _feature(feature_id, config_name, process, geometry, *, priority=5):
         geometry=geometry,
         source_tags={"highway": config_name},
         source_properties={"id": feature_id},
+        linear_authority=authority,
     )
 
 
@@ -69,6 +84,41 @@ def test_crossroads_build_one_shared_topology_node() -> None:
     assert graph.degree(shared_nodes[0].node_id) == 4
     assert len(graph.edges) == 4
     assert graph.diagnostics["intersection_points"] == 1
+    assert graph.diagnostics["false_intersections_avoided"] == 0
+
+
+def test_cross_family_crossing_does_not_create_topology_junction() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+
+    graph = NetworkTopologyBuilder(clip_geometry=_clip()).build(
+        (
+            _feature("road-0", "road", ProcessKind.ROAD, LineString([(0, 10), (20, 10)]), priority=1),
+            _feature("stream-1", "stream", ProcessKind.STREAM, LineString([(10, 0), (10, 20)]), priority=1),
+        )
+    )
+
+    crossing = graph.nearest_node(Point(10, 10))
+    assert crossing is None
+    assert len(graph.edges) == 2
+    assert graph.diagnostics["intersection_points"] == 0
+    assert graph.diagnostics["false_intersections_avoided"] == 1
+    assert all(edge.diagnostics["false_intersection_avoided"] for edge in graph.edges)
+
+
+def test_cross_family_near_touch_does_not_snap_or_connect() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+
+    graph = NetworkTopologyBuilder(snap_tolerance_m=1.0).build(
+        (
+            _feature("road-0", "road", ProcessKind.ROAD, LineString([(0, 0), (10, 0)]), priority=1),
+            _feature("fence-1", "fence", ProcessKind.FENCE, LineString([(10.5, 0), (18, 0)]), priority=1),
+        )
+    )
+
+    assert len(graph.nodes) == 4
+    assert graph.diagnostics["snapped_points"] == 0
 
 
 def test_t_junction_splits_line_and_marks_degree_three_node() -> None:

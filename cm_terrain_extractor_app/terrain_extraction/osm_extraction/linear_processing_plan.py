@@ -147,7 +147,7 @@ class LinearProcessingPlan:
                     config_name=config_name,
                     priority=priority,
                     rank=rank,
-                    edges=tuple(sorted(edges, key=lambda edge: edge.edge_id)),
+                    edges=tuple(sorted(edges, key=_edge_authority_sort_key)),
                 )
             )
 
@@ -189,3 +189,16 @@ def _process_stage(process: ProcessKind) -> int:
 
 def _config_rank(config_name: str) -> int:
     return _NETWORK_CLASS_RANK.get(config_name, 99)
+
+
+def _edge_authority_sort_key(edge: TopologyEdge) -> tuple[int, int, float, int, int]:
+    authority = edge.linear_authority
+    if authority is None:
+        return (99, 99, -edge.geometry.length, min(edge.source_indices, default=edge.edge_id), edge.edge_id)
+    return (
+        99 if authority.cm_type_index is None else authority.cm_type_index,
+        99 if authority.first_matching_tag_index is None else authority.first_matching_tag_index,
+        -float(authority.logical_chain_length_m or authority.source_feature_length_m),
+        authority.stable_source_order,
+        edge.edge_id,
+    )

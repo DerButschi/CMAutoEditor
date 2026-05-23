@@ -10,9 +10,15 @@ from shapely.geometry.base import BaseGeometry
 from terrain_extraction.osm_extraction.config_schema import (
     ExtractionConfig,
     extract_tags,
-    matched_or_first_cm_type,
+    matched_or_first_cm_type_match,
 )
-from terrain_extraction.osm_extraction.models import FeatureRecord
+from terrain_extraction.osm_extraction.models import (
+    FeatureRecord,
+    LinearFeatureAuthority,
+    ProcessKind,
+)
+
+_LINEAR_PROCESSES = frozenset({ProcessKind.ROAD, ProcessKind.RAIL, ProcessKind.STREAM, ProcessKind.FENCE})
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +40,23 @@ class FeatureMatcher:
                 continue
 
             for entry in matching_entries:
+                cm_type_match = matched_or_first_cm_type_match(entry, tags)
                 for process in entry.processes:
+                    authority = (
+                        LinearFeatureAuthority(
+                            top_level_name=entry.name,
+                            process=process,
+                            config_priority=entry.priority,
+                            cm_type_index=cm_type_match.cm_type_index,
+                            first_matching_tag_index=cm_type_match.first_matching_tag_index,
+                            source_feature_length_m=float(geometry.length),
+                            logical_chain_length_m=float(geometry.length),
+                            stable_source_order=source_index,
+                            source_feature_id=feature_id,
+                        )
+                        if process in _LINEAR_PROCESSES
+                        else None
+                    )
                     records.append(
                         FeatureRecord(
                             feature_id=feature_id,
@@ -45,7 +67,8 @@ class FeatureMatcher:
                             geometry=geometry,
                             source_tags=tags,
                             source_properties=properties,
-                            cm_type=matched_or_first_cm_type(entry, tags),
+                            cm_type=cm_type_match.cm_type,
+                            linear_authority=authority,
                         )
                     )
 

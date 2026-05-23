@@ -59,6 +59,34 @@ class CMType:
         object.__setattr__(self, "modifiers", _frozen_mapping(self.modifiers))
 
 
+@dataclass(frozen=True, slots=True)
+class LinearFeatureAuthority:
+    top_level_name: str
+    process: ProcessKind
+    config_priority: int
+    cm_type_index: int | None
+    first_matching_tag_index: int | None
+    source_feature_length_m: float
+    logical_chain_length_m: float
+    stable_source_order: int
+    source_feature_id: str | int | None
+
+    def as_diagnostics(self) -> Mapping[str, Any]:
+        return MappingProxyType(
+            {
+                "top_level_name": self.top_level_name,
+                "process": self.process.value,
+                "config_priority": self.config_priority,
+                "cm_type_index": self.cm_type_index,
+                "tag_rank": self.first_matching_tag_index,
+                "source_length_m": self.source_feature_length_m,
+                "logical_chain_length_m": self.logical_chain_length_m,
+                "stable_source_order": self.stable_source_order,
+                "source_feature_id": self.source_feature_id,
+            }
+        )
+
+
 @dataclass(frozen=True, order=True, slots=True)
 class GridCell:
     xidx: int
@@ -102,6 +130,7 @@ class FeatureRecord:
     source_tags: Mapping[str, Any] = field(default_factory=dict)
     source_properties: Mapping[str, Any] = field(default_factory=dict)
     cm_type: CMType | None = None
+    linear_authority: LinearFeatureAuthority | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "source_tags", _frozen_mapping(self.source_tags))
@@ -149,6 +178,7 @@ class TopologyEdge:
     priority: int
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
     cm_type: CMType | None = None
+    linear_authority: LinearFeatureAuthority | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "feature_ids", tuple(self.feature_ids))
@@ -217,6 +247,7 @@ class RouteRecord:
     success: bool = True
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
     cm_type: CMType | None = None
+    linear_authority: LinearFeatureAuthority | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "nodes", tuple(self.nodes))

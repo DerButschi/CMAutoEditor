@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from numbers import Integral
 from typing import Any
 
@@ -33,6 +33,11 @@ class _SourceLine:
     @property
     def metadata_key(self) -> tuple[str, str, int]:
         return self.feature.config_name, self.feature.process.value, self.feature.priority
+
+    @property
+    def top_level_name(self) -> str:
+        authority = self.feature.linear_authority
+        return authority.top_level_name if authority is not None else self.feature.process.value
 
 
 @dataclass(slots=True)
@@ -94,13 +99,17 @@ class NetworkTopologyBuilder:
     def _collect_split_points(self, source_lines: list[_SourceLine]) -> list[Point]:
         split_points: list[Point] = []
         self._line_point_ids: dict[int, set[int]] = defaultdict(set)
+        self._point_top_levels: dict[int, frozenset[str]] = {}
         self._point_roles: dict[int, str] = {}
+        self._false_intersections_by_line: dict[int, int] = defaultdict(int)
+        self._false_intersections_avoided = 0
         for line_idx, source_line in enumerate(source_lines):
             coords = list(source_line.geometry.coords)
             for coord in (coords[0], coords[-1]):
                 point_id = len(split_points)
                 split_points.append(Point(coord))
                 self._line_point_ids[line_idx].add(point_id)
+                self._point_top_levels[point_id] = frozenset((source_line.top_level_name,))
                 self._point_roles[point_id] = "endpoint"
 
         tree = STRtree([source_line.geometry for source_line in source_lines])
@@ -110,10 +119,16 @@ class NetworkTopologyBuilder:
                     continue
                 intersection = source_line.geometry.intersection(source_lines[candidate_idx].geometry)
                 for point in _extract_points(intersection):
+                    if source_line.top_level_name != source_lines[candidate_idx].top_level_name:
+                        self._false_intersections_avoided += 1
+                        self._false_intersections_by_line[line_idx] += 1
+                        self._false_intersections_by_line[candidate_idx] += 1
+                        continue
                     point_id = len(split_points)
                     split_points.append(point)
                     self._line_point_ids[line_idx].add(point_id)
                     self._line_point_ids[candidate_idx].add(point_id)
+                    self._point_top_levels[point_id] = frozenset((source_line.top_level_name,))
                     self._point_roles[point_id] = "intersection"
         return split_points
 
@@ -138,6 +153,8 @@ class NetworkTopologyBuilder:
                 search_area = point.buffer(self.snap_tolerance_m)
                 for candidate_id in _query_point_indices(tree, search_area, points):
                     if candidate_id <= point_id:
+                        continue
+                    if self._point_top_levels.get(point_id, frozenset()) != self._point_top_levels.get(candidate_id, frozenset()):
                         continue
                     if point.distance(points[candidate_id]) <= self.snap_tolerance_m:
                         union(point_id, candidate_id)
@@ -216,8 +233,14 @@ class NetworkTopologyBuilder:
                         config_name=source_line.feature.config_name,
                         process=source_line.feature.process,
                         priority=source_line.feature.priority,
-                        diagnostics={"source_length_m": source_line.geometry.length},
+                        diagnostics={
+                            "source_length_m": source_line.geometry.length,
+                            "top_level_name": source_line.top_level_name,
+                            "false_intersection_avoided": bool(self._false_intersections_by_line.get(line_idx, 0)),
+                            "false_intersection_avoidance_count": self._false_intersections_by_line.get(line_idx, 0),
+                        },
                         cm_type=source_line.feature.cm_type,
+                        linear_authority=source_line.feature.linear_authority,
                     )
                 )
         return tuple(edges)
@@ -307,6 +330,7 @@ class NetworkTopologyBuilder:
                 priority=edge.priority,
                 diagnostics=edge.diagnostics,
                 cm_type=edge.cm_type,
+                linear_authority=edge.linear_authority,
             )
             for edge in new_edges
         )
@@ -353,21 +377,34 @@ class NetworkTopologyBuilder:
                 node_ids.insert(0, edge.start_node_id)
 
         coords = _chain_coords(chain, node_ids)
+        geometry = LineString(coords)
         feature_ids = tuple(dict.fromkeys(feature_id for edge in chain for feature_id in edge.feature_ids))
         source_indices = tuple(dict.fromkeys(source_index for edge in chain for source_index in edge.source_indices))
         first_edge = chain[0]
+        authority = first_edge.linear_authority
+        if authority is not None:
+            authority = replace(authority, logical_chain_length_m=float(geometry.length))
         return TopologyEdge(
             edge_id=edge_id,
             start_node_id=node_ids[0],
             end_node_id=node_ids[-1],
-            geometry=LineString(coords),
+            geometry=geometry,
             feature_ids=feature_ids,
             source_indices=source_indices,
             config_name=first_edge.config_name,
             process=first_edge.process,
             priority=first_edge.priority,
-            diagnostics={"collapsed_edge_count": len(chain)},
+            diagnostics={
+                "collapsed_edge_count": len(chain),
+                "source_length_m": sum(float(edge.diagnostics.get("source_length_m", edge.geometry.length)) for edge in chain),
+                "top_level_name": first_edge.diagnostics.get("top_level_name", first_edge.config_name),
+                "false_intersection_avoided": any(edge.diagnostics.get("false_intersection_avoided") for edge in chain),
+                "false_intersection_avoidance_count": sum(
+                    int(edge.diagnostics.get("false_intersection_avoidance_count", 0)) for edge in chain
+                ),
+            },
             cm_type=first_edge.cm_type,
+            linear_authority=authority,
         )
 
     def _edge_metadata(self, edge: TopologyEdge) -> tuple[str, str, int, tuple[str, str, str | None, str | int | None]]:
@@ -387,6 +424,7 @@ class NetworkTopologyBuilder:
             "normalized_lines": normalized_line_count,
             "clipped_lines": clipped_line_count,
             "intersection_points": intersection_count,
+            "false_intersections_avoided": getattr(self, "_false_intersections_avoided", 0),
             "snapped_points": snapped_point_count,
             "collapsed_degree_two_nodes": collapsed_count,
             "snap_tolerance_m": self.snap_tolerance_m,

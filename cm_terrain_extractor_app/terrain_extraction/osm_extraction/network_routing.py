@@ -118,6 +118,8 @@ class _RouteAttempt:
     nodes: tuple[GridNode, ...]
     blocked_cells_considered: int
     soft_crossings: int = 0
+    hard_blocked_occupied_cells: int = 0
+    soft_avoid_cells: int = 0
     tile_feasible_rejections: int = 0
     tile_feasible_failures: tuple[Mapping[str, Any], ...] = ()
     a_star_expansions: int = 0
@@ -237,6 +239,8 @@ class NetworkRouter:
             attempts.append(("soft_crossing", attempts[-1][1], True))
 
         total_blocked = 0
+        total_hard_blocked = 0
+        total_soft_avoid = 0
         total_tile_rejections = 0
         total_expansions = 0
         attempt_count = 0
@@ -256,9 +260,12 @@ class NetworkRouter:
                 soft_crossing,
                 raster_spine,
                 edge.process,
+                _edge_top_level_name(edge),
                 edge.priority,
             )
             total_blocked += attempt.blocked_cells_considered
+            total_hard_blocked += attempt.hard_blocked_occupied_cells
+            total_soft_avoid += attempt.soft_avoid_cells
             total_tile_rejections += attempt.tile_feasible_rejections
             total_expansions += attempt.a_star_expansions
             tile_failures.extend(dict(failure) for failure in attempt.tile_feasible_failures)
@@ -271,6 +278,8 @@ class NetworkRouter:
                     attempt.soft_crossings,
                     degrees,
                     raster_spine,
+                    hard_blocked_occupied_cells=total_hard_blocked,
+                    soft_avoid_cells=total_soft_avoid,
                     retry_modes=tuple(retry_modes),
                     attempt_count=attempt_count,
                     retry_count=len(retry_modes),
@@ -305,11 +314,17 @@ class NetworkRouter:
             raster_spine=raster_spine,
             success=False,
             cm_type=edge.cm_type,
+            linear_authority=edge.linear_authority,
             diagnostics={
+                **_authority_diagnostics(edge),
                 "failure_reason": failure_reason,
+                "conflict_family": _conflict_family(tile_failures),
                 "source_length_m": edge.geometry.length,
                 "raster_spine_cell_count": len(raster_spine.cells),
                 "blocked_cells_considered": total_blocked,
+                "hard_blocked_occupied_cells": total_hard_blocked,
+                "soft_avoid_cells": total_soft_avoid,
+                "false_intersection_avoided": bool(edge.diagnostics.get("false_intersection_avoided", False)),
                 "corridor_deviation_m": self.corridor_deviation_m,
                 "tile_feasible_rejections": total_tile_rejections,
                 "tile_feasible_failures": tuple(tile_failures),
@@ -333,6 +348,7 @@ class NetworkRouter:
         allow_soft_crossing: bool,
         raster_spine: RasterSpine,
         process: ProcessKind,
+        top_level_name: str,
         priority: int,
     ) -> _RouteAttempt:
         if start == goal:
@@ -348,6 +364,8 @@ class NetworkRouter:
         blocked_cache: dict[GridCell, bool] = {}
         blocked_cells_considered = 0
         soft_crossings = 0
+        hard_blocked_occupied_cells = 0
+        soft_avoid_cells = 0
         tile_feasible_rejections = 0
         tile_feasible_failures: list[Mapping[str, Any]] = []
         a_star_expansions = 0
@@ -361,6 +379,8 @@ class NetworkRouter:
                     nodes=self._reconstruct_path(came_from, state),
                     blocked_cells_considered=blocked_cells_considered,
                     soft_crossings=soft_crossings,
+                    hard_blocked_occupied_cells=hard_blocked_occupied_cells,
+                    soft_avoid_cells=soft_avoid_cells,
                     tile_feasible_rejections=tile_feasible_rejections,
                     tile_feasible_failures=tuple(tile_feasible_failures),
                     a_star_expansions=a_star_expansions,
@@ -392,11 +412,14 @@ class NetworkRouter:
                     incoming_direction=incoming_direction,
                     step_direction=step.direction,
                     process=process,
+                    top_level_name=top_level_name,
                     priority=priority,
                 )
                 if not step_decision.allowed:
                     if step_decision.failures:
                         tile_feasible_rejections += 1
+                        hard_blocked_occupied_cells += _hard_blocked_failure_count(step_decision.failures)
+                        soft_avoid_cells += _soft_avoid_failure_count(step_decision.failures)
                         _extend_failures(tile_feasible_failures, step_decision.failures)
                     continue
                 traversed_cell = self._cell_for_step(current, neighbor)
@@ -404,8 +427,10 @@ class NetworkRouter:
                 if blocked:
                     blocked_cells_considered += 1
                     if not allow_soft_crossing:
+                        hard_blocked_occupied_cells += 1
                         continue
                     soft_crossings += 1
+                    soft_avoid_cells += 1
 
                 turn_cost = 0.15 if incoming_direction and incoming_direction != step.direction else 0.0
                 distance_cost = (
@@ -427,6 +452,8 @@ class NetworkRouter:
             nodes=(),
             blocked_cells_considered=blocked_cells_considered,
             soft_crossings=soft_crossings,
+            hard_blocked_occupied_cells=hard_blocked_occupied_cells,
+            soft_avoid_cells=soft_avoid_cells,
             tile_feasible_rejections=tile_feasible_rejections,
             tile_feasible_failures=tuple(tile_feasible_failures),
             a_star_expansions=a_star_expansions,
@@ -453,6 +480,7 @@ class NetworkRouter:
             True,
             raster_spine,
             edge.process,
+            _edge_top_level_name(edge),
             edge.priority,
         )
         second = self._a_star(
@@ -464,6 +492,7 @@ class NetworkRouter:
             True,
             raster_spine,
             edge.process,
+            _edge_top_level_name(edge),
             edge.priority,
         )
         if not first.success or not second.success:
@@ -477,6 +506,8 @@ class NetworkRouter:
             first.soft_crossings + second.soft_crossings,
             degrees,
             raster_spine,
+            hard_blocked_occupied_cells=first.hard_blocked_occupied_cells + second.hard_blocked_occupied_cells,
+            soft_avoid_cells=first.soft_avoid_cells + second.soft_avoid_cells,
             retry_modes=("midpoint_split",),
             attempt_count=2,
             retry_count=1,
@@ -498,6 +529,7 @@ class NetworkRouter:
             success=True,
             diagnostics=diagnostics,
             cm_type=record.cm_type,
+            linear_authority=record.linear_authority,
         )
 
     def _record_success(
@@ -510,6 +542,8 @@ class NetworkRouter:
         degrees: Mapping[int, int],
         raster_spine: RasterSpine,
         *,
+        hard_blocked_occupied_cells: int = 0,
+        soft_avoid_cells: int = 0,
         retry_modes: tuple[str, ...] = (),
         attempt_count: int = 1,
         retry_count: int = 0,
@@ -522,12 +556,17 @@ class NetworkRouter:
         source_length = edge.geometry.length
         spine_diagnostics = self._spine_diagnostics(edge.geometry, nodes, tile_cells, raster_spine)
         diagnostics = {
+            **_authority_diagnostics(edge),
             "source_length_m": source_length,
             "route_length_m": route_length,
             "detour_ratio": route_length / source_length if source_length > 0 else 1.0,
             "mean_source_line_distance_m": self._mean_node_source_distance(nodes, edge.geometry),
             "max_source_line_distance_m": max((self._node_source_distance(node, edge.geometry) for node in nodes), default=0.0),
             "blocked_cells_considered": blocked_cells_considered,
+            "hard_blocked_occupied_cells": hard_blocked_occupied_cells,
+            "soft_avoid_cells": soft_avoid_cells,
+            "conflict_family": _conflict_family(tile_feasible_failures),
+            "false_intersection_avoided": bool(edge.diagnostics.get("false_intersection_avoided", False)),
             "forced_relaxation": relaxation,
             "soft_crossings": soft_crossings,
             "intersection_importance": max(degrees.get(edge.start_node_id, 0), degrees.get(edge.end_node_id, 0)),
@@ -554,6 +593,7 @@ class NetworkRouter:
             success=True,
             diagnostics=diagnostics,
             cm_type=edge.cm_type,
+            linear_authority=edge.linear_authority,
         )
 
     def _reservation_failed_route(
@@ -565,6 +605,11 @@ class NetworkRouter:
         diagnostics = {
             **dict(route.diagnostics),
             "failure_reason": failure.get("failure_reason", "linear_state_rejected"),
+            "conflict_family": _conflict_family(reservation.failures),
+            "hard_blocked_occupied_cells": int(route.diagnostics.get("hard_blocked_occupied_cells", 0))
+            + _hard_blocked_failure_count(reservation.failures),
+            "soft_avoid_cells": int(route.diagnostics.get("soft_avoid_cells", 0))
+            + _soft_avoid_failure_count(reservation.failures),
             "linear_state_failures": tuple(dict(item) for item in reservation.failures),
             "tile_feasible_failures": tuple(dict(item) for item in reservation.failures),
             "tile_feasible_rejections": int(route.diagnostics.get("tile_feasible_rejections", 0))
@@ -583,6 +628,7 @@ class NetworkRouter:
             success=False,
             diagnostics=diagnostics,
             cm_type=route.cm_type,
+            linear_authority=route.linear_authority,
         )
 
     def _with_processing_diagnostics(
@@ -612,6 +658,7 @@ class NetworkRouter:
             success=route.success,
             diagnostics=diagnostics,
             cm_type=route.cm_type,
+            linear_authority=route.linear_authority,
         )
 
     def _node_anchors(self, topology: TopologyGraph, anchor_plans: Mapping[int, Any]) -> dict[int, GridNode]:
@@ -650,6 +697,7 @@ class NetworkRouter:
                 key=lambda edge: (
                     edge.priority,
                     _NETWORK_CLASS_RANK.get(edge.config_name, 99),
+                    *_authority_sort_key(edge),
                     -edge.geometry.length,
                     -max(degrees.get(edge.start_node_id, 0), degrees.get(edge.end_node_id, 0)),
                     edge.edge_id,
@@ -690,7 +738,12 @@ class NetworkRouter:
             priority=edge.priority,
             success=False,
             diagnostics={
+                **_authority_diagnostics(edge),
                 "failure_reason": "anchor_fallback_drop",
+                "conflict_family": "same_family",
+                "hard_blocked_occupied_cells": 0,
+                "soft_avoid_cells": 0,
+                "false_intersection_avoided": bool(edge.diagnostics.get("false_intersection_avoided", False)),
                 "intersection_fallback_decision": decision,
                 "elapsed_ms": 0.0,
                 "attempt_count": 0,
@@ -701,6 +754,7 @@ class NetworkRouter:
                 "source_indices": edge.source_indices,
             },
             cm_type=edge.cm_type,
+            linear_authority=edge.linear_authority,
         )
 
     def _node_window(self, line: LineString, corridor_m: float) -> tuple[int, int, int, int]:
@@ -784,6 +838,7 @@ class NetworkRouter:
         incoming_dir: str | None,
         outgoing_dir: str | None,
         process: ProcessKind,
+        top_level_name: str,
         priority: int,
         allow_lower_priority_connection: bool = False,
     ) -> Any:
@@ -794,6 +849,7 @@ class NetworkRouter:
             incoming_dir=incoming_dir,
             outgoing_dir=outgoing_dir,
             process=process,
+            top_level_name=top_level_name,
             priority=priority,
             allow_lower_priority_connection=allow_lower_priority_connection,
         )
@@ -810,6 +866,7 @@ class NetworkRouter:
         incoming_direction: str,
         step_direction: str,
         process: ProcessKind,
+        top_level_name: str,
         priority: int,
     ) -> Any:
         if _state_path_contains(came_from, state, neighbor):
@@ -819,6 +876,7 @@ class NetworkRouter:
             incoming_dir=_opposite(incoming_direction),
             outgoing_dir=step_direction,
             process=process,
+            top_level_name=top_level_name,
             priority=priority,
             allow_lower_priority_connection=current in {start, goal},
         )
@@ -829,6 +887,7 @@ class NetworkRouter:
             incoming_dir=_opposite(step_direction),
             outgoing_dir=None,
             process=process,
+            top_level_name=top_level_name,
             priority=priority,
             allow_lower_priority_connection=neighbor in {start, goal},
         )
@@ -945,10 +1004,15 @@ class NetworkRouter:
             "route_attempts": sum(int(route.diagnostics.get("attempt_count", 0)) for route in routes),
             "route_retries": sum(int(route.diagnostics.get("retry_count", 0)) for route in routes),
             "total_a_star_expansions": sum(int(route.diagnostics.get("a_star_expansions", 0)) for route in routes),
-            "total_tile_feasible_rejections": sum(
+        "total_tile_feasible_rejections": sum(
                 int(route.diagnostics.get("tile_feasible_rejections", 0))
                 for route in routes
             ),
+            "hard_blocked_occupied_cells": sum(
+                int(route.diagnostics.get("hard_blocked_occupied_cells", 0)) for route in routes
+            ),
+            "soft_avoid_cells": sum(int(route.diagnostics.get("soft_avoid_cells", 0)) for route in routes),
+            "false_intersections_avoided": sum(1 for route in routes if route.diagnostics.get("false_intersection_avoided")),
             "mean_detour_ratio": sum(detours) / len(detours) if detours else None,
             "max_source_line_distance_m": max(distances) if distances else None,
             "max_spine_distance_m": max(spine_distances) if spine_distances else None,
@@ -987,6 +1051,7 @@ def _route_with_diagnostics(route: RouteRecord, diagnostics: Mapping[str, Any]) 
         success=route.success,
         diagnostics=dict(diagnostics),
         cm_type=route.cm_type,
+        linear_authority=route.linear_authority,
     )
 
 
@@ -1016,6 +1081,62 @@ def _extend_failures(
         return
     remaining = limit - len(collected)
     collected.extend(dict(failure) for failure in tuple(failures)[:remaining])
+
+
+def _authority_diagnostics(edge: TopologyEdge) -> dict[str, Any]:
+    if edge.linear_authority is not None:
+        return dict(edge.linear_authority.as_diagnostics())
+    return {
+        "top_level_name": edge.process.value,
+        "process": edge.process.value,
+        "config_priority": edge.priority,
+        "cm_type_index": None,
+        "tag_rank": None,
+        "source_length_m": edge.geometry.length,
+        "logical_chain_length_m": edge.geometry.length,
+        "stable_source_order": min(edge.source_indices, default=edge.edge_id),
+        "source_feature_id": edge.feature_ids[0] if edge.feature_ids else None,
+    }
+
+
+def _edge_top_level_name(edge: TopologyEdge) -> str:
+    if edge.linear_authority is not None:
+        return edge.linear_authority.top_level_name
+    return edge.process.value
+
+
+def _authority_sort_key(edge: TopologyEdge) -> tuple[int, int, float, int, str]:
+    authority = edge.linear_authority
+    if authority is None:
+        return (99, 99, -edge.geometry.length, min(edge.source_indices, default=edge.edge_id), str(edge.edge_id))
+    return (
+        99 if authority.cm_type_index is None else authority.cm_type_index,
+        99 if authority.first_matching_tag_index is None else authority.first_matching_tag_index,
+        -float(authority.logical_chain_length_m or authority.source_feature_length_m),
+        authority.stable_source_order,
+        str(authority.source_feature_id),
+    )
+
+
+def _conflict_family(failures: Iterable[Mapping[str, Any]]) -> str | None:
+    reasons = {str(failure.get("failure_reason")) for failure in failures}
+    if reasons.intersection({"process_avoidance", "process_conflict"}):
+        return "cross_family"
+    if reasons:
+        return "same_family"
+    return None
+
+
+def _hard_blocked_failure_count(failures: Iterable[Mapping[str, Any]]) -> int:
+    return sum(
+        1
+        for failure in failures
+        if failure.get("failure_reason") not in {"process_avoidance"}
+    )
+
+
+def _soft_avoid_failure_count(failures: Iterable[Mapping[str, Any]]) -> int:
+    return sum(1 for failure in failures if failure.get("failure_reason") == "process_avoidance")
 
 
 def _combined_anchor_diagnostics(items: Iterable[Mapping[str, Any]]) -> dict[str, Any]:

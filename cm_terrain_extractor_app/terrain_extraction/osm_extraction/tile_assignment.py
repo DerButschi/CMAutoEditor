@@ -1704,14 +1704,16 @@ def _node_xy(node: GridNode | tuple[int, int]) -> tuple[int, int]:
     return node
 
 
-def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[ProcessKind, int], _IntersectionSpec]:
-    endpoints_by_key: dict[tuple[ProcessKind, int], list[_IntersectionEndpoint]] = {}
+def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[ProcessKind, str, int], _IntersectionSpec]:
+    endpoints_by_key: dict[tuple[ProcessKind, str, int], list[_IntersectionEndpoint]] = {}
     for route in routes:
         if len(route.nodes) < 2 or not route.tile_cells:
             continue
+        top_level_name = _route_top_level_name(route)
         _record_route_endpoint_candidate(
             endpoints_by_key,
             process=route.process,
+            top_level_name=top_level_name,
             node_id=route.start_node_id,
             node=route.nodes[0],
             direction=_start_endpoint_direction(route),
@@ -1721,6 +1723,7 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
         _record_route_endpoint_candidate(
             endpoints_by_key,
             process=route.process,
+            top_level_name=top_level_name,
             node_id=route.end_node_id,
             node=route.nodes[-1],
             direction=_end_endpoint_direction(route),
@@ -1728,7 +1731,7 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
             cm_type=route.cm_type,
         )
 
-    intersections: dict[tuple[ProcessKind, int], _IntersectionSpec] = {}
+    intersections: dict[tuple[ProcessKind, str, int], _IntersectionSpec] = {}
     for key, endpoints in endpoints_by_key.items():
         if not endpoints:
             continue
@@ -1742,7 +1745,7 @@ def _intersection_specs_by_process(routes: Sequence[RouteRecord]) -> dict[tuple[
             continue
         spec = _IntersectionSpec(
             process=key[0],
-            node_id=key[1],
+            node_id=key[2],
             node=valid_endpoints[0].node,
             directions=set(),
             cells={intersection_cell},
@@ -1770,17 +1773,24 @@ def _end_endpoint_direction(route: RouteRecord) -> str:
     return _direction_between_nodes(route.nodes[-1], route.nodes[-2])
 
 
+def _route_top_level_name(route: RouteRecord) -> str:
+    if route.linear_authority is not None:
+        return route.linear_authority.top_level_name
+    return route.process.value
+
+
 def _record_route_endpoint_candidate(
-    endpoints_by_key: dict[tuple[ProcessKind, int], list[_IntersectionEndpoint]],
+    endpoints_by_key: dict[tuple[ProcessKind, str, int], list[_IntersectionEndpoint]],
     *,
     process: ProcessKind,
+    top_level_name: str,
     node_id: int,
     node: GridNode,
     direction: str,
     cells_from_node: tuple[GridCell, ...],
     cm_type: CMType | None,
 ) -> None:
-    endpoints_by_key.setdefault((process, node_id), []).append(
+    endpoints_by_key.setdefault((process, top_level_name, node_id)).append(
         _IntersectionEndpoint(
             process=process,
             node_id=node_id,

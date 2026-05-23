@@ -106,3 +106,42 @@ def test_feature_matcher_is_deterministic_under_same_config_seed() -> None:
 
     assert first == second
     assert config.seed == 123
+
+
+def test_feature_matcher_attaches_linear_authority_from_cmcw_config() -> None:
+    from terrain_extraction.osm_extraction.config_schema import ExtractionConfig
+    from terrain_extraction.osm_extraction.feature_matcher import FeatureMatcher
+
+    config = ExtractionConfig.from_path(Path("default_osm_config_cmcw.json"), seed=123)
+    features = [
+        {
+            "id": "way/primary",
+            "properties": {"tags": {"highway": "primary"}},
+            "geometry": mapping(LineString([(0, 0), (16, 0)])),
+        },
+        {
+            "id": "way/residential",
+            "properties": {"tags": {"highway": "residential"}},
+            "geometry": mapping(LineString([(0, 8), (24, 8)])),
+        },
+        {
+            "id": "way/stream",
+            "properties": {"tags": {"waterway": "stream"}},
+            "geometry": mapping(LineString([(0, 16), (32, 16)])),
+        },
+    ]
+
+    records = FeatureMatcher(config).match_features(features)
+    linear_records = {record.feature_id: record for record in records if record.linear_authority is not None}
+
+    primary = linear_records["way/primary"].linear_authority
+    residential = linear_records["way/residential"].linear_authority
+    stream = linear_records["way/stream"].linear_authority
+    assert primary is not None
+    assert residential is not None
+    assert stream is not None
+    assert (primary.top_level_name, primary.cm_type_index, primary.first_matching_tag_index) == ("road", 0, 0)
+    assert (residential.top_level_name, residential.cm_type_index, residential.first_matching_tag_index) == ("road", 1, 0)
+    assert (stream.top_level_name, stream.cm_type_index, stream.first_matching_tag_index) == ("stream", 0, 0)
+    assert stream.stable_source_order == 2
+    assert stream.source_feature_length_m == 32.0

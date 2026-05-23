@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -58,6 +59,23 @@ def _edge(edge_id, start, end, *, config_name="primary", priority=1, process=Non
         process=process,
         priority=priority,
     )
+
+
+def _with_authority(edge, *, cm_type_index=0, tag_rank=0, length=None, source_order=None, top_level_name=None):
+    from terrain_extraction.osm_extraction.models import LinearFeatureAuthority
+
+    authority = LinearFeatureAuthority(
+        top_level_name=edge.config_name if top_level_name is None else top_level_name,
+        process=edge.process,
+        config_priority=edge.priority,
+        cm_type_index=cm_type_index,
+        first_matching_tag_index=tag_rank,
+        source_feature_length_m=float(edge.geometry.length if length is None else length),
+        logical_chain_length_m=float(edge.geometry.length if length is None else length),
+        stable_source_order=edge.edge_id if source_order is None else source_order,
+        source_feature_id=edge.feature_ids[0],
+    )
+    return replace(edge, linear_authority=authority)
 
 
 def _compiled_catalog(process, rows):
@@ -120,6 +138,53 @@ def test_routes_simple_topology_edge_on_integer_grid() -> None:
     assert result.diagnostics["route_retries"] == 0
     assert result.diagnostics["total_a_star_expansions"] == result.routes[0].diagnostics["a_star_expansions"]
     assert result.diagnostics["total_tile_feasible_rejections"] == 0
+
+
+def test_route_order_uses_authority_cm_type_tag_length_and_source_order() -> None:
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edges = (
+        _with_authority(_edge(0, (0, (4, 4)), (1, (28, 4))), cm_type_index=1, tag_rank=0),
+        _with_authority(_edge(1, (2, (4, 12)), (3, (28, 12))), cm_type_index=0, tag_rank=0, length=24),
+        _with_authority(_edge(2, (4, (4, 20)), (5, (28, 20))), cm_type_index=0, tag_rank=1, length=24),
+        _with_authority(_edge(3, (6, (4, 28)), (7, (36, 28))), cm_type_index=0, tag_rank=0, length=32),
+    )
+
+    result = NetworkRouter(grid_index=_grid(width=6, height=5)).route(_graph(edges))
+
+    assert [route.edge_id for route in result.routes] == [3, 1, 2, 0]
+    assert [route.diagnostics["cm_type_index"] for route in result.routes] == [0, 0, 0, 1]
+    assert [route.diagnostics["tag_rank"] for route in result.routes] == [0, 0, 1, 0]
+
+
+def test_cross_family_route_failure_reports_policy_diagnostics_deterministically() -> None:
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+
+    from tests.cm_terrain_extractor.osm_extraction.test_network_topology import _feature
+
+    topology = NetworkTopologyBuilder().build(
+        (
+            _feature("road-0", "road", ProcessKind.ROAD, LineString([(4, 20), (36, 20)]), priority=1),
+            _feature("stream-1", "stream", ProcessKind.STREAM, LineString([(20, 4), (20, 36)]), priority=1),
+        )
+    )
+    kwargs = {"grid_index": _grid(width=5, height=5), "corridor_deviation_m": 0.0}
+
+    first = NetworkRouter(**kwargs).route(topology)
+    second = NetworkRouter(**kwargs).route(topology)
+
+    assert tuple(route.edge_id for route in first.routes) == tuple(route.edge_id for route in second.routes)
+    assert tuple(route.tile_cells for route in first.routes) == tuple(route.tile_cells for route in second.routes)
+    failed = [route for route in first.routes if not route.success]
+    assert len(failed) == 1
+    assert failed[0].process is ProcessKind.STREAM
+    assert failed[0].diagnostics["top_level_name"] == "stream"
+    assert failed[0].diagnostics["conflict_family"] == "cross_family"
+    assert failed[0].diagnostics["soft_avoid_cells"] >= 1
+    assert failed[0].diagnostics["false_intersection_avoided"] is True
+    assert first.diagnostics["false_intersections_avoided"] >= 1
 
 
 def test_route_cells_are_output_cells_not_grid_corner_edges() -> None:
