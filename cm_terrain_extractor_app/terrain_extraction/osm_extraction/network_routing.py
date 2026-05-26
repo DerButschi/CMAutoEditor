@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from shapely.geometry import LineString
+from shapely.ops import substring
 from terrain_extraction.osm_extraction.anchor_selection import AnchorSelector, anchor_cell_for_plan
 from terrain_extraction.osm_extraction.config_schema import (
     LinearRouteFaithfulnessBudget,
@@ -45,7 +46,10 @@ from terrain_extraction.osm_extraction.models import (
     TopologyGraph,
 )
 from terrain_extraction.osm_extraction.occupancy import OccupancyModel
-from terrain_extraction.osm_extraction.raster_spine import build_raster_spine
+from terrain_extraction.osm_extraction.raster_spine import (
+    build_raster_spine,
+    derive_spine_guide_waypoints,
+)
 
 _MOVE_ORDER = ("N", "E", "S", "W", "NE", "NW", "SE", "SW")
 _DIRECTION_STEPS = DIRECTION_STEPS
@@ -159,6 +163,9 @@ class _RouteFaithfulnessMetrics:
     max_distance_to_source_m: float
     detour_ratio: float
     placed_source_length_fraction: float
+    visited_spine_fraction: float
+    skipped_spine_gap_max: int
+    route_shortcut_detected: bool
     topology_preserved: bool
     topology_issue_count: int
 
@@ -175,6 +182,9 @@ class _RouteFaithfulnessMetrics:
             "max_source_line_distance_m": self.max_distance_to_source_m,
             "detour_ratio": self.detour_ratio,
             "placed_source_length_fraction": self.placed_source_length_fraction,
+            "visited_spine_fraction": self.visited_spine_fraction,
+            "skipped_spine_gap_max": self.skipped_spine_gap_max,
+            "route_shortcut_detected": self.route_shortcut_detected,
             "topology_preserved": self.topology_preserved,
             "topology_issue_count": self.topology_issue_count,
         }
@@ -290,6 +300,13 @@ class NetworkRouter:
             line=edge.geometry,
             grid_index=self.grid_index,
         )
+        guide_waypoints = derive_spine_guide_waypoints(
+            line=edge.geometry,
+            raster_spine=raster_spine,
+            grid_index=self.grid_index,
+            start=start,
+            goal=goal,
+        )
         masks = self._route_conflict_masks(edge, start, goal, degrees)
         attempts = self._routing_attempts(edge, masks)
         source_distance_weight = self._source_distance_weight(edge)
@@ -308,17 +325,14 @@ class NetworkRouter:
             retry_mode = _retry_mode(relaxation)
             if retry_mode is not None:
                 retry_modes.append(retry_mode)
-            attempt = self._a_star(
-                edge.geometry,
+            attempt = self._guided_a_star(
+                edge,
                 start,
                 goal,
+                guide_waypoints,
                 corridor_m,
-                self._layer_for_edge(edge),
                 soft_crossing,
                 raster_spine,
-                edge.process,
-                _edge_top_level_name(edge),
-                edge.priority,
                 masks,
                 source_distance_weight,
             )
@@ -346,6 +360,7 @@ class NetworkRouter:
                     tile_feasible_rejections=total_tile_rejections,
                     tile_feasible_failures=tuple(tile_failures),
                     masks=masks,
+                    guide_waypoint_count=len(guide_waypoints),
                 )
                 if route.diagnostics.get("faithfulness_budget_exceeded") and relaxation is None:
                     faithfulness_rejections.append(_faithfulness_rejection_diagnostics(route, relaxation))
@@ -400,7 +415,11 @@ class NetworkRouter:
                 "faithfulness_tier": tier,
                 "faithfulness_budget": budget.to_dict(),
                 "faithfulness_budget_exceeded": bool(faithfulness_rejections),
+                "guide_waypoint_count": len(guide_waypoints),
                 "raster_spine_cell_count": len(raster_spine.cells),
+                "visited_spine_fraction": 0.0,
+                "skipped_spine_gap_max": len(raster_spine.cells),
+                "route_shortcut_detected": False,
                 "blocked_cells_considered": total_blocked,
                 "hard_blocked_occupied_cells": total_hard_blocked,
                 "soft_avoid_cells": total_soft_avoid,
@@ -419,6 +438,156 @@ class NetworkRouter:
         )
         return _route_with_elapsed(route, route_started_at)
 
+    def _guided_a_star(
+        self,
+        edge: TopologyEdge,
+        start: GridNode,
+        goal: GridNode,
+        guide_waypoints: tuple[tuple[GridCell, float], ...],
+        corridor_m: float,
+        allow_soft_crossing: bool,
+        raster_spine: RasterSpine,
+        masks: _RouteConflictMasks,
+        source_distance_weight: float,
+    ) -> _RouteAttempt:
+        guide_waypoints = self._routeable_guide_waypoints(edge, guide_waypoints, masks)
+        waypoints = tuple(
+            (GridNode(cell.xidx, cell.yidx), min(max(float(progress), 0.0), 1.0))
+            for cell, progress in guide_waypoints
+        )
+        if not waypoints:
+            waypoints = ((start, 0.0), (goal, 1.0))
+
+        total_blocked = 0
+        total_soft_crossings = 0
+        total_hard_blocked = 0
+        total_soft_avoid = 0
+        total_tile_rejections = 0
+        total_expansions = 0
+        tile_failures: list[Mapping[str, Any]] = []
+        nodes: tuple[GridNode, ...] = ()
+        route_endpoint_nodes = frozenset((start, goal))
+
+        for (segment_start, start_progress), (segment_goal, goal_progress) in zip(
+            waypoints,
+            waypoints[1:],
+            strict=False,
+        ):
+            segment_line = _source_subline(edge.geometry, start_progress, goal_progress)
+            segment_spine = _spine_progress_slice(
+                raster_spine,
+                start_progress,
+                goal_progress,
+                start_cell=GridCell(segment_start.xidx, segment_start.yidx),
+                goal_cell=GridCell(segment_goal.xidx, segment_goal.yidx),
+            )
+            attempt = self._a_star(
+                segment_line,
+                segment_start,
+                segment_goal,
+                corridor_m,
+                self._layer_for_edge(edge),
+                allow_soft_crossing,
+                segment_spine,
+                edge.process,
+                _edge_top_level_name(edge),
+                edge.priority,
+                masks,
+                source_distance_weight,
+                route_endpoint_nodes=route_endpoint_nodes,
+            )
+            total_blocked += attempt.blocked_cells_considered
+            total_soft_crossings += attempt.soft_crossings
+            total_hard_blocked += attempt.hard_blocked_occupied_cells
+            total_soft_avoid += attempt.soft_avoid_cells
+            total_tile_rejections += attempt.tile_feasible_rejections
+            total_expansions += attempt.a_star_expansions
+            tile_failures.extend(dict(failure) for failure in attempt.tile_feasible_failures)
+            if not attempt.success:
+                return _RouteAttempt(
+                    nodes=(),
+                    blocked_cells_considered=total_blocked,
+                    soft_crossings=total_soft_crossings,
+                    hard_blocked_occupied_cells=total_hard_blocked,
+                    soft_avoid_cells=total_soft_avoid,
+                    tile_feasible_rejections=total_tile_rejections,
+                    tile_feasible_failures=tuple(tile_failures),
+                    a_star_expansions=total_expansions,
+                )
+            nodes = attempt.nodes if not nodes else nodes + attempt.nodes[1:]
+
+        return _RouteAttempt(
+            nodes=nodes,
+            blocked_cells_considered=total_blocked,
+            soft_crossings=total_soft_crossings,
+            hard_blocked_occupied_cells=total_hard_blocked,
+            soft_avoid_cells=total_soft_avoid,
+            tile_feasible_rejections=total_tile_rejections,
+            tile_feasible_failures=tuple(tile_failures),
+            a_star_expansions=total_expansions,
+        )
+
+    def _routeable_guide_waypoints(
+        self,
+        edge: TopologyEdge,
+        guide_waypoints: tuple[tuple[GridCell, float], ...],
+        masks: _RouteConflictMasks,
+    ) -> tuple[tuple[GridCell, float], ...]:
+        if len(guide_waypoints) <= 2:
+            return guide_waypoints
+        layer = self._layer_for_edge(edge)
+        adjusted: list[tuple[GridCell, float]] = []
+        for index, (cell, progress) in enumerate(guide_waypoints):
+            if index == 0 or index == len(guide_waypoints) - 1:
+                candidate = cell
+            else:
+                candidate = self._nearest_routeable_guide_cell(edge.geometry, cell, layer, masks)
+            if adjusted and adjusted[-1][0] == candidate:
+                continue
+            adjusted.append((candidate, progress))
+        return tuple(adjusted)
+
+    def _nearest_routeable_guide_cell(
+        self,
+        line: LineString,
+        cell: GridCell,
+        layer: LayerKind,
+        masks: _RouteConflictMasks,
+    ) -> GridCell:
+        if self._guide_cell_routeable(cell, layer, masks):
+            return cell
+        for radius in (1, 2):
+            candidates = [
+                GridCell(cell.xidx + dx, cell.yidx + dy)
+                for dx in range(-radius, radius + 1)
+                for dy in range(-radius, radius + 1)
+                if abs(dx) + abs(dy) <= radius
+            ]
+            routeable = [candidate for candidate in candidates if self._guide_cell_routeable(candidate, layer, masks)]
+            if routeable:
+                return min(
+                    routeable,
+                    key=lambda candidate: (
+                        self.grid_index.cell_center(candidate).distance(line),
+                        abs(candidate.xidx - cell.xidx) + abs(candidate.yidx - cell.yidx),
+                        candidate.yidx,
+                        candidate.xidx,
+                    ),
+                )
+        return cell
+
+    def _guide_cell_routeable(
+        self,
+        cell: GridCell,
+        layer: LayerKind,
+        masks: _RouteConflictMasks,
+    ) -> bool:
+        if not (0 <= cell.xidx < self.grid_index.width and 0 <= cell.yidx < self.grid_index.height):
+            return False
+        if cell in masks.forbidden_occupied_cells:
+            return False
+        return not self._cell_is_blocked(cell, layer)
+
     def _a_star(  # noqa: PLR0915
         self,
         line: LineString,
@@ -433,11 +602,14 @@ class NetworkRouter:
         priority: int,
         masks: _RouteConflictMasks,
         source_distance_weight: float,
+        *,
+        route_endpoint_nodes: frozenset[GridNode] | None = None,
     ) -> _RouteAttempt:
         if start == goal:
             return _RouteAttempt(nodes=(start,), blocked_cells_considered=0)
 
         window = self._node_window(line, corridor_m)
+        route_endpoint_nodes = route_endpoint_nodes or frozenset((start, goal))
         move_set = self._move_set_for_process(process)
         start_state = (start.xidx, start.yidx, "")
         open_heap = [(self._heuristic(start, goal, move_set), 0.0, start_state)]
@@ -490,14 +662,13 @@ class NetworkRouter:
                     state=state,
                     current=current,
                     neighbor=neighbor,
-                    start=start,
-                    goal=goal,
                     incoming_direction=incoming_direction,
                     step_direction=step.direction,
                     process=process,
                     top_level_name=top_level_name,
                     priority=priority,
                     masks=masks,
+                    route_endpoint_nodes=route_endpoint_nodes,
                 )
                 if not step_decision.allowed:
                     if step_decision.failures:
@@ -560,59 +731,46 @@ class NetworkRouter:
         raster_spine: RasterSpine,
         masks: _RouteConflictMasks,
     ) -> RouteRecord | None:
-        midpoint = edge.geometry.interpolate(0.5, normalized=True)
-        midpoint_node = self._clamp_node(self.grid_index.projected_to_cell(midpoint.x, midpoint.y))
-        if midpoint_node in {start, goal}:
-            return None
         source_distance_weight = self._source_distance_weight(edge)
-        first = self._a_star(
-            edge.geometry,
+        guide_waypoints = derive_spine_guide_waypoints(
+            line=edge.geometry,
+            raster_spine=raster_spine,
+            grid_index=self.grid_index,
+            start=start,
+            goal=goal,
+            sample_every_cells=2,
+        )
+        attempt = self._guided_a_star(
+            edge,
             start,
-            midpoint_node,
-            self.minor_relaxation_m,
-            self._layer_for_edge(edge),
-            True,
-            raster_spine,
-            edge.process,
-            _edge_top_level_name(edge),
-            edge.priority,
-            masks,
-            source_distance_weight,
-        )
-        second = self._a_star(
-            edge.geometry,
-            midpoint_node,
             goal,
+            guide_waypoints,
             self.minor_relaxation_m,
-            self._layer_for_edge(edge),
             True,
             raster_spine,
-            edge.process,
-            _edge_top_level_name(edge),
-            edge.priority,
             masks,
             source_distance_weight,
         )
-        if not first.success or not second.success:
+        if not attempt.success:
             return None
-        nodes = first.nodes + second.nodes[1:]
         record = self._record_success(
             edge,
-            nodes,
+            attempt.nodes,
             "split_long_edge",
-            first.blocked_cells_considered + second.blocked_cells_considered,
-            first.soft_crossings + second.soft_crossings,
+            attempt.blocked_cells_considered,
+            attempt.soft_crossings,
             degrees,
             raster_spine,
-            hard_blocked_occupied_cells=first.hard_blocked_occupied_cells + second.hard_blocked_occupied_cells,
-            soft_avoid_cells=first.soft_avoid_cells + second.soft_avoid_cells,
+            hard_blocked_occupied_cells=attempt.hard_blocked_occupied_cells,
+            soft_avoid_cells=attempt.soft_avoid_cells,
             retry_modes=("midpoint_split",),
             attempt_count=2,
             retry_count=1,
-            a_star_expansions=first.a_star_expansions + second.a_star_expansions,
-            tile_feasible_rejections=first.tile_feasible_rejections + second.tile_feasible_rejections,
-            tile_feasible_failures=first.tile_feasible_failures + second.tile_feasible_failures,
+            a_star_expansions=attempt.a_star_expansions,
+            tile_feasible_rejections=attempt.tile_feasible_rejections,
+            tile_feasible_failures=attempt.tile_feasible_failures,
             masks=masks,
+            guide_waypoint_count=len(guide_waypoints),
         )
         diagnostics = {**dict(record.diagnostics), "split_intersections": 1}
         return RouteRecord(
@@ -650,6 +808,7 @@ class NetworkRouter:
         tile_feasible_rejections: int = 0,
         tile_feasible_failures: tuple[Mapping[str, Any], ...] = (),
         masks: _RouteConflictMasks | None = None,
+        guide_waypoint_count: int = 2,
     ) -> RouteRecord:
         tile_cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
         masks = masks or _RouteConflictMasks()
@@ -657,12 +816,17 @@ class NetworkRouter:
         metrics = self._faithfulness_metrics(edge, nodes, tile_cells, raster_spine)
         tier = self._faithfulness_tier(edge)
         budget = self.route_faithfulness_config.budget_for_tier(tier)
-        budget_exceeded, budget_reasons = _faithfulness_budget_exceeded(metrics, budget)
+        budget_exceeded, budget_reasons = _faithfulness_budget_exceeded(
+            metrics,
+            budget,
+            reject_shortcut=tier in {"high", "secondary"},
+        )
         spine_diagnostics = self._spine_diagnostics(edge.geometry, nodes, tile_cells, raster_spine)
         diagnostics = {
             **_authority_diagnostics(edge),
             **metrics.as_diagnostics(),
             "route_length_m": metrics.placed_length_m,
+            "guide_waypoint_count": guide_waypoint_count,
             "blocked_cells_considered": blocked_cells_considered,
             "hard_blocked_occupied_cells": hard_blocked_occupied_cells,
             "soft_avoid_cells": soft_avoid_cells,
@@ -951,6 +1115,7 @@ class NetworkRouter:
         source_length = float(edge.geometry.length)
         placed_length = max(0, len(nodes) - 1) * self.grid_index.cell_size_m
         topology_issue_count = int(not nodes or nodes[0] == nodes[-1] and source_length > 0)
+        coverage = _spine_coverage(tile_cells, raster_spine)
         return _RouteFaithfulnessMetrics(
             source_length_m=source_length,
             placed_length_m=placed_length,
@@ -959,7 +1124,10 @@ class NetworkRouter:
             p95_distance_to_source_m=_percentile(distances, 0.95),
             max_distance_to_source_m=max(distances, default=0.0),
             detour_ratio=placed_length / source_length if source_length > 0 else 1.0,
-            placed_source_length_fraction=_placed_source_length_fraction(tile_cells, raster_spine),
+            placed_source_length_fraction=coverage.visited_fraction,
+            visited_spine_fraction=coverage.visited_fraction,
+            skipped_spine_gap_max=coverage.skipped_gap_max,
+            route_shortcut_detected=coverage.shortcut_detected,
             topology_preserved=topology_issue_count == 0,
             topology_issue_count=topology_issue_count,
         )
@@ -1069,14 +1237,13 @@ class NetworkRouter:
         state: tuple[int, int, str],
         current: GridNode,
         neighbor: GridNode,
-        start: GridNode,
-        goal: GridNode,
         incoming_direction: str,
         step_direction: str,
         process: ProcessKind,
         top_level_name: str,
         priority: int,
         masks: _RouteConflictMasks,
+        route_endpoint_nodes: frozenset[GridNode],
     ) -> Any:
         if _state_path_contains(came_from, state, neighbor):
             return _AllowedCellDecision(allowed=False)
@@ -1088,7 +1255,7 @@ class NetworkRouter:
             top_level_name=top_level_name,
             priority=priority,
             masks=masks,
-            allow_lower_priority_connection=current in {start, goal},
+            allow_lower_priority_connection=current in route_endpoint_nodes,
         )
         if not current_decision.allowed:
             return current_decision
@@ -1100,7 +1267,7 @@ class NetworkRouter:
             top_level_name=top_level_name,
             priority=priority,
             masks=masks,
-            allow_lower_priority_connection=neighbor in {start, goal},
+            allow_lower_priority_connection=neighbor in route_endpoint_nodes,
         )
 
     def _spine_diagnostics(
@@ -1115,8 +1282,12 @@ class NetworkRouter:
         skipped = tuple(cell for cell in raster_spine.cells if cell not in route_cell_set)
         extra = tuple(cell for cell in tile_cells if cell not in spine_cell_set)
         route_to_spine = [self._cell_spine_distance(cell, raster_spine) for cell in tile_cells]
+        coverage = _spine_coverage(tile_cells, raster_spine)
         return {
             "raster_spine_cell_count": len(raster_spine.cells),
+            "visited_spine_fraction": coverage.visited_fraction,
+            "skipped_spine_gap_max": coverage.skipped_gap_max,
+            "route_shortcut_detected": coverage.shortcut_detected,
             "mean_spine_distance_m": sum(route_to_spine) / len(route_to_spine) if route_to_spine else 0.0,
             "max_spine_distance_m": max(route_to_spine, default=0.0),
             "skipped_spine_cells": skipped,
@@ -1368,6 +1539,103 @@ class _AllowedCellDecision:
     failures: tuple[Mapping[str, Any], ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class _SpineCoverage:
+    visited_fraction: float
+    skipped_gap_max: int
+    shortcut_detected: bool
+
+
+def _source_subline(line: LineString, start_progress: float, goal_progress: float) -> LineString:
+    if line.length <= 0:
+        return line
+    start_progress = min(max(float(start_progress), 0.0), 1.0)
+    goal_progress = min(max(float(goal_progress), 0.0), 1.0)
+    if goal_progress <= start_progress + 1e-9:
+        return line
+    segment = substring(line, start_progress * line.length, goal_progress * line.length)
+    if isinstance(segment, LineString) and len(segment.coords) >= 2 and segment.length > 0:
+        return segment
+    start = line.interpolate(start_progress, normalized=True)
+    goal = line.interpolate(goal_progress, normalized=True)
+    if start.distance(goal) <= 1e-9:
+        return line
+    return LineString((start, goal))
+
+
+def _spine_progress_slice(
+    raster_spine: RasterSpine,
+    start_progress: float,
+    goal_progress: float,
+    *,
+    start_cell: GridCell,
+    goal_cell: GridCell,
+) -> RasterSpine:
+    lower = min(max(float(start_progress), 0.0), 1.0)
+    upper = min(max(float(goal_progress), 0.0), 1.0)
+    entries = [
+        (cell, progress, distance)
+        for cell, progress, distance in zip(raster_spine.cells, raster_spine.progress, raster_spine.distance_m, strict=True)
+        if lower - 1e-9 <= progress <= upper + 1e-9
+    ]
+    entries.insert(0, (start_cell, lower, 0.0))
+    entries.append((goal_cell, upper, 0.0))
+
+    cells: list[GridCell] = []
+    progress_values: list[float] = []
+    distance_values: list[float] = []
+    for cell, progress, distance in sorted(entries, key=lambda entry: (entry[1], entry[0].xidx, entry[0].yidx)):
+        if cells and cells[-1] == cell:
+            continue
+        cells.append(cell)
+        progress_values.append(progress)
+        distance_values.append(distance)
+
+    return RasterSpine(
+        topology_edge_id=raster_spine.topology_edge_id,
+        cells=tuple(cells),
+        progress=tuple(progress_values),
+        distance_m=tuple(distance_values),
+        source_length_m=max(0.0, upper - lower) * raster_spine.source_length_m,
+    )
+
+
+def _spine_coverage(tile_cells: Sequence[GridCell], raster_spine: RasterSpine) -> _SpineCoverage:
+    if not raster_spine.cells:
+        return _SpineCoverage(
+            visited_fraction=1.0 if tile_cells else 0.0,
+            skipped_gap_max=0,
+            shortcut_detected=False,
+        )
+    route_cells = set(tile_cells)
+    covered = tuple(_spine_cell_is_covered(cell, route_cells) for cell in raster_spine.cells)
+    visited_fraction = sum(1 for value in covered if value) / len(covered)
+    skipped_gap_max = _max_false_run(covered)
+    shortcut_gap_threshold = max(3, math.ceil(len(covered) * 0.35))
+    shortcut_detected = skipped_gap_max >= shortcut_gap_threshold or visited_fraction < 0.70
+    return _SpineCoverage(
+        visited_fraction=visited_fraction,
+        skipped_gap_max=skipped_gap_max,
+        shortcut_detected=shortcut_detected,
+    )
+
+
+def _spine_cell_is_covered(cell: GridCell, route_cells: set[GridCell]) -> bool:
+    return any(max(abs(cell.xidx - route_cell.xidx), abs(cell.yidx - route_cell.yidx)) <= 1 for route_cell in route_cells)
+
+
+def _max_false_run(values: Sequence[bool]) -> int:
+    longest = 0
+    current = 0
+    for value in values:
+        if value:
+            current = 0
+            continue
+        current += 1
+        longest = max(longest, current)
+    return longest
+
+
 def _percentile(values: Sequence[float], percentile: float) -> float:
     if not values:
         return 0.0
@@ -1400,12 +1668,22 @@ def _placed_source_length_fraction(tile_cells: Sequence[GridCell], raster_spine:
 def _faithfulness_budget_exceeded(
     metrics: _RouteFaithfulnessMetrics,
     budget: LinearRouteFaithfulnessBudget,
+    *,
+    reject_shortcut: bool = False,
 ) -> tuple[bool, tuple[str, ...]]:
     reasons = []
+    if metrics.source_length_m >= 96.0 and metrics.mean_distance_to_source_m > budget.mean_distance_m:
+        reasons.append("mean_distance")
     if metrics.p95_distance_to_source_m > budget.p95_distance_m:
         reasons.append("p95_distance")
     if metrics.max_distance_to_source_m > budget.max_distance_m:
         reasons.append("max_distance")
+    if metrics.source_length_m >= 96.0 and metrics.detour_ratio > budget.max_detour_ratio:
+        reasons.append("detour_ratio")
+    if metrics.placed_source_length_fraction < budget.min_placed_source_length_fraction:
+        reasons.append("placed_source_length_fraction")
+    if reject_shortcut and metrics.route_shortcut_detected:
+        reasons.append("route_shortcut")
     if not metrics.topology_preserved:
         reasons.append("topology")
     return bool(reasons), tuple(reasons)

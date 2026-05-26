@@ -518,7 +518,10 @@ class RasterSpine:
     source_length_m: float
 ```
 
-The router may deviate from the spine, but deviations must be penalized and bounded.
+The router uses the raster spine as an ordered guide: significant bends and sparse progress samples become
+waypoints, and each topology edge is routed as subroutes between those waypoints. The route may deviate locally
+from a waypoint to avoid conflicts, but diagnostics must report spine coverage and shortcut risk so long/high
+authority routes cannot silently skip large portions of the source shape.
 
 ### Algorithm options
 

@@ -106,3 +106,77 @@ def test_spine_generation_respects_rotated_grid_axes() -> None:
 
     assert spine.cells == (GridCell(0, 0), GridCell(1, 0), GridCell(2, 0), GridCell(3, 0))
     _assert_ordered_progress(spine)
+
+
+def test_guide_waypoints_include_start_end_and_linestring_bend() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, GridNode
+    from terrain_extraction.osm_extraction.raster_spine import (
+        build_raster_spine,
+        derive_spine_guide_waypoints,
+    )
+
+    line = LineString([(4, 4), (4, 28), (28, 28)])
+    spine = build_raster_spine(topology_edge_id=11, line=line, grid_index=_grid())
+
+    waypoints = derive_spine_guide_waypoints(
+        line=line,
+        raster_spine=spine,
+        grid_index=_grid(),
+        start=GridNode(0, 0),
+        goal=GridNode(3, 3),
+    )
+
+    assert waypoints[0] == (GridCell(0, 0), 0.0)
+    assert waypoints[-1] == (GridCell(3, 3), 1.0)
+    assert (GridCell(0, 3), pytest.approx(0.5)) in waypoints
+
+
+def test_guide_waypoints_sample_long_spine_without_excessive_density() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, GridNode
+    from terrain_extraction.osm_extraction.raster_spine import (
+        build_raster_spine,
+        derive_spine_guide_waypoints,
+    )
+
+    grid = _grid()
+    line = LineString([(4, 4), (60, 4)])
+    spine = build_raster_spine(topology_edge_id=12, line=line, grid_index=grid)
+
+    waypoints = derive_spine_guide_waypoints(
+        line=line,
+        raster_spine=spine,
+        grid_index=grid,
+        start=GridNode(0, 0),
+        goal=GridNode(7, 0),
+        sample_every_cells=1,
+        max_waypoints=5,
+    )
+
+    assert waypoints[0] == (GridCell(0, 0), 0.0)
+    assert waypoints[-1] == (GridCell(7, 0), 1.0)
+    assert 2 < len(waypoints) <= 5
+    assert tuple(progress for _cell, progress in waypoints) == tuple(
+        sorted(progress for _cell, progress in waypoints)
+    )
+
+
+def test_guide_waypoints_remove_consecutive_duplicate_cells() -> None:
+    from terrain_extraction.osm_extraction.models import GridNode
+    from terrain_extraction.osm_extraction.raster_spine import (
+        build_raster_spine,
+        derive_spine_guide_waypoints,
+    )
+
+    line = LineString([(4, 4), (5, 4), (28, 4)])
+    spine = build_raster_spine(topology_edge_id=13, line=line, grid_index=_grid())
+
+    waypoints = derive_spine_guide_waypoints(
+        line=line,
+        raster_spine=spine,
+        grid_index=_grid(),
+        start=GridNode(0, 0),
+        goal=GridNode(3, 0),
+        sample_every_cells=1,
+    )
+
+    assert all(first[0] != second[0] for first, second in zip(waypoints, waypoints[1:], strict=False))

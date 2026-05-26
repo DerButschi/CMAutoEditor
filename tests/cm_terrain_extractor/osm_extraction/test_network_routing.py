@@ -61,6 +61,11 @@ def _edge(edge_id, start, end, *, config_name="primary", priority=1, process=Non
     )
 
 
+def _polyline_edge(edge_id, start_id, end_id, coords, *, config_name="primary", priority=1, process=None):
+    edge = _edge(edge_id, (start_id, coords[0]), (end_id, coords[-1]), config_name=config_name, priority=priority, process=process)
+    return replace(edge, geometry=LineString(coords))
+
+
 def _with_authority(edge, *, cm_type_index=0, tag_rank=0, length=None, source_order=None, top_level_name=None):
     from terrain_extraction.osm_extraction.models import LinearFeatureAuthority
 
@@ -217,7 +222,7 @@ def test_short_lower_rank_spur_may_shift_more_than_primary() -> None:
     assert routes[1].success
     assert routes[0].diagnostics["faithfulness_tier"] == "high"
     assert routes[1].diagnostics["faithfulness_tier"] == "minor"
-    assert routes[1].diagnostics["mean_distance_to_source_m"] > routes[0].diagnostics["mean_distance_to_source_m"]
+    assert routes[1].diagnostics["route_shortcut_detected"] is False
     assert routes[1].diagnostics["detour_ratio"] > routes[0].diagnostics["detour_ratio"]
 
 
@@ -282,6 +287,8 @@ def test_lower_authority_same_family_overlap_shifts_without_intersection() -> No
     assert GridCell(2, 0) in routes[0].tile_cells
     assert GridCell(2, 1) in routes[1].tile_cells
     assert routes[1].diagnostics["conflict_family"] == "same_family"
+    assert routes[1].diagnostics["visited_spine_fraction"] >= 0.90
+    assert routes[1].diagnostics["route_shortcut_detected"] is False
     assert routes[1].diagnostics["forbidden_occupied_cells"]
     assert result.linear_state is not None
     assert result.linear_state.intersection_kind_at(GridCell(2, 0)) == "straight"
@@ -403,9 +410,56 @@ def test_route_follows_preserved_linestring_bend() -> None:
     )
     assert route.raster_spine is not None
     assert route.diagnostics["raster_spine_cell_count"] > 0
+    assert route.diagnostics["guide_waypoint_count"] >= 3
+    assert route.diagnostics["visited_spine_fraction"] == pytest.approx(1.0)
+    assert route.diagnostics["skipped_spine_gap_max"] == 0
+    assert route.diagnostics["route_shortcut_detected"] is False
     assert route.diagnostics["skipped_spine_cells"] == ()
     assert route.diagnostics["extra_detour_cells"] == ()
     assert route.diagnostics["mean_spine_distance_m"] >= 0.0
+
+
+def test_shallow_s_curve_follows_intermediate_vertices() -> None:
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edge = _polyline_edge(0, 0, 1, ((4, 4), (20, 20), (36, 4), (52, 20)))
+
+    route = NetworkRouter(grid_index=_grid(width=8, height=4), corridor_deviation_m=16.0).route(_graph((edge,))).routes[0]
+
+    assert route.success
+    assert route.diagnostics["guide_waypoint_count"] >= 4
+    assert route.diagnostics["visited_spine_fraction"] >= 0.85
+    assert route.diagnostics["skipped_spine_gap_max"] <= 2
+    assert route.diagnostics["route_shortcut_detected"] is False
+
+
+def test_long_bent_primary_has_high_visited_spine_fraction() -> None:
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edge = _with_authority(_polyline_edge(0, 0, 1, ((4, 4), (60, 4), (60, 28), (116, 28))))
+
+    route = NetworkRouter(grid_index=_grid(width=16, height=5), corridor_deviation_m=16.0).route(_graph((edge,))).routes[0]
+
+    assert route.success
+    assert route.diagnostics["faithfulness_tier"] == "high"
+    assert route.diagnostics["guide_waypoint_count"] > 3
+    assert route.diagnostics["visited_spine_fraction"] >= 0.90
+    assert route.diagnostics["route_shortcut_detected"] is False
+
+
+def test_u_shaped_polyline_does_not_shortcut_between_endpoints() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    edge = _with_authority(_polyline_edge(0, 0, 1, ((4, 4), (4, 36), (44, 36), (44, 4))))
+
+    route = NetworkRouter(grid_index=_grid(width=7, height=6), corridor_deviation_m=40.0).route(_graph((edge,))).routes[0]
+
+    assert route.success
+    assert max(cell.yidx for cell in route.tile_cells) >= 4
+    assert GridCell(3, 0) not in route.tile_cells
+    assert route.diagnostics["visited_spine_fraction"] >= 0.85
+    assert route.diagnostics["route_shortcut_detected"] is False
 
 
 def test_diagonalish_route_prefers_source_line_spine_support() -> None:
