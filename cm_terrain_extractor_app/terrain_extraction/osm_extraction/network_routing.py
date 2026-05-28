@@ -531,7 +531,61 @@ class NetworkRouter:
         masks: _RouteConflictMasks,
         source_distance_weight: float,
     ) -> _RouteAttempt:
-        guide_waypoints, guide_relocations = self._routeable_guide_waypoints(edge, guide_waypoints, masks)
+        ordered_waypoints, ordered_relocations = self._routeable_guide_waypoints(
+            edge,
+            guide_waypoints,
+            masks,
+            preserve_progress_order=True,
+        )
+        ordered_attempt = self._guided_a_star_segments(
+            edge,
+            start,
+            goal,
+            ordered_waypoints,
+            corridor_m,
+            allow_soft_crossing,
+            raster_spine,
+            masks,
+            source_distance_weight,
+            ordered_relocations,
+        )
+        if ordered_attempt.success:
+            return ordered_attempt
+
+        fallback_waypoints, fallback_relocations = self._routeable_guide_waypoints(
+            edge,
+            guide_waypoints,
+            masks,
+            preserve_progress_order=False,
+        )
+        if fallback_waypoints == ordered_waypoints:
+            return ordered_attempt
+        return self._guided_a_star_segments(
+            edge,
+            start,
+            goal,
+            fallback_waypoints,
+            corridor_m,
+            allow_soft_crossing,
+            raster_spine,
+            masks,
+            source_distance_weight,
+            fallback_relocations,
+        )
+
+    def _guided_a_star_segments(
+        self,
+        edge: TopologyEdge,
+        start: GridNode,
+        goal: GridNode,
+        guide_waypoints: tuple[tuple[GridCell, float], ...],
+        corridor_m: float,
+        allow_soft_crossing: bool,
+        raster_spine: RasterSpine,
+        masks: _RouteConflictMasks,
+        source_distance_weight: float,
+        guide_relocations: tuple[Mapping[str, Any], ...],
+    ) -> _RouteAttempt:
         waypoints = tuple(
             (GridNode(cell.xidx, cell.yidx), min(max(float(progress), 0.0), 1.0))
             for cell, progress in guide_waypoints
@@ -629,6 +683,8 @@ class NetworkRouter:
         edge: TopologyEdge,
         guide_waypoints: tuple[tuple[GridCell, float], ...],
         masks: _RouteConflictMasks,
+        *,
+        preserve_progress_order: bool = True,
     ) -> tuple[tuple[tuple[GridCell, float], ...], tuple[Mapping[str, Any], ...]]:
         if len(guide_waypoints) <= 2:
             return guide_waypoints, ()
@@ -645,10 +701,14 @@ class NetworkRouter:
                     edge,
                     edge.geometry,
                     cell,
+                    progress,
                     previous_cell,
+                    guide_waypoints[index - 1][1],
                     next_cell,
+                    guide_waypoints[index + 1][1],
                     layer,
                     masks,
+                    preserve_progress_order=preserve_progress_order,
                 )
                 if candidate != cell:
                     decision = self._guide_cell_decision(edge, cell, previous_cell, next_cell, layer, masks)
@@ -670,48 +730,61 @@ class NetworkRouter:
         edge: TopologyEdge,
         line: LineString,
         cell: GridCell,
+        progress: float,
         previous_cell: GridCell,
+        previous_progress: float,
         next_cell: GridCell,
+        next_progress: float,
         layer: LayerKind,
         masks: _RouteConflictMasks,
+        *,
+        preserve_progress_order: bool,
     ) -> GridCell:
         decision = self._guide_cell_decision(edge, cell, previous_cell, next_cell, layer, masks)
         if decision.allowed:
             return cell
         if _only_cross_family_process_avoidance(decision.failures) and not _supports_cross_family_endpoint_relocation(edge):
             return cell
+        progress_window = (
+            (previous_progress + progress) / 2.0,
+            (progress + next_progress) / 2.0,
+        )
         for radius in (1, 2):
-            candidates = [
-                GridCell(cell.xidx + dx, cell.yidx + dy)
-                for dx in range(-radius, radius + 1)
-                for dy in range(-radius, radius + 1)
-                if abs(dx) + abs(dy) <= radius
-            ]
-            routeable = [
-                candidate
-                for candidate in candidates
-                if self._relocation_cell_allowed(
-                    edge=edge,
-                    candidate=candidate,
-                    reference_cell=cell,
-                    other_cell=next_cell,
-                    layer=layer,
-                    masks=masks,
-                    incoming_dir=_direction_toward_cell(candidate, previous_cell),
-                    outgoing_dir=_direction_toward_cell(candidate, next_cell),
-                )
-            ]
+            routeable: list[tuple[GridCell, float]] = []
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if abs(dx) + abs(dy) > radius:
+                        continue
+                    candidate = GridCell(cell.xidx + dx, cell.yidx + dy)
+                    candidate_progress = self._cell_source_progress(line, candidate)
+                    if preserve_progress_order and not (
+                        progress_window[0] - 1e-9 <= candidate_progress <= progress_window[1] + 1e-9
+                    ):
+                        continue
+                    if not self._relocation_cell_allowed(
+                        edge=edge,
+                        candidate=candidate,
+                        reference_cell=cell,
+                        other_cell=next_cell,
+                        layer=layer,
+                        masks=masks,
+                        incoming_dir=_direction_toward_cell(candidate, previous_cell),
+                        outgoing_dir=_direction_toward_cell(candidate, next_cell),
+                    ):
+                        continue
+                    routeable.append((candidate, candidate_progress))
             if routeable:
                 return min(
                     routeable,
-                    key=lambda candidate: (
-                        self.grid_index.cell_center(candidate).distance(line),
-                        0 if candidate in masks.preferred_adjacency_cells else 1,
-                        abs(candidate.xidx - cell.xidx) + abs(candidate.yidx - cell.yidx),
-                        candidate.yidx,
-                        candidate.xidx,
+                    key=lambda item: (
+                        abs(item[1] - progress) if preserve_progress_order else 0.0,
+                        self.grid_index.cell_center(item[0]).distance(line),
+                        0 if item[0] in masks.preferred_adjacency_cells else 1,
+                        abs(item[0].xidx - cell.xidx) + abs(item[0].yidx - cell.yidx),
+                        item[0].yidx,
+                        item[0].xidx,
                     ),
-                )
+                )[0]
         return cell
 
     def _guide_cell_decision(
@@ -1430,6 +1503,12 @@ class NetworkRouter:
     def _node_source_distance(self, node: GridNode, line: LineString) -> float:
         point = self.grid_index.cell_center(GridCell(node.xidx, node.yidx))
         return point.distance(line)
+
+    def _cell_source_progress(self, line: LineString, cell: GridCell) -> float:
+        if line.length <= 0:
+            return 0.0
+        point = self.grid_index.cell_center(cell)
+        return min(max(line.project(point) / line.length, 0.0), 1.0)
 
     def _cached_node_source_distance(
         self,

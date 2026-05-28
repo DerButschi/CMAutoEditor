@@ -473,6 +473,69 @@ def test_industrial_fences_route_without_cross_family_drop_regression() -> None:
     assert all(failure["failure_reason"] != "process_avoidance" for failure in catalog_failures)
 
 
+def test_buildings_ringmauer_node_1_to_2_preserves_ordered_spine_regression() -> None:
+    from terrain_extraction import osm_processor as osm_processor_module
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+    from terrain_extraction.osm_extraction_benchmark import (
+        _bbox_from_fixture,
+        _FeatureCollection,
+        load_fixture,
+    )
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    fixture_data = load_fixture(Path("test/buildings_ringmauer.geojson"))
+    osm_processor_module.st.progress = lambda *args, **kwargs: _NullProgress()
+    processor = OSMProcessor(
+        profile="cold_war",
+        bbox=_bbox_from_fixture(fixture_data),
+        path_to_config="default_osm_config.json",
+    )
+    processor.pipeline.context.seed = 123
+    processor.pipeline.context.rng = np.random.default_rng(123)
+    processor.preprocess_osm_data(_FeatureCollection(fixture_data))
+    linear_processes = {ProcessKind.ROAD, ProcessKind.RAIL, ProcessKind.STREAM, ProcessKind.FENCE}
+    features = tuple(
+        feature for feature in processor._typed_features_from_matched_elements() if feature.process in linear_processes
+    )
+    topology = NetworkTopologyBuilder(clip_geometry=processor.effective_bbox_polygon).build(features)
+    catalogs = processor._tile_catalogs_for(features)
+
+    routing = NetworkRouter(grid_index=processor.grid_index, catalogs=catalogs).route(topology)
+    route = next(
+        route
+        for route in routing.routes
+        if (route.start_node_id, route.end_node_id) == (1, 2)
+    )
+
+    assert routing.failed_count == 0
+    assert len(set(route.tile_cells)) == len(route.tile_cells)
+    assert route.tile_cells == (
+        GridCell(49, 83),
+        GridCell(50, 83),
+        GridCell(51, 83),
+        GridCell(52, 83),
+        GridCell(52, 82),
+        GridCell(53, 82),
+        GridCell(53, 81),
+        GridCell(53, 80),
+        GridCell(54, 80),
+        GridCell(55, 80),
+        GridCell(55, 79),
+        GridCell(55, 78),
+        GridCell(54, 78),
+        GridCell(54, 77),
+        GridCell(54, 76),
+        GridCell(54, 75),
+        GridCell(54, 74),
+        GridCell(54, 73),
+    )
+    assert route.diagnostics["visited_spine_fraction"] == pytest.approx(1.0)
+    assert route.diagnostics["route_shortcut_detected"] is False
+    assert route.diagnostics["forced_relaxation"] is None
+
+
 class _NullProgress:
     def progress(self, *args: object, **kwargs: object) -> _NullProgress:
         return self
