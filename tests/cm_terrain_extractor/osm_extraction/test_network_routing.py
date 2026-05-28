@@ -265,6 +265,8 @@ def test_cross_family_route_failure_reports_policy_diagnostics_deterministically
     assert stream.diagnostics["soft_avoid_cells"] >= 1
     assert stream.diagnostics["false_intersection_avoided"] is True
     assert stream.diagnostics["state_skipped_conflict_cells"]
+    assert stream.diagnostics["cross_family_policy_failures"]
+    assert stream.diagnostics["tile_catalog_failures"] == ()
     assert first.linear_state is not None
     assert all(first.linear_state.process_at_cell[cell] is not ProcessKind.STREAM for cell in stream.diagnostics["state_skipped_conflict_cells"])
     assert first.diagnostics["false_intersections_avoided"] >= 1
@@ -364,8 +366,116 @@ def test_fence_near_road_prefers_adjacency_without_merging() -> None:
     assert set(routes[0].tile_cells).isdisjoint(routes[1].tile_cells)
     assert {cell.yidx for cell in routes[1].tile_cells} == {1}
     assert GridCell(2, 1) in routes[1].diagnostics["preferred_adjacency_cells"]
+    assert routes[1].diagnostics["tile_catalog_failures"] == ()
     assert result.linear_state is not None
     assert all(result.linear_state.process_at_cell[cell] is ProcessKind.FENCE for cell in routes[1].tile_cells)
+
+
+def test_fence_endpoint_on_road_relocates_to_adjacent_free_cell() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    road = _with_authority(_edge(0, (0, (0, 4)), (1, (40, 4)), config_name="primary", priority=1))
+    fence = _with_authority(
+        _edge(1, (2, (20, 4)), (3, (20, 36)), config_name="fence", priority=8, process=ProcessKind.FENCE),
+        top_level_name="fence",
+    )
+
+    result = NetworkRouter(grid_index=_grid(width=6, height=6), corridor_deviation_m=8.0).route(_graph((road, fence)))
+    routes = {route.edge_id: route for route in result.routes}
+    fence_route = routes[1]
+
+    assert fence_route.success
+    assert GridCell(2, 0) not in fence_route.tile_cells
+    assert fence_route.diagnostics["endpoint_relocated"] is True
+    assert fence_route.diagnostics["endpoint_relocations"][0]["endpoint"] == "start"
+    assert fence_route.diagnostics["endpoint_relocations"][0]["original_cell"] == GridCell(2, 0)
+    assert fence_route.diagnostics["endpoint_relocations"][0]["relocated_cell"] == GridCell(2, 1)
+    assert (
+        fence_route.diagnostics["endpoint_relocations"][0]["relocation_reason"]
+        == "cross_family_process_avoidance"
+    )
+    assert fence_route.diagnostics["cross_family_policy_failures"]
+    assert fence_route.diagnostics["tile_catalog_failures"] == ()
+    assert result.linear_state is not None
+    assert result.linear_state.process_at_cell[GridCell(2, 0)] is ProcessKind.ROAD
+
+
+def test_fence_crossing_road_uses_non_reserved_conflict_hole() -> None:
+    from terrain_extraction.osm_extraction.models import GridCell, ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+
+    road = _with_authority(_edge(0, (0, (4, 20)), (1, (36, 20)), config_name="primary", priority=1))
+    fence = _with_authority(
+        _edge(1, (2, (20, 4)), (3, (20, 36)), config_name="wall", priority=8, process=ProcessKind.FENCE),
+        top_level_name="wall",
+    )
+
+    result = NetworkRouter(grid_index=_grid(width=5, height=5), corridor_deviation_m=0.0).route(_graph((road, fence)))
+    routes = {route.edge_id: route for route in result.routes}
+    fence_route = routes[1]
+    conflict_cell = GridCell(2, 2)
+
+    assert fence_route.success
+    assert conflict_cell in fence_route.tile_cells
+    assert fence_route.diagnostics["forced_relaxation"] == "soft_crossing"
+    assert conflict_cell in fence_route.diagnostics["state_skipped_conflict_cells"]
+    assert fence_route.diagnostics["cross_family_policy_failures"]
+    assert fence_route.diagnostics["tile_catalog_failures"] == ()
+    assert result.linear_state is not None
+    assert result.linear_state.process_at_cell[conflict_cell] is ProcessKind.ROAD
+    assert result.linear_state.intersection_kind_at(conflict_cell) == "straight"
+
+
+def test_industrial_fences_route_without_cross_family_drop_regression() -> None:
+    from collections import Counter
+
+    from terrain_extraction import osm_processor as osm_processor_module
+    from terrain_extraction.osm_extraction.models import ProcessKind
+    from terrain_extraction.osm_extraction.network_routing import NetworkRouter
+    from terrain_extraction.osm_extraction.network_topology import NetworkTopologyBuilder
+    from terrain_extraction.osm_extraction_benchmark import (
+        _bbox_from_fixture,
+        _FeatureCollection,
+        load_fixture,
+    )
+    from terrain_extraction.osm_processor import OSMProcessor
+
+    fixture_data = load_fixture(Path("test/industrial_fences.geojson"))
+    osm_processor_module.st.progress = lambda *args, **kwargs: _NullProgress()
+    processor = OSMProcessor(profile="cold_war", bbox=_bbox_from_fixture(fixture_data), path_to_config="default_osm_config.json")
+    processor.preprocess_osm_data(_FeatureCollection(fixture_data))
+    linear_processes = {ProcessKind.ROAD, ProcessKind.RAIL, ProcessKind.STREAM, ProcessKind.FENCE}
+    features = tuple(feature for feature in processor._typed_features_from_matched_elements() if feature.process in linear_processes)
+    topology = NetworkTopologyBuilder(clip_geometry=processor.effective_bbox_polygon).build(features)
+    catalogs = processor._tile_catalogs_for(features)
+
+    routing = NetworkRouter(grid_index=processor.grid_index, catalogs=catalogs).route(topology)
+    fence_routes = tuple(route for route in routing.routes if route.process is ProcessKind.FENCE)
+    long_fence_routes = tuple(
+        route for route in fence_routes if route.config_name == "fence" and float(route.diagnostics["source_length_m"]) > 64.0
+    )
+    fence_failure_reasons = Counter(route.diagnostics.get("failure_reason") for route in fence_routes if not route.success)
+    policy_failures = tuple(
+        failure
+        for route in fence_routes
+        for failure in route.diagnostics.get("cross_family_policy_failures", ())
+    )
+    catalog_failures = tuple(
+        failure
+        for route in fence_routes
+        for failure in route.diagnostics.get("tile_catalog_failures", ())
+    )
+
+    assert any(route.success for route in long_fence_routes)
+    assert fence_failure_reasons["cross_family_conflict"] < 6
+    assert any(failure["failure_reason"] == "process_avoidance" for failure in policy_failures)
+    assert all(failure["failure_reason"] != "process_avoidance" for failure in catalog_failures)
+
+
+class _NullProgress:
+    def progress(self, *args: object, **kwargs: object) -> _NullProgress:
+        return self
 
 
 def test_route_cells_are_output_cells_not_grid_corner_edges() -> None:

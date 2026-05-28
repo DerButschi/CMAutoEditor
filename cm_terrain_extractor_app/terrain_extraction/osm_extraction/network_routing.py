@@ -18,6 +18,7 @@ from terrain_extraction.osm_extraction.direction_resolution import (
     CARDINAL_DIRECTIONS,
     DIRECTION_STEPS,
     OPPOSITE_DIRECTIONS,
+    direction_between_cells,
     supports_diagonal_directions,
 )
 from terrain_extraction.osm_extraction.grid_index import GridIndex
@@ -132,6 +133,10 @@ class _RouteAttempt:
     soft_avoid_cells: int = 0
     tile_feasible_rejections: int = 0
     tile_feasible_failures: tuple[Mapping[str, Any], ...] = ()
+    tile_catalog_failures: tuple[Mapping[str, Any], ...] = ()
+    linear_state_failures: tuple[Mapping[str, Any], ...] = ()
+    cross_family_policy_failures: tuple[Mapping[str, Any], ...] = ()
+    guide_relocations: tuple[Mapping[str, Any], ...] = ()
     a_star_expansions: int = 0
 
     @property
@@ -146,11 +151,36 @@ class _RouteConflictMasks:
     soft_avoid_cells: frozenset[GridCell] = frozenset()
     preferred_adjacency_cells: frozenset[GridCell] = frozenset()
     allowed_cross_family_conflict_cells: frozenset[GridCell] = frozenset()
+    deferred_cross_family_conflict_cells: frozenset[GridCell] = frozenset()
     state_skip_cells: frozenset[GridCell] = frozenset()
 
     @property
     def requires_displacement(self) -> bool:
-        return bool(self.forbidden_occupied_cells or self.soft_avoid_cells or self.preferred_adjacency_cells)
+        return bool(
+            self.forbidden_occupied_cells
+            or self.soft_avoid_cells
+            or self.preferred_adjacency_cells
+            or self.deferred_cross_family_conflict_cells
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _EndpointRelocationResult:
+    start: GridNode
+    goal: GridNode
+    relocations: tuple[Mapping[str, Any], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _RouteEdgeContext:
+    start: GridNode
+    goal: GridNode
+    raster_spine: RasterSpine
+    guide_waypoints: tuple[tuple[GridCell, float], ...]
+    masks: _RouteConflictMasks
+    attempts: tuple[tuple[str | None, float, bool, bool], ...]
+    source_distance_weight: float
+    endpoint_relocations: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,23 +323,10 @@ class NetworkRouter:
         anchor_plans: Mapping[int, Any],
     ) -> RouteRecord:
         route_started_at = time.perf_counter()
-        start = self._anchor_for_edge_node(edge, edge.start_node_id, anchors, anchor_plans)
-        goal = self._anchor_for_edge_node(edge, edge.end_node_id, anchors, anchor_plans)
-        raster_spine = build_raster_spine(
-            topology_edge_id=edge.edge_id,
-            line=edge.geometry,
-            grid_index=self.grid_index,
-        )
-        guide_waypoints = derive_spine_guide_waypoints(
-            line=edge.geometry,
-            raster_spine=raster_spine,
-            grid_index=self.grid_index,
-            start=start,
-            goal=goal,
-        )
-        masks = self._route_conflict_masks(edge, start, goal, degrees)
-        attempts = self._routing_attempts(edge, masks)
-        source_distance_weight = self._source_distance_weight(edge)
+        context = self._route_edge_context(edge, anchors, degrees, anchor_plans)
+        start = context.start
+        goal = context.goal
+        masks = context.masks
 
         total_blocked = 0
         total_hard_blocked = 0
@@ -317,31 +334,42 @@ class NetworkRouter:
         total_tile_rejections = 0
         total_expansions = 0
         attempt_count = 0
-        tile_failures: list[Mapping[str, Any]] = []
+        tile_catalog_failures: list[Mapping[str, Any]] = []
+        linear_state_failures: list[Mapping[str, Any]] = []
+        cross_family_policy_failures: list[Mapping[str, Any]] = [
+            relocation["failure"]
+            for relocation in context.endpoint_relocations
+            if "failure" in relocation
+        ]
         faithfulness_rejections: list[Mapping[str, Any]] = []
         retry_modes: list[str] = []
-        for relaxation, corridor_m, soft_crossing in attempts:
+        guide_relocations: tuple[Mapping[str, Any], ...] = ()
+        for relaxation, corridor_m, soft_crossing, conflict_holes in context.attempts:
             attempt_count += 1
             retry_mode = _retry_mode(relaxation)
             if retry_mode is not None:
                 retry_modes.append(retry_mode)
+            attempt_masks = _masks_with_deferred_conflict_holes(masks) if conflict_holes else masks
             attempt = self._guided_a_star(
                 edge,
                 start,
                 goal,
-                guide_waypoints,
+                context.guide_waypoints,
                 corridor_m,
                 soft_crossing,
-                raster_spine,
-                masks,
-                source_distance_weight,
+                context.raster_spine,
+                attempt_masks,
+                context.source_distance_weight,
             )
             total_blocked += attempt.blocked_cells_considered
             total_hard_blocked += attempt.hard_blocked_occupied_cells
             total_soft_avoid += attempt.soft_avoid_cells
             total_tile_rejections += attempt.tile_feasible_rejections
             total_expansions += attempt.a_star_expansions
-            tile_failures.extend(dict(failure) for failure in attempt.tile_feasible_failures)
+            _extend_failures(tile_catalog_failures, attempt.tile_catalog_failures)
+            _extend_failures(linear_state_failures, attempt.linear_state_failures)
+            _extend_failures(cross_family_policy_failures, attempt.cross_family_policy_failures)
+            guide_relocations = attempt.guide_relocations or guide_relocations
             if attempt.success:
                 route = self._record_success(
                     edge,
@@ -350,7 +378,7 @@ class NetworkRouter:
                     total_blocked,
                     attempt.soft_crossings,
                     degrees,
-                    raster_spine,
+                    context.raster_spine,
                     hard_blocked_occupied_cells=total_hard_blocked,
                     soft_avoid_cells=total_soft_avoid,
                     retry_modes=tuple(retry_modes),
@@ -358,9 +386,13 @@ class NetworkRouter:
                     retry_count=len(retry_modes),
                     a_star_expansions=total_expansions,
                     tile_feasible_rejections=total_tile_rejections,
-                    tile_feasible_failures=tuple(tile_failures),
-                    masks=masks,
-                    guide_waypoint_count=len(guide_waypoints),
+                    tile_catalog_failures=tuple(tile_catalog_failures),
+                    linear_state_failures=tuple(linear_state_failures),
+                    cross_family_policy_failures=tuple(cross_family_policy_failures),
+                    masks=attempt_masks,
+                    guide_waypoint_count=len(context.guide_waypoints),
+                    endpoint_relocations=context.endpoint_relocations,
+                    guide_relocations=guide_relocations,
                 )
                 if route.diagnostics.get("faithfulness_budget_exceeded") and relaxation is None:
                     faithfulness_rejections.append(_faithfulness_rejection_diagnostics(route, relaxation))
@@ -368,7 +400,7 @@ class NetworkRouter:
                 return _route_with_elapsed(route, route_started_at)
 
         if edge.geometry.length > self.split_long_edge_m:
-            split_record = self._try_split_route(edge, start, goal, degrees, raster_spine, masks)
+            split_record = self._try_split_route(edge, start, goal, degrees, context.raster_spine, masks)
             if split_record is not None:
                 diagnostics = {
                     **dict(split_record.diagnostics),
@@ -384,8 +416,15 @@ class NetworkRouter:
 
         failure_reason = (
             "faithfulness_budget_exceeded"
-            if faithfulness_rejections and not tile_failures and total_tile_rejections == 0
-            else _route_failure_reason(tile_failures, total_tile_rejections)
+            if faithfulness_rejections
+            and not tile_catalog_failures
+            and not linear_state_failures
+            and not cross_family_policy_failures
+            and total_tile_rejections == 0
+            else _route_failure_reason(
+                (*tile_catalog_failures, *linear_state_failures, *cross_family_policy_failures),
+                total_tile_rejections,
+            )
         )
         failure_faithfulness = dict(faithfulness_rejections[-1]) if faithfulness_rejections else {}
         tier = self._faithfulness_tier(edge)
@@ -397,7 +436,7 @@ class NetworkRouter:
             process=edge.process,
             config_name=edge.config_name,
             priority=edge.priority,
-            raster_spine=raster_spine,
+            raster_spine=context.raster_spine,
             success=False,
             cm_type=edge.cm_type,
             linear_authority=edge.linear_authority,
@@ -406,7 +445,7 @@ class NetworkRouter:
                 "failure_reason": failure_reason,
                 "faithfulness_rejections": tuple(faithfulness_rejections),
                 **failure_faithfulness,
-                "conflict_family": _conflict_family(tile_failures),
+                "conflict_family": _conflict_family((*linear_state_failures, *cross_family_policy_failures)),
                 "source_length_m": edge.geometry.length,
                 "placed_length_m": 0.0,
                 "placed_length_m_or_cells": 0.0,
@@ -415,10 +454,10 @@ class NetworkRouter:
                 "faithfulness_tier": tier,
                 "faithfulness_budget": budget.to_dict(),
                 "faithfulness_budget_exceeded": bool(faithfulness_rejections),
-                "guide_waypoint_count": len(guide_waypoints),
-                "raster_spine_cell_count": len(raster_spine.cells),
+                "guide_waypoint_count": len(context.guide_waypoints),
+                "raster_spine_cell_count": len(context.raster_spine.cells),
                 "visited_spine_fraction": 0.0,
-                "skipped_spine_gap_max": len(raster_spine.cells),
+                "skipped_spine_gap_max": len(context.raster_spine.cells),
                 "route_shortcut_detected": False,
                 "blocked_cells_considered": total_blocked,
                 "hard_blocked_occupied_cells": total_hard_blocked,
@@ -426,17 +465,59 @@ class NetworkRouter:
                 "false_intersection_avoided": bool(edge.diagnostics.get("false_intersection_avoided", False)),
                 "corridor_deviation_m": self.corridor_deviation_m,
                 "tile_feasible_rejections": total_tile_rejections,
-                "tile_feasible_failures": tuple(tile_failures),
+                "tile_feasible_failures": tuple(tile_catalog_failures),
+                "tile_catalog_failures": tuple(tile_catalog_failures),
+                "linear_state_failures": tuple(linear_state_failures),
+                "cross_family_policy_failures": tuple(cross_family_policy_failures),
                 "attempt_count": attempt_count,
                 "retry_count": len(retry_modes),
                 "a_star_expansions": total_expansions,
                 "retry_modes": tuple(retry_modes),
                 **_mask_diagnostics(masks),
+                **_relocation_diagnostics(context.endpoint_relocations, guide_relocations),
                 "source_feature_ids": edge.feature_ids,
                 "source_indices": edge.source_indices,
             },
         )
         return _route_with_elapsed(route, route_started_at)
+
+    def _route_edge_context(
+        self,
+        edge: TopologyEdge,
+        anchors: Mapping[int, GridNode],
+        degrees: Mapping[int, int],
+        anchor_plans: Mapping[int, Any],
+    ) -> _RouteEdgeContext:
+        start = self._anchor_for_edge_node(edge, edge.start_node_id, anchors, anchor_plans)
+        goal = self._anchor_for_edge_node(edge, edge.end_node_id, anchors, anchor_plans)
+        masks = self._route_conflict_masks(edge, start, goal, degrees)
+        endpoint_relocation = self._relocate_route_endpoints(edge, start, goal)
+        start = endpoint_relocation.start
+        goal = endpoint_relocation.goal
+        if endpoint_relocation.relocations:
+            masks = self._route_conflict_masks(edge, start, goal, degrees)
+        raster_spine = build_raster_spine(
+            topology_edge_id=edge.edge_id,
+            line=edge.geometry,
+            grid_index=self.grid_index,
+        )
+        guide_waypoints = derive_spine_guide_waypoints(
+            line=edge.geometry,
+            raster_spine=raster_spine,
+            grid_index=self.grid_index,
+            start=start,
+            goal=goal,
+        )
+        return _RouteEdgeContext(
+            start=start,
+            goal=goal,
+            raster_spine=raster_spine,
+            guide_waypoints=guide_waypoints,
+            masks=masks,
+            attempts=tuple(self._routing_attempts(edge, masks)),
+            source_distance_weight=self._source_distance_weight(edge),
+            endpoint_relocations=endpoint_relocation.relocations,
+        )
 
     def _guided_a_star(
         self,
@@ -450,7 +531,7 @@ class NetworkRouter:
         masks: _RouteConflictMasks,
         source_distance_weight: float,
     ) -> _RouteAttempt:
-        guide_waypoints = self._routeable_guide_waypoints(edge, guide_waypoints, masks)
+        guide_waypoints, guide_relocations = self._routeable_guide_waypoints(edge, guide_waypoints, masks)
         waypoints = tuple(
             (GridNode(cell.xidx, cell.yidx), min(max(float(progress), 0.0), 1.0))
             for cell, progress in guide_waypoints
@@ -464,7 +545,13 @@ class NetworkRouter:
         total_soft_avoid = 0
         total_tile_rejections = 0
         total_expansions = 0
-        tile_failures: list[Mapping[str, Any]] = []
+        tile_catalog_failures: list[Mapping[str, Any]] = []
+        linear_state_failures: list[Mapping[str, Any]] = []
+        cross_family_policy_failures: list[Mapping[str, Any]] = [
+            relocation["failure"]
+            for relocation in guide_relocations
+            if "failure" in relocation
+        ]
         nodes: tuple[GridNode, ...] = ()
         route_endpoint_nodes = frozenset((start, goal))
 
@@ -502,7 +589,9 @@ class NetworkRouter:
             total_soft_avoid += attempt.soft_avoid_cells
             total_tile_rejections += attempt.tile_feasible_rejections
             total_expansions += attempt.a_star_expansions
-            tile_failures.extend(dict(failure) for failure in attempt.tile_feasible_failures)
+            _extend_failures(tile_catalog_failures, attempt.tile_catalog_failures)
+            _extend_failures(linear_state_failures, attempt.linear_state_failures)
+            _extend_failures(cross_family_policy_failures, attempt.cross_family_policy_failures)
             if not attempt.success:
                 return _RouteAttempt(
                     nodes=(),
@@ -511,7 +600,11 @@ class NetworkRouter:
                     hard_blocked_occupied_cells=total_hard_blocked,
                     soft_avoid_cells=total_soft_avoid,
                     tile_feasible_rejections=total_tile_rejections,
-                    tile_feasible_failures=tuple(tile_failures),
+                    tile_feasible_failures=tuple(tile_catalog_failures),
+                    tile_catalog_failures=tuple(tile_catalog_failures),
+                    linear_state_failures=tuple(linear_state_failures),
+                    cross_family_policy_failures=tuple(cross_family_policy_failures),
+                    guide_relocations=guide_relocations,
                     a_star_expansions=total_expansions,
                 )
             nodes = attempt.nodes if not nodes else nodes + attempt.nodes[1:]
@@ -523,7 +616,11 @@ class NetworkRouter:
             hard_blocked_occupied_cells=total_hard_blocked,
             soft_avoid_cells=total_soft_avoid,
             tile_feasible_rejections=total_tile_rejections,
-            tile_feasible_failures=tuple(tile_failures),
+            tile_feasible_failures=tuple(tile_catalog_failures),
+            tile_catalog_failures=tuple(tile_catalog_failures),
+            linear_state_failures=tuple(linear_state_failures),
+            cross_family_policy_failures=tuple(cross_family_policy_failures),
+            guide_relocations=guide_relocations,
             a_star_expansions=total_expansions,
         )
 
@@ -532,29 +629,56 @@ class NetworkRouter:
         edge: TopologyEdge,
         guide_waypoints: tuple[tuple[GridCell, float], ...],
         masks: _RouteConflictMasks,
-    ) -> tuple[tuple[GridCell, float], ...]:
+    ) -> tuple[tuple[tuple[GridCell, float], ...], tuple[Mapping[str, Any], ...]]:
         if len(guide_waypoints) <= 2:
-            return guide_waypoints
+            return guide_waypoints, ()
         layer = self._layer_for_edge(edge)
         adjusted: list[tuple[GridCell, float]] = []
+        relocations: list[Mapping[str, Any]] = []
         for index, (cell, progress) in enumerate(guide_waypoints):
             if index == 0 or index == len(guide_waypoints) - 1:
                 candidate = cell
             else:
-                candidate = self._nearest_routeable_guide_cell(edge.geometry, cell, layer, masks)
+                previous_cell = guide_waypoints[index - 1][0]
+                next_cell = guide_waypoints[index + 1][0]
+                candidate = self._nearest_routeable_guide_cell(
+                    edge,
+                    edge.geometry,
+                    cell,
+                    previous_cell,
+                    next_cell,
+                    layer,
+                    masks,
+                )
+                if candidate != cell:
+                    decision = self._guide_cell_decision(edge, cell, previous_cell, next_cell, layer, masks)
+                    if _only_cross_family_process_avoidance(decision.failures):
+                        relocation = _relocation_entry(
+                            original_cell=cell,
+                            relocated_cell=candidate,
+                            relocation_reason="cross_family_process_avoidance",
+                            failure=decision.failures[0] if decision.failures else None,
+                        )
+                        relocations.append(relocation)
             if adjusted and adjusted[-1][0] == candidate:
                 continue
             adjusted.append((candidate, progress))
-        return tuple(adjusted)
+        return tuple(adjusted), tuple(relocations)
 
     def _nearest_routeable_guide_cell(
         self,
+        edge: TopologyEdge,
         line: LineString,
         cell: GridCell,
+        previous_cell: GridCell,
+        next_cell: GridCell,
         layer: LayerKind,
         masks: _RouteConflictMasks,
     ) -> GridCell:
-        if self._guide_cell_routeable(cell, layer, masks):
+        decision = self._guide_cell_decision(edge, cell, previous_cell, next_cell, layer, masks)
+        if decision.allowed:
+            return cell
+        if _only_cross_family_process_avoidance(decision.failures) and not _supports_cross_family_endpoint_relocation(edge):
             return cell
         for radius in (1, 2):
             candidates = [
@@ -563,12 +687,26 @@ class NetworkRouter:
                 for dy in range(-radius, radius + 1)
                 if abs(dx) + abs(dy) <= radius
             ]
-            routeable = [candidate for candidate in candidates if self._guide_cell_routeable(candidate, layer, masks)]
+            routeable = [
+                candidate
+                for candidate in candidates
+                if self._relocation_cell_allowed(
+                    edge=edge,
+                    candidate=candidate,
+                    reference_cell=cell,
+                    other_cell=next_cell,
+                    layer=layer,
+                    masks=masks,
+                    incoming_dir=_direction_toward_cell(candidate, previous_cell),
+                    outgoing_dir=_direction_toward_cell(candidate, next_cell),
+                )
+            ]
             if routeable:
                 return min(
                     routeable,
                     key=lambda candidate: (
                         self.grid_index.cell_center(candidate).distance(line),
+                        0 if candidate in masks.preferred_adjacency_cells else 1,
                         abs(candidate.xidx - cell.xidx) + abs(candidate.yidx - cell.yidx),
                         candidate.yidx,
                         candidate.xidx,
@@ -576,17 +714,42 @@ class NetworkRouter:
                 )
         return cell
 
-    def _guide_cell_routeable(
+    def _guide_cell_decision(
         self,
+        edge: TopologyEdge,
         cell: GridCell,
+        previous_cell: GridCell,
+        next_cell: GridCell,
         layer: LayerKind,
         masks: _RouteConflictMasks,
-    ) -> bool:
+    ) -> _AllowedCellDecision:
         if not (0 <= cell.xidx < self.grid_index.width and 0 <= cell.yidx < self.grid_index.height):
-            return False
+            return _AllowedCellDecision(allowed=False)
         if cell in masks.forbidden_occupied_cells:
-            return False
-        return not self._cell_is_blocked(cell, layer)
+            return _AllowedCellDecision(
+                allowed=False,
+                failures=(
+                    _route_failure(
+                        edge.process,
+                        cell,
+                        "unplanned_same_family_overlap",
+                        top_level_name=_edge_top_level_name(edge),
+                    ),
+                ),
+            )
+        if self._cell_is_blocked(cell, layer):
+            return _AllowedCellDecision(allowed=False)
+        if self.linear_state is None:
+            return _AllowedCellDecision()
+        decision = self.linear_state.can_enter_cell(
+            cell,
+            incoming_dir=_direction_toward_cell(cell, previous_cell),
+            outgoing_dir=_direction_toward_cell(cell, next_cell),
+            process=edge.process,
+            top_level_name=_edge_top_level_name(edge),
+            priority=edge.priority,
+        )
+        return _AllowedCellDecision(allowed=decision.allowed, failures=decision.failures)
 
     def _a_star(  # noqa: PLR0915
         self,
@@ -622,7 +785,9 @@ class NetworkRouter:
         hard_blocked_occupied_cells = 0
         soft_avoid_cells = 0
         tile_feasible_rejections = 0
-        tile_feasible_failures: list[Mapping[str, Any]] = []
+        tile_catalog_failures: list[Mapping[str, Any]] = []
+        linear_state_failures: list[Mapping[str, Any]] = []
+        cross_family_policy_failures: list[Mapping[str, Any]] = []
         a_star_expansions = 0
 
         while open_heap:
@@ -637,7 +802,10 @@ class NetworkRouter:
                     hard_blocked_occupied_cells=hard_blocked_occupied_cells,
                     soft_avoid_cells=soft_avoid_cells,
                     tile_feasible_rejections=tile_feasible_rejections,
-                    tile_feasible_failures=tuple(tile_feasible_failures),
+                    tile_feasible_failures=tuple(tile_catalog_failures),
+                    tile_catalog_failures=tuple(tile_catalog_failures),
+                    linear_state_failures=tuple(linear_state_failures),
+                    cross_family_policy_failures=tuple(cross_family_policy_failures),
                     a_star_expansions=a_star_expansions,
                 )
             if cost_so_far > best_cost[state]:
@@ -675,7 +843,12 @@ class NetworkRouter:
                         tile_feasible_rejections += 1
                         hard_blocked_occupied_cells += _hard_blocked_failure_count(step_decision.failures)
                         soft_avoid_cells += _soft_avoid_failure_count(step_decision.failures)
-                        _extend_failures(tile_feasible_failures, step_decision.failures)
+                        _extend_classified_failures(
+                            failures=step_decision.failures,
+                            tile_catalog_failures=tile_catalog_failures,
+                            linear_state_failures=linear_state_failures,
+                            cross_family_policy_failures=cross_family_policy_failures,
+                        )
                     continue
                 traversed_cell = self._cell_for_step(current, neighbor)
                 blocked = self._cached_cell_is_blocked(traversed_cell, layer, blocked_cache)
@@ -718,7 +891,10 @@ class NetworkRouter:
             hard_blocked_occupied_cells=hard_blocked_occupied_cells,
             soft_avoid_cells=soft_avoid_cells,
             tile_feasible_rejections=tile_feasible_rejections,
-            tile_feasible_failures=tuple(tile_feasible_failures),
+            tile_feasible_failures=tuple(tile_catalog_failures),
+            tile_catalog_failures=tuple(tile_catalog_failures),
+            linear_state_failures=tuple(linear_state_failures),
+            cross_family_policy_failures=tuple(cross_family_policy_failures),
             a_star_expansions=a_star_expansions,
         )
 
@@ -768,9 +944,12 @@ class NetworkRouter:
             retry_count=1,
             a_star_expansions=attempt.a_star_expansions,
             tile_feasible_rejections=attempt.tile_feasible_rejections,
-            tile_feasible_failures=attempt.tile_feasible_failures,
+            tile_catalog_failures=attempt.tile_catalog_failures,
+            linear_state_failures=attempt.linear_state_failures,
+            cross_family_policy_failures=attempt.cross_family_policy_failures,
             masks=masks,
             guide_waypoint_count=len(guide_waypoints),
+            guide_relocations=attempt.guide_relocations,
         )
         diagnostics = {**dict(record.diagnostics), "split_intersections": 1}
         return RouteRecord(
@@ -806,13 +985,22 @@ class NetworkRouter:
         retry_count: int = 0,
         a_star_expansions: int = 0,
         tile_feasible_rejections: int = 0,
-        tile_feasible_failures: tuple[Mapping[str, Any], ...] = (),
+        tile_catalog_failures: tuple[Mapping[str, Any], ...] = (),
+        linear_state_failures: tuple[Mapping[str, Any], ...] = (),
+        cross_family_policy_failures: tuple[Mapping[str, Any], ...] = (),
         masks: _RouteConflictMasks | None = None,
         guide_waypoint_count: int = 2,
+        endpoint_relocations: tuple[Mapping[str, Any], ...] = (),
+        guide_relocations: tuple[Mapping[str, Any], ...] = (),
     ) -> RouteRecord:
         tile_cells = tuple(GridCell(node.xidx, node.yidx) for node in nodes)
         masks = masks or _RouteConflictMasks()
         used_conflict_skip_cells = frozenset(tile_cells).intersection(masks.state_skip_cells)
+        policy_failures = cross_family_policy_failures or _mask_policy_failures(
+            masks,
+            used_conflict_skip_cells,
+            edge,
+        )
         metrics = self._faithfulness_metrics(edge, nodes, tile_cells, raster_spine)
         tier = self._faithfulness_tier(edge)
         budget = self.route_faithfulness_config.budget_for_tier(tier)
@@ -830,7 +1018,7 @@ class NetworkRouter:
             "blocked_cells_considered": blocked_cells_considered,
             "hard_blocked_occupied_cells": hard_blocked_occupied_cells,
             "soft_avoid_cells": soft_avoid_cells,
-            "conflict_family": _conflict_family(tile_feasible_failures)
+            "conflict_family": _conflict_family((*linear_state_failures, *policy_failures))
             or _mask_conflict_family(masks, used_conflict_skip_cells),
             "false_intersection_avoided": bool(edge.diagnostics.get("false_intersection_avoided", False)),
             "forced_relaxation": relaxation,
@@ -842,7 +1030,10 @@ class NetworkRouter:
             "retry_count": retry_count,
             "a_star_expansions": a_star_expansions,
             "tile_feasible_rejections": tile_feasible_rejections,
-            "tile_feasible_failures": tile_feasible_failures,
+            "tile_feasible_failures": tile_catalog_failures,
+            "tile_catalog_failures": tile_catalog_failures,
+            "linear_state_failures": linear_state_failures,
+            "cross_family_policy_failures": policy_failures,
             "source_feature_ids": edge.feature_ids,
             "source_indices": edge.source_indices,
             "faithfulness_tier": tier,
@@ -851,6 +1042,7 @@ class NetworkRouter:
             "faithfulness_budget_exceeded_reasons": budget_reasons,
             "faithfulness_rejection_reason": "hard_budget_exceeded" if budget_exceeded else None,
             **_mask_diagnostics(masks, used_state_skip_cells=used_conflict_skip_cells),
+            **_relocation_diagnostics(endpoint_relocations, guide_relocations),
             **spine_diagnostics,
         }
         return RouteRecord(
@@ -875,6 +1067,15 @@ class NetworkRouter:
         reservation: LinearReservationResult,
     ) -> RouteRecord:
         failure = dict(reservation.failures[0]) if reservation.failures else {"failure_reason": "linear_state_rejected"}
+        tile_catalog_failures: list[Mapping[str, Any]] = []
+        linear_state_failures: list[Mapping[str, Any]] = []
+        cross_family_policy_failures: list[Mapping[str, Any]] = []
+        _extend_classified_failures(
+            failures=reservation.failures,
+            tile_catalog_failures=tile_catalog_failures,
+            linear_state_failures=linear_state_failures,
+            cross_family_policy_failures=cross_family_policy_failures,
+        )
         diagnostics = {
             **dict(route.diagnostics),
             "failure_reason": "reservation_failed",
@@ -885,7 +1086,9 @@ class NetworkRouter:
             "soft_avoid_cells": int(route.diagnostics.get("soft_avoid_cells", 0))
             + _soft_avoid_failure_count(reservation.failures),
             "linear_state_failures": tuple(dict(item) for item in reservation.failures),
-            "tile_feasible_failures": tuple(dict(item) for item in reservation.failures),
+            "tile_feasible_failures": tuple(dict(item) for item in tile_catalog_failures),
+            "tile_catalog_failures": tuple(dict(item) for item in tile_catalog_failures),
+            "cross_family_policy_failures": tuple(dict(item) for item in cross_family_policy_failures),
             "tile_feasible_rejections": int(route.diagnostics.get("tile_feasible_rejections", 0))
             + len(reservation.failures),
         }
@@ -959,6 +1162,147 @@ class NetworkRouter:
         if cell is not None:
             return GridNode(cell.xidx, cell.yidx)
         return anchors[node_id]
+
+    def _relocate_route_endpoints(
+        self,
+        edge: TopologyEdge,
+        start: GridNode,
+        goal: GridNode,
+    ) -> _EndpointRelocationResult:
+        if not _supports_cross_family_endpoint_relocation(edge):
+            return _EndpointRelocationResult(start=start, goal=goal)
+        layer = self._layer_for_edge(edge)
+        start_cell = GridCell(start.xidx, start.yidx)
+        goal_cell = GridCell(goal.xidx, goal.yidx)
+        relocated_start, start_relocation = self._relocate_endpoint_cell(
+            edge=edge,
+            endpoint="start",
+            cell=start_cell,
+            other_cell=goal_cell,
+            layer=layer,
+            incoming_dir=None,
+            outgoing_dir=_direction_toward_cell(start_cell, goal_cell),
+        )
+        relocated_goal, goal_relocation = self._relocate_endpoint_cell(
+            edge=edge,
+            endpoint="goal",
+            cell=goal_cell,
+            other_cell=relocated_start,
+            layer=layer,
+            incoming_dir=_direction_toward_cell(goal_cell, relocated_start),
+            outgoing_dir=None,
+        )
+        relocations = tuple(item for item in (start_relocation, goal_relocation) if item is not None)
+        return _EndpointRelocationResult(
+            start=GridNode(relocated_start.xidx, relocated_start.yidx),
+            goal=GridNode(relocated_goal.xidx, relocated_goal.yidx),
+            relocations=relocations,
+        )
+
+    def _relocate_endpoint_cell(
+        self,
+        *,
+        edge: TopologyEdge,
+        endpoint: str,
+        cell: GridCell,
+        other_cell: GridCell,
+        layer: LayerKind,
+        incoming_dir: str | None,
+        outgoing_dir: str | None,
+    ) -> tuple[GridCell, Mapping[str, Any] | None]:
+        if self.linear_state is None:
+            return cell, None
+        decision = self.linear_state.can_enter_cell(
+            cell,
+            incoming_dir=incoming_dir,
+            outgoing_dir=outgoing_dir,
+            process=edge.process,
+            top_level_name=_edge_top_level_name(edge),
+            priority=edge.priority,
+        )
+        if decision.allowed or not _only_cross_family_process_avoidance(decision.failures):
+            return cell, None
+
+        masks = self._route_conflict_masks(
+            edge,
+            GridNode(cell.xidx, cell.yidx),
+            GridNode(other_cell.xidx, other_cell.yidx),
+            {},
+        )
+        for radius in (1, 2):
+            candidates = [
+                GridCell(cell.xidx + dx, cell.yidx + dy)
+                for dx in range(-radius, radius + 1)
+                for dy in range(-radius, radius + 1)
+                if abs(dx) + abs(dy) <= radius
+            ]
+            routeable = [
+                candidate
+                for candidate in candidates
+                if self._relocation_cell_allowed(
+                    edge=edge,
+                    candidate=candidate,
+                    reference_cell=cell,
+                    other_cell=other_cell,
+                    layer=layer,
+                    masks=masks,
+                    incoming_dir=_direction_toward_cell(candidate, other_cell) if incoming_dir else None,
+                    outgoing_dir=_direction_toward_cell(candidate, other_cell) if outgoing_dir else None,
+                )
+            ]
+            if routeable:
+                relocated = min(
+                    routeable,
+                    key=lambda candidate: (
+                        self.grid_index.cell_center(candidate).distance(edge.geometry),
+                        0 if candidate in masks.preferred_adjacency_cells else 1,
+                        abs(candidate.xidx - cell.xidx) + abs(candidate.yidx - cell.yidx),
+                        candidate.yidx,
+                        candidate.xidx,
+                    ),
+                )
+                return relocated, {
+                    "endpoint": endpoint,
+                    **_relocation_entry(
+                        original_cell=cell,
+                        relocated_cell=relocated,
+                        relocation_reason="cross_family_process_avoidance",
+                        failure=decision.failures[0] if decision.failures else None,
+                    ),
+                }
+        return cell, None
+
+    def _relocation_cell_allowed(
+        self,
+        *,
+        edge: TopologyEdge,
+        candidate: GridCell,
+        reference_cell: GridCell,
+        other_cell: GridCell,
+        layer: LayerKind,
+        masks: _RouteConflictMasks,
+        incoming_dir: str | None,
+        outgoing_dir: str | None,
+    ) -> bool:
+        if candidate == reference_cell or not (
+            0 <= candidate.xidx < self.grid_index.width and 0 <= candidate.yidx < self.grid_index.height
+        ):
+            return False
+        if self._cell_is_blocked(candidate, layer):
+            return False
+        if candidate in masks.forbidden_occupied_cells or candidate in masks.allowed_cross_family_conflict_cells:
+            return False
+        if self.linear_state is None:
+            return True
+        decision = self.linear_state.can_enter_cell(
+            candidate,
+            incoming_dir=incoming_dir,
+            outgoing_dir=outgoing_dir,
+            process=edge.process,
+            top_level_name=_edge_top_level_name(edge),
+            priority=edge.priority,
+        )
+        return decision.allowed
 
     def _route_order(
         self,
@@ -1351,13 +1695,15 @@ class NetworkRouter:
         self,
         edge: TopologyEdge,
         masks: _RouteConflictMasks,
-    ) -> list[tuple[str | None, float, bool]]:
-        attempts: list[tuple[str | None, float, bool]] = [(None, self.corridor_deviation_m, False)]
+    ) -> list[tuple[str | None, float, bool, bool]]:
+        attempts: list[tuple[str | None, float, bool, bool]] = [(None, self.corridor_deviation_m, False, False)]
         budget_m = self._displacement_budget_m(edge, masks)
         if budget_m > self.corridor_deviation_m:
-            attempts.append(("minor_corridor", budget_m, False))
+            attempts.append(("minor_corridor", budget_m, False, False))
         if masks.allowed_cross_family_conflict_cells or self.allow_soft_crossing:
-            attempts.append(("soft_crossing", max(budget_m, self.corridor_deviation_m), True))
+            attempts.append(("soft_crossing", max(budget_m, self.corridor_deviation_m), True, False))
+        if masks.deferred_cross_family_conflict_cells:
+            attempts.append(("soft_crossing", max(budget_m, self.corridor_deviation_m), True, True))
         return attempts
 
     def _displacement_budget_m(self, edge: TopologyEdge, masks: _RouteConflictMasks) -> float:
@@ -1400,6 +1746,7 @@ class NetworkRouter:
         soft_avoid_cells: set[GridCell] = set()
         preferred_adjacency_cells: set[GridCell] = set()
         allowed_cross_family_conflict_cells: set[GridCell] = set()
+        deferred_cross_family_conflict_cells: set[GridCell] = set()
         state_skip_cells: set[GridCell] = set()
         top_level_name = _edge_top_level_name(edge)
         route_endpoint_cells = {GridCell(start.xidx, start.yidx), GridCell(goal.xidx, goal.yidx)}
@@ -1431,10 +1778,13 @@ class NetworkRouter:
                 state_skip_cells.add(cell)
 
             if existing_process is ProcessKind.ROAD and edge.process in {ProcessKind.FENCE, ProcessKind.LINEAR}:
+                deferred_cross_family_conflict_cells.add(cell)
+                state_skip_cells.add(cell)
                 preferred_adjacency_cells.update(self._adjacent_cells(cell))
 
         preferred_adjacency_cells.difference_update(forbidden_occupied_cells)
         preferred_adjacency_cells.difference_update(allowed_cross_family_conflict_cells)
+        preferred_adjacency_cells.difference_update(deferred_cross_family_conflict_cells)
         preferred_adjacency_cells.difference_update(self.linear_state.occupied)
         return _RouteConflictMasks(
             planned_connect_cells=frozenset(planned_connect_cells),
@@ -1442,6 +1792,7 @@ class NetworkRouter:
             soft_avoid_cells=frozenset(soft_avoid_cells),
             preferred_adjacency_cells=frozenset(preferred_adjacency_cells),
             allowed_cross_family_conflict_cells=frozenset(allowed_cross_family_conflict_cells),
+            deferred_cross_family_conflict_cells=frozenset(deferred_cross_family_conflict_cells),
             state_skip_cells=frozenset(state_skip_cells),
         )
 
@@ -1736,6 +2087,18 @@ def _opposite(direction: str | None) -> str | None:
     return None if not direction else _OPPOSITE_DIRECTIONS[direction]
 
 
+def _direction_toward_cell(first: GridCell, second: GridCell) -> str | None:
+    direct = direction_between_cells(first, second)
+    if direct is not None:
+        return direct
+    dx = second.xidx - first.xidx
+    dy = second.yidx - first.yidx
+    if dx == 0 and dy == 0:
+        return None
+    step = GridCell(first.xidx + (1 if dx > 0 else -1 if dx < 0 else 0), first.yidx + (1 if dy > 0 else -1 if dy < 0 else 0))
+    return direction_between_cells(first, step)
+
+
 def _catalog_supported_step_dirs(catalog: Any | None) -> frozenset[str]:
     if catalog is None:
         return frozenset()
@@ -1758,6 +2121,35 @@ def _extend_failures(
         return
     remaining = limit - len(collected)
     collected.extend(dict(failure) for failure in tuple(failures)[:remaining])
+
+
+def _extend_classified_failures(
+    *,
+    failures: Iterable[Mapping[str, Any]],
+    tile_catalog_failures: list[Mapping[str, Any]],
+    linear_state_failures: list[Mapping[str, Any]],
+    cross_family_policy_failures: list[Mapping[str, Any]],
+) -> None:
+    for failure in failures:
+        if _is_cross_family_policy_failure(failure):
+            _extend_failures(cross_family_policy_failures, (failure,))
+        elif _is_tile_catalog_failure(failure):
+            _extend_failures(tile_catalog_failures, (failure,))
+        else:
+            _extend_failures(linear_state_failures, (failure,))
+
+
+def _is_cross_family_policy_failure(failure: Mapping[str, Any]) -> bool:
+    return str(failure.get("failure_reason")) in {"process_avoidance", "process_conflict", "cross_family_conflict"}
+
+
+def _is_tile_catalog_failure(failure: Mapping[str, Any]) -> bool:
+    return str(failure.get("failure_reason")) in {"catalog_gap", "unsupported_direction"}
+
+
+def _only_cross_family_process_avoidance(failures: Iterable[Mapping[str, Any]]) -> bool:
+    reasons = {str(failure.get("failure_reason")) for failure in failures}
+    return bool(reasons) and reasons <= {"process_avoidance"}
 
 
 def _route_failure(
@@ -1785,8 +2177,52 @@ def _mask_diagnostics(
         "soft_avoid_mask_cells": _ordered_cells(masks.soft_avoid_cells),
         "preferred_adjacency_cells": _ordered_cells(masks.preferred_adjacency_cells),
         "allowed_cross_family_conflict_cells": _ordered_cells(masks.allowed_cross_family_conflict_cells),
+        "deferred_cross_family_conflict_cells": _ordered_cells(masks.deferred_cross_family_conflict_cells),
         "state_skipped_conflict_cells": _ordered_cells(used_state_skip_cells),
     }
+
+
+def _masks_with_deferred_conflict_holes(masks: _RouteConflictMasks) -> _RouteConflictMasks:
+    return _RouteConflictMasks(
+        planned_connect_cells=masks.planned_connect_cells,
+        forbidden_occupied_cells=masks.forbidden_occupied_cells,
+        soft_avoid_cells=masks.soft_avoid_cells,
+        preferred_adjacency_cells=masks.preferred_adjacency_cells,
+        allowed_cross_family_conflict_cells=frozenset(
+            set(masks.allowed_cross_family_conflict_cells) | set(masks.deferred_cross_family_conflict_cells)
+        ),
+        deferred_cross_family_conflict_cells=masks.deferred_cross_family_conflict_cells,
+        state_skip_cells=masks.state_skip_cells,
+    )
+
+
+def _relocation_diagnostics(
+    endpoint_relocations: tuple[Mapping[str, Any], ...],
+    guide_relocations: tuple[Mapping[str, Any], ...],
+) -> dict[str, Any]:
+    return {
+        "endpoint_relocated": bool(endpoint_relocations),
+        "endpoint_relocations": endpoint_relocations,
+        "guide_cell_relocated": bool(guide_relocations),
+        "guide_cell_relocations": guide_relocations,
+    }
+
+
+def _relocation_entry(
+    *,
+    original_cell: GridCell,
+    relocated_cell: GridCell,
+    relocation_reason: str,
+    failure: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "original_cell": original_cell,
+        "relocated_cell": relocated_cell,
+        "relocation_reason": relocation_reason,
+    }
+    if failure is not None:
+        entry["failure"] = dict(failure)
+    return entry
 
 
 def _ordered_cells(cells: Iterable[GridCell]) -> tuple[GridCell, ...]:
@@ -1813,6 +2249,10 @@ def _edge_top_level_name(edge: TopologyEdge) -> str:
     if edge.linear_authority is not None:
         return edge.linear_authority.top_level_name
     return edge.process.value
+
+
+def _supports_cross_family_endpoint_relocation(edge: TopologyEdge) -> bool:
+    return edge.process is ProcessKind.FENCE or (edge.process is ProcessKind.LINEAR and edge.config_name in {"fence", "hedge", "wall"})
 
 
 def _authority_sort_key(edge: TopologyEdge) -> tuple[int, int, float, int, str]:
@@ -1843,6 +2283,28 @@ def _mask_conflict_family(masks: _RouteConflictMasks, used_state_skip_cells: Ite
     if masks.forbidden_occupied_cells:
         return "same_family"
     return None
+
+
+def _mask_policy_failures(
+    masks: _RouteConflictMasks,
+    used_state_skip_cells: Iterable[GridCell],
+    edge: TopologyEdge,
+) -> tuple[Mapping[str, Any], ...]:
+    failures = []
+    top_level_name = _edge_top_level_name(edge)
+    for cell in _ordered_cells(used_state_skip_cells):
+        if cell not in masks.allowed_cross_family_conflict_cells:
+            continue
+        failures.append(
+            _route_failure(
+                edge.process,
+                cell,
+                "process_avoidance",
+                incoming_top_level_name=top_level_name,
+                interaction="avoid",
+            )
+        )
+    return tuple(failures)
 
 
 def _route_failure_reason(failures: Iterable[Mapping[str, Any]], rejection_count: int) -> str:

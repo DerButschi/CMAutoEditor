@@ -249,6 +249,13 @@ def _route_summary(route: Any) -> dict[str, Any]:
         "faithfulness_budget_exceeded": diagnostics.get("faithfulness_budget_exceeded", False),
         "relaxation_reason": diagnostics.get("relaxation_reason"),
         "failure_reason": diagnostics.get("failure_reason"),
+        "tile_catalog_failures": diagnostics.get("tile_catalog_failures", ()),
+        "linear_state_failures": diagnostics.get("linear_state_failures", ()),
+        "cross_family_policy_failures": diagnostics.get("cross_family_policy_failures", ()),
+        "endpoint_relocated": diagnostics.get("endpoint_relocated", False),
+        "endpoint_relocations": diagnostics.get("endpoint_relocations", ()),
+        "guide_cell_relocated": diagnostics.get("guide_cell_relocated", False),
+        "guide_cell_relocations": diagnostics.get("guide_cell_relocations", ()),
     }
 
 
